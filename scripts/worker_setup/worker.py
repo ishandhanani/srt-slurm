@@ -46,7 +46,7 @@ def _run_setup_script(setup_script: str | None = None):
     
     if os.path.exists(script_path):
         logging.info(f"Running setup script: {script_path}")
-        run_command(f"bash {scriptc_path}")
+        run_command(f"bash {script_path}")
     elif setup_script:
         # Only warn if a custom script was explicitly provided
         logging.warning(f"Setup script not found: {script_path}")
