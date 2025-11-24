@@ -35,20 +35,21 @@ def _patch_sglang_engine():
 
 def _run_setup_script(setup_script: str | None = None):
     """
-    Run a setup script in the /configs directory if it exists.
+    Run a setup script in the /configs directory if explicitly provided.
     
     Args:
         setup_script: Custom setup script name (e.g., 'custom-setup.sh'). 
-                     If None, defaults to 'setup-script.sh'.
+                     If None, no setup script runs.
     """
-    script_name = setup_script if setup_script else "setup-script.sh"
-    script_path = f"/configs/{script_name}"
+    if not setup_script:
+        return
+    
+    script_path = f"/configs/{setup_script}"
     
     if os.path.exists(script_path):
         logging.info(f"Running setup script: {script_path}")
         run_command(f"bash {script_path}")
-    elif setup_script:
-        # Only warn if a custom script was explicitly provided
+    else:
         logging.warning(f"Setup script not found: {script_path}")
 
 def setup_prefill_worker(

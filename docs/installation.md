@@ -189,4 +189,4 @@ You can run custom initialization scripts on worker nodes before starting SGLang
 
 The script will be executed on each worker node (prefill, decode, and aggregated) before installing Dynamo wheels and starting the SGLang workers. The script must be located in the `configs/` directory, which is mounted into containers at `/configs/`.
 
-**Note**: If you don't specify `--setup-script`, the system will look for `setup-script.sh` in the configs directory. If neither exists, setup script execution is skipped.
+**Note**: Setup scripts only run when you explicitly specify `--setup-script`. No default setup script will run if this flag is omitted.
