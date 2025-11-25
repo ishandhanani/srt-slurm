@@ -51,6 +51,8 @@ def _run_setup_script(setup_script: str | None = None):
         run_command(f"bash {script_path}")
     else:
         logging.warning(f"Setup script not found: {script_path}")
+    # Need to chdir to sglang for the next steps
+    os.chdir("/sgl-workspace/sglang")
 
 def setup_prefill_worker(
     worker_idx: int,
