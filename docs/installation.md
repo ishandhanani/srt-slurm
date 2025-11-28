@@ -111,6 +111,10 @@ model:
   container: "latest" # Uses alias from srtslurm.yaml
   precision: "fp8"
 
+extra_mount: # add this if you need to mount extra directories to the container
+- "/local-dir1:/container-dir1"
+- "/local-dir2:/container-dir2"
+
 resources:
   gpu_type: "gb200"
   prefill_nodes: 1
