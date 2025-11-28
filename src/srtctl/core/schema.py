@@ -7,6 +7,7 @@ Pydantic schema definitions for job configuration validation.
 """
 
 from enum import Enum
+import re
 from typing import Any, Dict, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
@@ -237,6 +238,25 @@ class JobConfig(BaseModel):
 
     # Additional optional settings
     enable_config_dump: bool = True
+    extra_mount: Optional[list[str]] = Field(
+        default=None,
+        description="Additional host-to-container mounts in 'host:container' format.",
+    )
+
+    @field_validator("extra_mount")
+    @classmethod
+    def validate_extra_mount(cls, v):
+        if v is None:
+            return v
+        if not isinstance(v, list):
+            raise ValueError("extra_mount must be a list of 'host:container' strings")
+        pattern = re.compile(r"^[^:]+:[^:]+$")
+        for item in v:
+            if not isinstance(item, str):
+                raise ValueError("extra_mount entries must be strings")
+            if not pattern.match(item):
+                raise ValueError("extra_mount entries must be in 'host:container' format")
+        return v
 
     def model_post_init(self, __context: Any) -> None:
         """Auto-populate backend config if not provided."""

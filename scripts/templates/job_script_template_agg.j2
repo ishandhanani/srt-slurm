@@ -176,7 +176,7 @@ ENROOT_ARGS="\
     --container-image=${CONTAINER_IMAGE} \
     --no-container-entrypoint \
     --no-container-mount-home \
-    --container-mounts=${MODEL_DIR}:/model/,${CONFIG_DIR}:/configs/,${SCRIPT_DIR}:/scripts/,${OUTPUT_DIR}:/outputs/,${LOG_DIR}:/logs/ \
+    --container-mounts=${MODEL_DIR}:/model/,${CONFIG_DIR}:/configs/,${SCRIPT_DIR}:/scripts/,${OUTPUT_DIR}:/outputs/,${LOG_DIR}:/logs/{% endraw %}{% if extra_container_mounts %},{{ extra_container_mounts }}{% endif %}{% raw %} \
 "
 
 # Build common worker arguments
