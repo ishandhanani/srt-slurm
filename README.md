@@ -9,6 +9,7 @@ Please run the following command to setup the srtctl tool. This repo requires Dy
 ```bash
 # One-time setup
 make setup ARCH=aarch64  # or ARCH=x86_64
+pip install -e .
 ```
 
 ## Documentation
