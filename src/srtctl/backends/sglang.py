@@ -142,9 +142,7 @@ class SGLangBackend(Backend):
             # Convert underscores to hyphens
             flag_name = key.replace("_", "-")
 
-            # Skip disaggregation-mode flag when profiling (sglang.launch_server doesn't accept it)
-            if profiling_type in ("torch", "nsys") and flag_name == "disaggregation-mode":
-                continue
+            # Always pass disaggregation-mode so profiling runs in PD mode
 
             if isinstance(value, bool):
                 if value:
@@ -281,10 +279,8 @@ class SGLangBackend(Backend):
         config_dir_path = srtctl_root / "configs"
         log_dir_path = srtctl_root / "logs"
 
-        # Build profiling env injections
+        # Build profiling env injections 
         profiling_cfg = self.config.get("profiling") or {}
-        prefill_cfg = profiling_cfg.get("prefill") or {}
-        decode_cfg = profiling_cfg.get("decode") or {}
 
         def build_env_str(cfg: dict) -> str:
             parts: list[str] = []
@@ -300,11 +296,12 @@ class SGLangBackend(Backend):
                 parts.append(f"PROFILE_STOP_STEP={cfg['stop_step']}")
             return " ".join(parts)
 
-        prefill_profile_env = build_env_str(prefill_cfg)
-        decode_profile_env = build_env_str(decode_cfg)
+        # Use the same profiling spec for both prefill and decode; in PD
+        # disaggregation mode this single spec drives both sides.
+        prefill_profile_env = build_env_str(profiling_cfg)
+        decode_profile_env = build_env_str(profiling_cfg)
 
         profiler_mode = profiling_cfg.get("type") or "none"
-
         # Template variables
         template_vars = {
             "job_name": job_name,
@@ -327,6 +324,7 @@ class SGLangBackend(Backend):
             "partition": partition,
             "enable_multiple_frontends": self.backend_config.get("enable_multiple_frontends", True),
             "num_additional_frontends": self.backend_config.get("num_additional_frontends", 9),
+            "use_sglang_router": self.backend_config.get("use_sglang_router", False),
             "do_benchmark": do_benchmark,
             "benchmark_type": bench_type,
             "benchmark_arg": parsable_config,

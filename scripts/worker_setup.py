@@ -96,6 +96,12 @@ def _parse_command_line_args(args: list[str] | None = None) -> argparse.Namespac
     )
 
     parser.add_argument(
+        "--use-sglang-router",
+        action="store_true",
+        help="Whether this job uses sglang router (PD disaggregation); skips NATS/ETCD/frontend bootstrap in workers.",
+    )
+
+    parser.add_argument(
         "--dump-config-path",
         type=str,
         default=None,
@@ -188,6 +194,7 @@ def main(input_args: list[str] | None = None):
             args.sglang_config_path,
             args.dump_config_path,
             args.setup_script,
+            args.use_sglang_router,
         )
     elif args.worker_type == "decode":
         setup_decode_worker(
@@ -201,6 +208,7 @@ def main(input_args: list[str] | None = None):
             args.sglang_config_path,
             args.dump_config_path,
             args.setup_script,
+            args.use_sglang_router,
         )
     elif args.worker_type == "aggregated":
         setup_aggregated_worker(
@@ -215,6 +223,7 @@ def main(input_args: list[str] | None = None):
             args.sglang_config_path,
             args.dump_config_path,
             args.setup_script,
+            args.use_sglang_router,
         )
 
     logging.info(f"{args.worker_type.capitalize()} worker setup complete")

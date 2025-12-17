@@ -73,9 +73,6 @@ def build_sglang_command_from_yaml(
         # Add all SGLang flags from config
         for key, value in sorted(mode_config.items()):
             flag_name = key.replace("_", "-")
-            # Skip disaggregation-mode flag for profiling
-            if flag_name == "disaggregation-mode":
-                continue
             if isinstance(value, bool):
                 if value:
                     cmd_parts.append(f"--{flag_name}")

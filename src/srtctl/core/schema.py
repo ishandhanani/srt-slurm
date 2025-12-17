@@ -170,22 +170,17 @@ class ProfilingType(str, Enum):
     NONE = "none"
 
 
-class ProfilingPhaseConfig(BaseModel):
-    """Per-phase profiling parameters."""
+class ProfilingConfig(BaseModel):
+    """Profiling configuration."""
 
+    type: ProfilingType = Field(ProfilingType.NONE, description="Profiling type")
+    # Unified profiling spec (used for both prefill and decode in PD
+    # disaggregation mode, or for aggregated mode).
     isl: Optional[int] = Field(None, description="Input sequence length")
     osl: Optional[int] = Field(None, description="Output sequence length")
     concurrency: Optional[int] = Field(None, description="Batch size / concurrency")
     start_step: Optional[int] = Field(None, description="Profiling start step")
     stop_step: Optional[int] = Field(None, description="Profiling stop step")
-
-
-class ProfilingConfig(BaseModel):
-    """Profiling configuration."""
-
-    type: ProfilingType = Field(ProfilingType.NONE, description="Profiling type")
-    prefill: Optional[ProfilingPhaseConfig] = None
-    decode: Optional[ProfilingPhaseConfig] = None
 
 
 class SGLangPrefillConfig(BaseModel):
@@ -239,9 +234,12 @@ class BackendConfig(BaseModel):
     # SGLang-specific config
     sglang_config: Optional[SGLangConfig] = None
 
-    # Frontend settings
+    # Frontend / router settings
     enable_multiple_frontends: bool = True
     num_additional_frontends: int = 9
+    # Whether to launch sglang_router alongside the workers (PD disaggregation).
+    # This is user-configurable via backend.use_sglang_router in the recipe.
+    use_sglang_router: bool = False
 
 
 class JobConfig(BaseModel):
