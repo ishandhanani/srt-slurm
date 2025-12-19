@@ -170,6 +170,8 @@ class BenchmarkConfig(BaseModel):
     max_tokens: Optional[int] = Field(None, description="Maximum output tokens")
     repeat: Optional[int] = Field(None, description="Number of times to repeat the benchmark")
     num_threads: Optional[int] = Field(None, description="Number of running threads for accuracy benchmark")
+    max_context_length: Optional[int] = Field(None, description="Maximum context length for LongBench-v2 accuracy benchmark")
+    categories: Optional[list[str]] = Field(None, description="Comma-separated list of categories to evaluate for LongBench-v2 (None for all)")
 
 
 class ProfilingType(str, Enum):

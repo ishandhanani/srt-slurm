@@ -14,10 +14,10 @@ n_decode=$2
 prefill_gpus=$3
 decode_gpus=$4
 num_examples=${5:-198}  # Default: 198
-max_tokens=${6:-512}    # Default: 512
+max_tokens=${6:-32768}    # Default: 32768
 repeat=${7:-8}          # Default: 8
-num_threads=${8:-512}   # Default: 512
-thinking_mode=${9:-deepseek-r1} # Default: deepseek-r1
+num_threads=${8:-128}   # Default: 128
+# Note: --thinking-mode removed because dynamo frontend doesn't support chat_template_kwargs
 
 echo "GPQA Benchmark Config: num_examples=${num_examples}; max_tokens=${max_tokens}; repeat=${repeat}; num_threads=${num_threads}; thinking-mode=${thinking_mode}"
 
