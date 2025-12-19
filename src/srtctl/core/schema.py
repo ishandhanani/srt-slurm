@@ -165,6 +165,12 @@ class BenchmarkConfig(BaseModel):
     )
     req_rate: Optional[str] = Field("inf", description="Request rate")
 
+    # Accuracy benchmark arguments
+    num_examples: Optional[int] = Field(None, description="Number of examples")
+    max_tokens: Optional[int] = Field(None, description="Maximum output tokens")
+    repeat: Optional[int] = Field(None, description="Number of times to repeat the benchmark")
+    num_threads: Optional[int] = Field(None, description="Number of running threads for accuracy benchmark")
+
 
 class ProfilingType(str, Enum):
     """Supported profiling types."""
