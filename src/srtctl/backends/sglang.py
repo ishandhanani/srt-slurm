@@ -262,6 +262,12 @@ class SGLangBackend(Backend):
                 concurrency_str = str(concurrencies)
 
             parsable_config = f"{isl} {osl} {concurrency_str} {req_rate}"
+        elif bench_type == "mmlu":
+            num_examples = benchmark_config.get("num_examples", 200)
+            max_tokens = benchmark_config.get("max_tokens", 2048)
+            repeat = benchmark_config.get("repeat", 8)
+            num_threads = benchmark_config.get("num_threads", 512)
+            parsable_config = f"{num_examples} {max_tokens} {repeat} {num_threads}"
 
         # Config directory should point to where deepep_config.json lives
         # This is typically the configs/ directory in the yaml-config repo
