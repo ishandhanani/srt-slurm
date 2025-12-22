@@ -14,7 +14,7 @@ n_decode=$2
 prefill_gpus=$3
 decode_gpus=$4
 num_examples=${5:-200}  # Default: 200
-max_tokens=${6:-2048}    # Default: 2048
+max_tokens=${6:-8192}    # Default: 8192
 repeat=${7:-8}          # Default: 8
 num_threads=${8:-512}   # Default: 512
 
