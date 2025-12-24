@@ -1,17 +1,15 @@
-# 4P1D, with 8 Decode Nodes. Better per-gpu throughput with worse latency.
-
-name: "gb200-fp4-max-tpt-2-mtp"
+name: "gb200-fp4-max-tpt-mtp"
 
 model:
   path: "dsfp4"
-  container: "0.5.5.post2"
+  container: "0.5.6.post2"
   precision: "fp4"
 
 resources:
   gpu_type: "gb200"
-  prefill_nodes: 4
-  decode_nodes: 8
-  prefill_workers: 4
+  prefill_nodes: 1
+  decode_nodes: 12
+  prefill_workers: 1
   decode_workers: 1
   gpus_per_node: 4
 
@@ -35,6 +33,7 @@ backend:
     SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
     SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
     SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
+    SGLANG_MOE_NVFP4_DISPATCH: "1"
 
   # Decode-specific environment variables
   decode_environment:
@@ -55,7 +54,7 @@ backend:
     SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
     SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
     SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK: "1024"
-    SGLANG_CUTEDSL_MOE_NVFP4_DISPATCH: "1"
+    SGLANG_MOE_NVFP4_DISPATCH: "1"
     SGLANG_FLASHINFER_FP4_GEMM_BACKEND: "cutlass"
 
   sglang_config:
@@ -114,8 +113,9 @@ backend:
       speculative-num-steps: 1
       speculative-eagle-topk: 1
       speculative-num-draft-tokens: 2
-      speculative-moe-runner-backend: "cutlass"
+      speculative-moe-runner-backend: "flashinfer_trtllm"
       speculative-moe-a2a-backend: "none"
+      speculative-moe-tp-ep-size: 1
 
     decode:
       # Model configuration
@@ -172,21 +172,22 @@ backend:
       enable-dp-attention: true
 
       # Parallelism
-      tp-size: 32
-      dp-size: 32
-      ep-size: 32
+      tp-size: 48
+      dp-size: 48
+      ep-size: 48
 
       # MTP
       speculative-algorithm: "EAGLE"
       speculative-num-steps: 1
       speculative-eagle-topk: 1
       speculative-num-draft-tokens: 2
-      speculative-moe-runner-backend: "cutlass"
+      speculative-moe-runner-backend: "flashinfer_trtllm"
       speculative-moe-a2a-backend: "none"
+      speculative-moe-tp-ep-size: 1
 
 benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 1024
-  concurrencies: "1x128x512x2048x4096x8192x12000x15000"
+  concurrencies: "1x128x512x2048x4096"
   req_rate: "inf"
