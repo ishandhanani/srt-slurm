@@ -1,3 +1,5 @@
+# This script requires a custom branch for running, please launch as follows:
+# srtctl apply -f max-tpt-mtp.yaml --setup-script gb200-fp4-mtp-setup.sh
 name: "gb200-fp4-max-tpt-mtp"
 
 model:
