@@ -4,7 +4,7 @@ name: "gb200-fp4-max-tpt-mtp"
 
 model:
   path: "dsfp4"
-  container: "0.5.6.post2"
+  container: "0.5.7"
   precision: "fp4"
 
 resources:
