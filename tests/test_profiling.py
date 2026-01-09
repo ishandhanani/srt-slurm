@@ -29,9 +29,6 @@ class TestProfilingConfig:
 
         profiling = ProfilingConfig(
             type="nsys",
-            isl=1024,
-            osl=512,
-            concurrency=32,
         )
 
         assert profiling.enabled is True
@@ -44,15 +41,18 @@ class TestProfilingConfig:
         assert "profile" in prefix
         assert "/output/test" in prefix
 
+        # Dynamo frontend requires trace-fork-before-exec, sglangrouter does not.
+        prefix_dynamo = profiling.get_nsys_prefix("/output/test", frontend_type="dynamo")
+        assert "--trace-fork-before-exec=true" in prefix_dynamo
+        prefix_router = profiling.get_nsys_prefix("/output/test", frontend_type="sglangrouter")
+        assert "--trace-fork-before-exec=true" not in prefix_router
+
     def test_torch_profiling(self):
         """Test torch profiling configuration."""
         from srtctl.core.schema import ProfilingConfig, ProfilingPhaseConfig
 
         profiling = ProfilingConfig(
             type="torch",
-            isl=2048,
-            osl=1024,
-            concurrency=64,
             prefill=ProfilingPhaseConfig(start_step=5, stop_step=15),
             decode=ProfilingPhaseConfig(start_step=10, stop_step=20),
         )
@@ -64,9 +64,7 @@ class TestProfilingConfig:
         # Test env vars generation for prefill
         env = profiling.get_env_vars("prefill", "/logs/profiles")
         assert env["PROFILING_MODE"] == "prefill"
-        assert env["PROFILE_ISL"] == "2048"
-        assert env["PROFILE_OSL"] == "1024"
-        assert env["PROFILE_CONCURRENCY"] == "64"
+        assert env["PROFILE_TYPE"] == "torch"
         assert env["PROFILE_PREFILL_START_STEP"] == "5"
         assert env["PROFILE_PREFILL_STOP_STEP"] == "15"
         assert env["SGLANG_TORCH_PROFILER_DIR"] == "/logs/profiles/prefill"
@@ -82,13 +80,11 @@ class TestProfilingConfig:
 
         profiling = ProfilingConfig(
             type="torch",
-            isl=1024,
-            osl=512,
-            concurrency=32,
             aggregated=ProfilingPhaseConfig(start_step=0, stop_step=100),
         )
 
         env = profiling.get_env_vars("agg", "/logs/profiles")
+        assert env["PROFILE_TYPE"] == "torch"
         assert env["PROFILE_AGG_START_STEP"] == "0"
         assert env["PROFILE_AGG_STOP_STEP"] == "100"
 
@@ -122,9 +118,6 @@ class TestProfilingValidation:
                 ),
                 profiling=ProfilingConfig(
                     type="torch",
-                    isl=1024,
-                    osl=128,
-                    concurrency=1,
                     prefill=ProfilingPhaseConfig(start_step=0, stop_step=50),
                     # Missing decode config
                 ),
@@ -149,38 +142,7 @@ class TestProfilingValidation:
                 resources=ResourceConfig(gpu_type="h100", agg_nodes=1, agg_workers=1),
                 profiling=ProfilingConfig(
                     type="torch",
-                    isl=1024,
-                    osl=128,
-                    concurrency=1,
                     # Missing aggregated config
-                ),
-            )
-
-    def test_profiling_requires_traffic_params(self):
-        """Profiling requires isl/osl/concurrency."""
-        from marshmallow import ValidationError
-
-        from srtctl.core.schema import (
-            ModelConfig,
-            ProfilingConfig,
-            ProfilingPhaseConfig,
-            ResourceConfig,
-            SrtConfig,
-        )
-
-        # Missing concurrency should fail
-        with pytest.raises(ValidationError, match="isl/osl/concurrency must be set"):
-            SrtConfig(
-                name="test",
-                model=ModelConfig(path="/model", container="/container", precision="fp8"),
-                resources=ResourceConfig(gpu_type="h100", prefill_nodes=1, decode_nodes=1),
-                profiling=ProfilingConfig(
-                    type="torch",
-                    isl=1024,
-                    osl=128,
-                    # Missing concurrency
-                    prefill=ProfilingPhaseConfig(start_step=0, stop_step=50),
-                    decode=ProfilingPhaseConfig(start_step=0, stop_step=50),
                 ),
             )
 
@@ -210,9 +172,6 @@ class TestProfilingValidation:
                 ),
                 profiling=ProfilingConfig(
                     type="torch",
-                    isl=1024,
-                    osl=128,
-                    concurrency=1,
                     prefill=ProfilingPhaseConfig(start_step=0, stop_step=50),
                     decode=ProfilingPhaseConfig(start_step=0, stop_step=50),
                 ),
@@ -242,9 +201,6 @@ class TestProfilingValidation:
                 ),
                 profiling=ProfilingConfig(
                     type="torch",
-                    isl=1024,
-                    osl=128,
-                    concurrency=1,
                     aggregated=ProfilingPhaseConfig(start_step=0, stop_step=50),
                 ),
             )
@@ -272,9 +228,6 @@ class TestProfilingValidation:
             ),
             profiling=ProfilingConfig(
                 type="torch",
-                isl=1024,
-                osl=128,
-                concurrency=1,
                 prefill=ProfilingPhaseConfig(start_step=0, stop_step=50),
                 decode=ProfilingPhaseConfig(start_step=0, stop_step=50),
             ),
@@ -282,11 +235,16 @@ class TestProfilingValidation:
         assert config.profiling.enabled
 
 
-class TestProfilingAutoSwitch:
-    """Test that profiling auto-switches benchmark type."""
+class TestProfilingIntegration:
+    """Integration tests for profiling + benchmarks."""
 
-    def test_profiling_enabled_overrides_benchmark_type(self):
-        """When profiling is enabled, benchmark type should be treated as 'profiling'."""
+    def test_no_profiling_benchmark_runner(self):
+        """There is no dedicated 'profiling' benchmark runner anymore."""
+        with pytest.raises(ValueError, match="Unknown benchmark"):
+            get_runner("profiling")
+
+    def test_profiling_does_not_override_benchmark_type(self):
+        """Profiling is orthogonal to benchmark selection."""
         from srtctl.core.schema import (
             BenchmarkConfig,
             ModelConfig,
@@ -296,7 +254,7 @@ class TestProfilingAutoSwitch:
             SrtConfig,
         )
 
-        # User sets benchmark.type to "manual" but has profiling enabled
+        # User sets benchmark.type to "sa-bench" and has profiling enabled.
         config = SrtConfig(
             name="test",
             model=ModelConfig(path="/model", container="/container", precision="fp8"),
@@ -307,84 +265,19 @@ class TestProfilingAutoSwitch:
                 prefill_workers=1,
                 decode_workers=1,
             ),
-            benchmark=BenchmarkConfig(type="manual"),  # User says manual
+            benchmark=BenchmarkConfig(type="sa-bench"),
             profiling=ProfilingConfig(
                 type="torch",
-                isl=1024,
-                osl=128,
-                concurrency=1,
                 prefill=ProfilingPhaseConfig(start_step=0, stop_step=50),
                 decode=ProfilingPhaseConfig(start_step=0, stop_step=50),
             ),
         )
 
-        # The orchestrator should detect profiling.enabled and use "profiling" runner
         assert config.profiling.enabled is True
-        assert config.benchmark.type == "manual"  # Original value unchanged
+        runner = get_runner(config.benchmark.type)
+        assert runner.name == "SA-Bench"
+        assert (SCRIPTS_DIR / "sa-bench" / "bench.sh").exists()
 
-        # Simulate the auto-switch logic from do_sweep.py
-        benchmark_type = config.benchmark.type
-        if config.profiling.enabled:
-            benchmark_type = "profiling"
-
-        # Verify the profiling runner can be retrieved
-        runner = get_runner(benchmark_type)
-        assert runner.name == "Profiling"
-
-
-class TestProfilingRunner:
-    """Test Profiling benchmark runner."""
-
-    def test_get_profiling_runner(self):
-        """Can get profiling runner."""
-        runner = get_runner("profiling")
-        assert runner.name == "Profiling"
-        assert "profiling" in runner.script_path
-
-    def test_validate_config_requires_profiling_enabled(self):
-        """Validates that profiling must be enabled."""
-        from srtctl.benchmarks.profiling import ProfilingRunner
-        from srtctl.core.schema import (
-            ModelConfig,
-            ProfilingConfig,
-            ResourceConfig,
-            SrtConfig,
-        )
-
-        runner = ProfilingRunner()
-        config = SrtConfig(
-            name="test",
-            model=ModelConfig(path="/model", container="/image", precision="fp4"),
-            resources=ResourceConfig(gpu_type="h100"),
-            profiling=ProfilingConfig(type="none"),  # Not enabled
-        )
-        errors = runner.validate_config(config)
-        assert any("torch" in e or "nsys" in e for e in errors)
-
-    def test_validate_config_requires_params(self):
-        """Validates that isl/osl/concurrency are required."""
-        from srtctl.benchmarks.profiling import ProfilingRunner
-        from srtctl.core.schema import (
-            ModelConfig,
-            ProfilingConfig,
-            ResourceConfig,
-            SrtConfig,
-        )
-
-        runner = ProfilingRunner()
-        config = SrtConfig(
-            name="test",
-            model=ModelConfig(path="/model", container="/image", precision="fp4"),
-            resources=ResourceConfig(gpu_type="h100"),
-            profiling=ProfilingConfig(type="none", isl=None, osl=None, concurrency=None),
-        )
-        errors = runner.validate_config(config)
-        assert any("isl" in e for e in errors)
-        assert any("osl" in e for e in errors)
-        assert any("concurrency" in e for e in errors)
-
-    def test_profiling_script_exists(self):
-        """Profiling script exists."""
-        script = SCRIPTS_DIR / "profiling" / "profile.sh"
-        assert script.exists()
+    def test_sglang_bench_script_exists(self):
+        assert (SCRIPTS_DIR / "sglang-bench" / "bench.sh").exists()
 

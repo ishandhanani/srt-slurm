@@ -52,3 +52,6 @@ configs/*.tar.gz
 *.egg-info/
 
 .coverage
+
+outputs/
+configs/flashinfer-cache/

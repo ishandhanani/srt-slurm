@@ -57,7 +57,7 @@ class WorkerStageMixin:
 
         Runs (in order):
         1. Custom setup script from /configs/ (if config.setup_script set)
-        2. Dynamo installation (if frontend type is dynamo and not profiling)
+        2. Dynamo installation (if frontend type is dynamo)
         """
         parts = []
 
@@ -69,9 +69,8 @@ class WorkerStageMixin:
                 f"if [ -f '{script_path}' ]; then bash '{script_path}'; else echo 'WARNING: {script_path} not found'; fi"
             )
 
-        # 2. Dynamo installation (required for dynamo.sglang when using dynamo frontend and not profiling)
-        # When profiling is enabled, we use sglang.launch_server directly (no dynamo)
-        if self.config.frontend.type == "dynamo" and not self.config.profiling.enabled:
+        # 2. Dynamo installation (required for dynamo frontend)
+        if self.config.frontend.type == "dynamo":
             parts.append(self.config.dynamo.get_install_commands())
 
         if not parts:
@@ -94,8 +93,9 @@ class WorkerStageMixin:
         profiling = self.config.profiling
         nsys_prefix = None
         if profiling.is_nsys:
-            nsys_output = str(self.runtime.log_dir / f"{process.node}_{mode}_w{index}_profile")
-            nsys_prefix = profiling.get_nsys_prefix(nsys_output)
+            # nsys runs inside the container; /logs is the mounted host log directory.
+            nsys_output = f"/logs/profiles/{process.node}_{mode}_w{index}_profile"
+            nsys_prefix = profiling.get_nsys_prefix(nsys_output, frontend_type=self.config.frontend.type)
 
         # Build command using backend's method
         cmd = self.backend.build_worker_command(
@@ -103,7 +103,6 @@ class WorkerStageMixin:
             endpoint_processes=endpoint_processes,
             runtime=self.runtime,
             frontend_type=self.config.frontend.type,
-            profiling_enabled=profiling.enabled,
             nsys_prefix=nsys_prefix,
             dump_config_path=config_dump,
         )

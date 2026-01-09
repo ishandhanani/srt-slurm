@@ -79,7 +79,7 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
     @functools.cached_property
     def backend_processes(self) -> list[Process]:
         """Compute physical process topology from endpoints (cached)."""
-        return self.backend.endpoints_to_processes(self.endpoints)
+                return self.backend.endpoints_to_processes(self.endpoints)
 
     def start_head_infrastructure(self, registry: ProcessRegistry) -> ManagedProcess:
         """Start NATS and etcd on the head node."""
@@ -178,13 +178,7 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
         logger.info("Head node: %s", self.runtime.nodes.head)
         logger.info("Worker nodes: %s", ", ".join(self.runtime.nodes.worker))
         if self.config.profiling.enabled:
-            logger.info(
-                "Profiling: %s (isl=%s, osl=%s, concurrency=%s)",
-                self.config.profiling.type,
-                self.config.profiling.isl,
-                self.config.profiling.osl,
-                self.config.profiling.concurrency,
-            )
+            logger.info("Profiling: %s", self.config.profiling.type)
 
         registry = ProcessRegistry(job_id=self.runtime.job_id)
         stop_event = threading.Event()

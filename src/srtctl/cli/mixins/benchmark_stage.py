@@ -83,21 +83,13 @@ class BenchmarkStageMixin:
 
         logger.info("Server is healthy")
 
-        # Auto-select profiling benchmark when profiling is enabled
         benchmark_type = self.config.benchmark.type
         if self.config.profiling.enabled:
-            if benchmark_type != "profiling":
-                logger.info(
-                    "Profiling enabled (type=%s) - automatically using 'profiling' benchmark",
-                    self.config.profiling.type,
-                )
-                logger.info(
-                    "Profiling config: isl=%s, osl=%s, concurrency=%s",
-                    self.config.profiling.isl,
-                    self.config.profiling.osl,
-                    self.config.profiling.concurrency,
-                )
-            benchmark_type = "profiling"
+            logger.info(
+                "Profiling enabled (type=%s) with benchmark type '%s'",
+                self.config.profiling.type,
+                benchmark_type,
+            )
 
         if benchmark_type == "manual":
             logger.info("Benchmark type is 'manual' - server is ready for testing")
@@ -178,68 +170,79 @@ class BenchmarkStageMixin:
         """Get environment variables for the benchmark script."""
         env: dict[str, str] = {}
 
-        # Add profiling-specific env vars
-        if runner.name == "Profiling" and self.config.profiling.enabled:
-            p = self.config.profiling
+        p = self.config.profiling
+        if not p.enabled:
+            return env
 
-            # Traffic generator params
-            if p.isl is not None:
-                env["PROFILE_ISL"] = str(p.isl)
-            if p.osl is not None:
-                env["PROFILE_OSL"] = str(p.osl)
-            if p.concurrency is not None:
-                env["PROFILE_CONCURRENCY"] = str(p.concurrency)
+        # Inside the container, the host log directory is mounted to /logs. Use the container path so profiling
+        # artifacts persist back to the host log directory across nodes.
+        profiles_dir_in_container = "/logs/profiles"
 
-            # Model name
-            env["PROFILE_MODEL_NAME"] = self.config.served_model_name
+        # Profiling type (nsys, torch)
+        env["PROFILE_TYPE"] = p.type
 
-            # Head node for traffic
+        # Phase-specific step configs
+        if p.prefill:
+            if p.prefill.start_step is not None:
+                env["PROFILE_PREFILL_START_STEP"] = str(p.prefill.start_step)
+            if p.prefill.stop_step is not None:
+                env["PROFILE_PREFILL_STOP_STEP"] = str(p.prefill.stop_step)
+        if p.decode:
+            if p.decode.start_step is not None:
+                env["PROFILE_DECODE_START_STEP"] = str(p.decode.start_step)
+            if p.decode.stop_step is not None:
+                env["PROFILE_DECODE_STOP_STEP"] = str(p.decode.stop_step)
+        if p.aggregated:
+            if p.aggregated.start_step is not None:
+                env["PROFILE_AGG_START_STEP"] = str(p.aggregated.start_step)
+            if p.aggregated.stop_step is not None:
+                env["PROFILE_AGG_STOP_STEP"] = str(p.aggregated.stop_step)
+
+        # Torch profiler directory
+        if p.is_torch:
+            env["SGLANG_TORCH_PROFILER_DIR"] = profiles_dir_in_container
+
+        # Collect worker leader IPs and system server ports by mode
+        prefill_ips = []
+        decode_ips = []
+        agg_ips = []
+        prefill_endpoints = []
+        decode_endpoints = []
+        agg_endpoints = []
+
+        for process in self.backend_processes:
+            if not process.is_leader:
+                continue
+            leader_ip = get_hostname_ip(process.node)
+            leader_endpoint = f"{leader_ip}:{process.sys_port}"
+            if process.endpoint_mode == "prefill":
+                prefill_ips.append(leader_ip)
+                prefill_endpoints.append(leader_endpoint)
+            elif process.endpoint_mode == "decode":
+                decode_ips.append(leader_ip)
+                decode_endpoints.append(leader_endpoint)
+            elif process.endpoint_mode == "agg":
+                agg_ips.append(leader_ip)
+                agg_endpoints.append(leader_endpoint)
+
+        if prefill_ips:
+            env["PROFILE_PREFILL_IPS"] = ",".join(prefill_ips)
+        if decode_ips:
+            env["PROFILE_DECODE_IPS"] = ",".join(decode_ips)
+        if agg_ips:
+            env["PROFILE_AGG_IPS"] = ",".join(agg_ips)
+        if prefill_endpoints:
+            env["PROFILE_PREFILL_ENDPOINTS"] = ",".join(prefill_endpoints)
+        if decode_endpoints:
+            env["PROFILE_DECODE_ENDPOINTS"] = ",".join(decode_endpoints)
+        if agg_endpoints:
+            env["PROFILE_AGG_ENDPOINTS"] = ",".join(agg_endpoints)
+
+        # Set profile output directory and common env vars for benchmarks that support profiling
+        if runner.name in ("SA-Bench", "SGLang-Bench"):
+            env["PROFILE_OUTPUT_DIR"] = profiles_dir_in_container
+            env["BENCH_MODEL_NAME"] = self.config.served_model_name
             env["HEAD_NODE"] = self.runtime.nodes.head
             env["HEAD_PORT"] = str(self.runtime.frontend_port)
-
-            # Collect worker leader IPs by mode
-            prefill_ips = []
-            decode_ips = []
-            agg_ips = []
-
-            for endpoint in self.endpoints:
-                leader_ip = get_hostname_ip(endpoint.leader_node)
-                if endpoint.mode == "prefill":
-                    prefill_ips.append(leader_ip)
-                elif endpoint.mode == "decode":
-                    decode_ips.append(leader_ip)
-                elif endpoint.mode == "agg":
-                    agg_ips.append(leader_ip)
-
-            if prefill_ips:
-                env["PROFILE_PREFILL_IPS"] = ",".join(prefill_ips)
-            if decode_ips:
-                env["PROFILE_DECODE_IPS"] = ",".join(decode_ips)
-            if agg_ips:
-                env["PROFILE_AGG_IPS"] = ",".join(agg_ips)
-
-            # Phase-specific step configs
-            if p.prefill:
-                if p.prefill.start_step is not None:
-                    env["PROFILE_PREFILL_START_STEP"] = str(p.prefill.start_step)
-                if p.prefill.stop_step is not None:
-                    env["PROFILE_PREFILL_STOP_STEP"] = str(p.prefill.stop_step)
-            if p.decode:
-                if p.decode.start_step is not None:
-                    env["PROFILE_DECODE_START_STEP"] = str(p.decode.start_step)
-                if p.decode.stop_step is not None:
-                    env["PROFILE_DECODE_STOP_STEP"] = str(p.decode.stop_step)
-            if p.aggregated:
-                if p.aggregated.start_step is not None:
-                    env["PROFILE_AGG_START_STEP"] = str(p.aggregated.start_step)
-                if p.aggregated.stop_step is not None:
-                    env["PROFILE_AGG_STOP_STEP"] = str(p.aggregated.stop_step)
-
-            # Torch profiler directory
-            if p.is_torch:
-                env["SGLANG_TORCH_PROFILER_DIR"] = str(self.runtime.log_dir / "profiles")
-
-            # The profile.sh script only generates traffic when PROFILING_MODE=prefill
-            env["PROFILING_MODE"] = "prefill"
 
         return env

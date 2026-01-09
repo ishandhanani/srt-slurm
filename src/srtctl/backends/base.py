@@ -73,7 +73,6 @@ class BackendProtocol(Protocol):
         endpoint_processes: list["Process"],
         runtime: "RuntimeContext",
         frontend_type: str = "dynamo",
-        profiling_enabled: bool = False,
         nsys_prefix: list[str] | None = None,
         dump_config_path: Optional["Path"] = None,
     ) -> list[str]:

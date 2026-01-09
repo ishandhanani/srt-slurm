@@ -183,7 +183,6 @@ class SGLangProtocol:
         endpoint_processes: list["Process"],
         runtime: "RuntimeContext",
         frontend_type: str = "dynamo",
-        profiling_enabled: bool = False,
         nsys_prefix: list[str] | None = None,
         dump_config_path: Path | None = None,
     ) -> list[str]:
@@ -194,7 +193,6 @@ class SGLangProtocol:
             endpoint_processes: All processes for this endpoint (for multi-node)
             runtime: Runtime context with paths and settings
             frontend_type: Frontend type - "sglang" uses sglang.launch_server, "dynamo" uses dynamo.sglang
-            profiling_enabled: Whether profiling is enabled (forces sglang.launch_server)
             nsys_prefix: Optional nsys profiling command prefix
             dump_config_path: Path to dump config JSON
         """
@@ -211,9 +209,8 @@ class SGLangProtocol:
         leader_ip = get_hostname_ip(endpoint_nodes[0])
         dist_init_port = 29500
 
-        # Choose Python module
-        # When profiling is enabled, always use sglang.launch_server (not dynamo.sglang)
-        use_sglang = frontend_type == "sglang" or profiling_enabled
+        # Choose Python module based on frontend type
+        use_sglang = frontend_type == "sglang"
         python_module = "sglang.launch_server" if use_sglang else "dynamo.sglang"
 
         # Get served model name from config
