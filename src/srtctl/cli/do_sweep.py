@@ -79,7 +79,15 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
     @functools.cached_property
     def backend_processes(self) -> list[Process]:
         """Compute physical process topology from endpoints (cached)."""
-                return self.backend.endpoints_to_processes(self.endpoints)
+        # DYN_SYSTEM_PORT is parsed as i16 by dynamo runtime, so keep ports < 32768.
+        # Also avoid collisions across concurrent jobs by offsetting from the job id.
+        try:
+            job_id_int = int(self.runtime.job_id)
+        except ValueError:
+            job_id_int = 0
+
+        base_sys_port = 8081 + ((job_id_int % 2000) * 10)  # 8081..28071
+        return self.backend.endpoints_to_processes(self.endpoints, base_sys_port=base_sys_port)
 
     def start_head_infrastructure(self, registry: ProcessRegistry) -> ManagedProcess:
         """Start NATS and etcd on the head node."""

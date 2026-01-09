@@ -115,6 +115,13 @@ class WorkerStageMixin:
             "DYN_SYSTEM_PORT": str(process.sys_port),
         }
 
+        # Keep request-plane consistent across frontend/workers. Dynamo frontend defaults to NATS request plane.
+        if self.config.frontend.type == "dynamo" and "DYN_REQUEST_PLANE" not in env_to_set:
+            frontend_plane = None
+            if self.config.frontend.env:
+                frontend_plane = self.config.frontend.env.get("DYN_REQUEST_PLANE")
+            env_to_set["DYN_REQUEST_PLANE"] = frontend_plane if frontend_plane else "nats"
+
         # Add mode-specific environment variables from backend
         env_to_set.update(self.backend.get_environment_for_mode(mode))
 

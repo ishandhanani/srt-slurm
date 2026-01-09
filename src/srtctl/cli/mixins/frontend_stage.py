@@ -113,7 +113,7 @@ class FrontendStageMixin:
         return FrontendTopology(
             nginx_node=head,
             frontend_nodes=frontend_nodes,
-            frontend_port=8080,  # Internal port behind nginx
+            frontend_port=12569,  # Internal port behind nginx
             public_port=8000,  # Public port exposed by nginx
         )
 
