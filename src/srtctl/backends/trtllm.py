@@ -144,9 +144,14 @@ class TRTLLMProtocol:
         mode = process.endpoint_mode
         config = self.get_config_for_mode(mode)
 
-        config_path = runtime.log_dir / f"trtllm_config_{mode}.yaml"
+        # Write config to host path (log_dir)
+        config_filename = f"trtllm_config_{mode}.yaml"
+        host_config_path = runtime.log_dir / config_filename
+        host_config_path.write_text(yaml.safe_dump(config))
 
-        config_path.write_text(yaml.safe_dump(config))
+        # Use container paths for the command
+        # (model_path is mounted to /model, log_dir is mounted to /logs)
+        container_config_path = Path("/logs") / config_filename
 
         cmd = [
             "trtllm-llmapi-launch",
@@ -160,7 +165,7 @@ class TRTLLMProtocol:
             "--disaggregation-mode",
             mode,
             "--extra-engine-args",
-            str(config_path),
+            str(container_config_path),
         ]
 
         return cmd
