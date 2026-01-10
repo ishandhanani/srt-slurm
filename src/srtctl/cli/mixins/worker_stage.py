@@ -226,6 +226,10 @@ class WorkerStageMixin:
             profile_dir = str(self.runtime.log_dir / "profiles")
             env_to_set.update(profiling.get_env_vars(mode, profile_dir))
 
+        # Set CUDA_VISIBLE_DEVICES if not using all GPUs on the node
+        if len(leader.gpu_indices) < self.runtime.gpus_per_node:
+            env_to_set["CUDA_VISIBLE_DEVICES"] = leader.cuda_visible_devices
+
         # Log env vars in the format: VAR=value VAR2=value2
         env_str = " ".join(f"{k}={v}" for k, v in sorted(env_to_set.items()))
         logger.info("Env: %s", env_str)
