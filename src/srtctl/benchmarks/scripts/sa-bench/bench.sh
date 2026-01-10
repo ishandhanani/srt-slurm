@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # SA-Bench: Throughput/latency benchmark
-# Expects: endpoint isl osl concurrencies [req_rate]
+# Expects: endpoint isl osl concurrencies req_rate model_name
 
 set -e
 
@@ -12,16 +12,16 @@ ISL=$2
 OSL=$3
 CONCURRENCIES=$4
 REQ_RATE=${5:-inf}
+MODEL_NAME=${6:-"model"}
 
 # Parse endpoint into host:port
 HOST=$(echo "$ENDPOINT" | sed 's|http://||' | cut -d: -f1)
 PORT=$(echo "$ENDPOINT" | sed 's|http://||' | cut -d: -f2 | cut -d/ -f1)
 
-MODEL_NAME="deepseek-ai/DeepSeek-R1"
 MODEL_PATH="/model/"
 WORK_DIR="$(dirname "$0")"
 
-echo "SA-Bench Config: endpoint=${ENDPOINT}; isl=${ISL}; osl=${OSL}; concurrencies=${CONCURRENCIES}; req_rate=${REQ_RATE}"
+echo "SA-Bench Config: endpoint=${ENDPOINT}; isl=${ISL}; osl=${OSL}; concurrencies=${CONCURRENCIES}; req_rate=${REQ_RATE}; model=${MODEL_NAME}"
 
 # Parse concurrency list
 IFS='x' read -r -a CONCURRENCY_LIST <<< "$CONCURRENCIES"
@@ -30,12 +30,12 @@ IFS='x' read -r -a CONCURRENCY_LIST <<< "$CONCURRENCIES"
 echo "Verifying endpoint..."
 curl -s "${ENDPOINT}/v1/chat/completions" \
     -H "Content-Type: application/json" \
-    -d '{
-        "model": "deepseek-ai/DeepSeek-R1",
-        "messages": [{"role": "user", "content": "Hello"}],
-        "stream": false,
-        "max_tokens": 10
-    }' | head -c 200
+    -d "{
+        \"model\": \"${MODEL_NAME}\",
+        \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
+        \"stream\": false,
+        \"max_tokens\": 10
+    }" | head -c 200
 echo ""
 
 # Warmup
