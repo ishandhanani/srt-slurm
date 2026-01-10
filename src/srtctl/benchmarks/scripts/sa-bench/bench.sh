@@ -42,7 +42,7 @@ echo ""
 for concurrency in "${CONCURRENCY_LIST[@]}"; do
     echo "Warming up with concurrency $concurrency"
     echo "$(date '+%Y-%m-%d %H:%M:%S')"
-    num_prompts=$((concurrency * 5))
+    num_prompts=$((concurrency * 2))
     python3 -u "${WORK_DIR}/benchmark_serving.py" \
         --model "${MODEL_NAME}" --tokenizer "${MODEL_PATH}" \
         --host "$HOST" --port "$PORT" \
@@ -64,7 +64,7 @@ result_dir="/logs/sa-bench_isl_${ISL}_osl_${OSL}"
 mkdir -p "$result_dir"
 
 for concurrency in "${CONCURRENCY_LIST[@]}"; do
-    num_prompts=$((concurrency * 5))
+    num_prompts=$((concurrency * 8))
     result_filename="isl_${ISL}_osl_${OSL}_concurrency_${concurrency}_req_rate_${REQ_RATE}.json"
     
     echo "Running benchmark with concurrency: $concurrency"
