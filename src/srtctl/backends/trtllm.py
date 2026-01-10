@@ -152,6 +152,7 @@ class TRTLLMProtocol:
         # Use container paths for the command
         # (model_path is mounted to /model, log_dir is mounted to /logs)
         container_config_path = Path("/logs") / config_filename
+        container_model_path = Path("/model")
 
         cmd = [
             "trtllm-llmapi-launch",
@@ -159,7 +160,7 @@ class TRTLLMProtocol:
             "-m",
             "dynamo.trtllm",
             "--model-path",
-            str(runtime.model_path),
+            str(container_model_path),
             "--served-model-name",
             runtime.model_path.name,
             "--disaggregation-mode",
