@@ -151,6 +151,9 @@ def start_srun_process(
     srun_options: dict[str, str] | None = None,
     overlap: bool = True,
     use_bash_wrapper: bool = True,
+    mpi: str | None = None,
+    oversubscribe: bool = False,
+    cpu_bind: str | None = None,
 ) -> subprocess.Popen:
     """Start a process via srun with container support.
 
@@ -172,6 +175,9 @@ def start_srun_process(
         srun_options: Additional srun options as dict
         overlap: Use --overlap flag (default: True)
         use_bash_wrapper: Wrap command in bash -c (default: True)
+        mpi: MPI type (e.g., "pmix" for TRTLLM)
+        oversubscribe: Use --oversubscribe flag (for MPI jobs)
+        cpu_bind: CPU binding mode (e.g., "verbose,none" for TRTLLM)
 
     Returns:
         subprocess.Popen object for the srun process
@@ -190,6 +196,14 @@ def start_srun_process(
     # Basic options
     if overlap:
         srun_cmd.append("--overlap")
+
+    # MPI options (for TRTLLM)
+    if mpi:
+        srun_cmd.extend(["--mpi", mpi])
+    if oversubscribe:
+        srun_cmd.append("--oversubscribe")
+    if cpu_bind:
+        srun_cmd.extend(["--cpu-bind", cpu_bind])
 
     srun_cmd.extend(["--nodes", str(nodes)])
     srun_cmd.extend(["--ntasks", str(ntasks)])

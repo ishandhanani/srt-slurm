@@ -6,6 +6,7 @@ Base types and protocols for backend configurations.
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
@@ -20,6 +21,25 @@ class BackendType(str, Enum):
     """Supported backend types."""
 
     SGLANG = "sglang"
+    TRTLLM = "trtllm"
+
+
+@dataclass
+class SrunConfig:
+    """Configuration for srun process launching.
+
+    Attributes:
+        mpi: MPI type (e.g., "pmix" for TRTLLM). None for non-MPI backends.
+        oversubscribe: Use --oversubscribe flag (for MPI jobs).
+        launch_per_endpoint: If True, launch one srun per endpoint (all nodes together).
+                            If False, launch one srun per process (per node).
+        cpu_bind: CPU binding mode (e.g., "verbose,none" for TRTLLM). None to omit.
+    """
+
+    mpi: str | None = None
+    oversubscribe: bool = False
+    launch_per_endpoint: bool = False
+    cpu_bind: str | None = None
 
 
 class BackendProtocol(Protocol):
@@ -35,6 +55,13 @@ class BackendProtocol(Protocol):
     @property
     def type(self) -> str:
         """Backend type identifier."""
+        ...
+
+    def get_srun_config(self) -> SrunConfig:
+        """Get srun configuration for this backend.
+
+        Returns SrunConfig with MPI settings and launch strategy.
+        """
         ...
 
     def get_config_for_mode(self, mode: str) -> dict[str, Any]:

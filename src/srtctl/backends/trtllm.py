@@ -1,0 +1,166 @@
+import builtins
+from dataclasses import field
+from pathlib import Path
+from typing import Any, ClassVar, Literal, Sequence, TYPE_CHECKING
+
+import yaml
+from marshmallow import Schema
+from marshmallow_dataclass import dataclass
+
+if TYPE_CHECKING:
+    from srtctl.backends.base import SrunConfig
+    from srtctl.core.runtime import RuntimeContext
+    from srtctl.core.topology import Endpoint, Process
+
+# Type alias for worker modes
+WorkerMode = Literal["prefill", "decode", "agg"]
+
+@dataclass(frozen=True)
+class TRTLLMServerConfig:
+    """SGLang server CLI configuration per mode (prefill/decode/aggregated).
+
+    Each mode can have its own configuration dict that gets converted
+    to CLI flags when starting the worker.
+    """
+
+    prefill: dict[str, Any] | None = None
+    decode: dict[str, Any] | None = None
+    aggregated: dict[str, Any] | None = None
+
+    Schema: ClassVar[type[Schema]] = Schema
+
+@dataclass(frozen=True)
+class TRTLLMProtocol:
+    """TRTLLM protocol - implements BackendProtocol.
+
+    This frozen dataclass both holds configuration AND implements the
+    BackendProtocol methods for process allocation and launching.
+
+    Example YAML:
+        backend:
+          type: trtllm
+          prefill_environment:
+            CUDA_LAUNCH_BLOCKING: "1"
+          trtllm_config:
+            prefill:
+              mem-fraction-static: 0.8
+              chunked-prefill-size: 8192
+            decode:
+              mem-fraction-static: 0.9
+    """
+
+    type: Literal["trtllm"] = "trtllm"
+    
+    prefill_environment: dict[str, str] = field(default_factory=dict)
+    decode_environment: dict[str, str] = field(default_factory=dict)
+
+    trtllm_config: TRTLLMServerConfig | None = None
+
+    Schema: ClassVar[builtins.type[Schema]] = Schema
+
+    # =========================================================================
+    # BackendProtocol Implementation
+    # =========================================================================
+
+    def get_srun_config(self) -> "SrunConfig":
+        """TRTLLM uses MPI-style launching (one srun per endpoint with all nodes)."""
+        from srtctl.backends.base import SrunConfig
+
+        return SrunConfig(
+            mpi="pmix",
+            oversubscribe=True,
+            launch_per_endpoint=True,
+            cpu_bind="verbose,none",
+        )
+
+    def get_config_for_mode(self, mode: WorkerMode) -> dict[str, Any]:
+        if not self.trtllm_config:
+            return {}
+
+        if mode == "prefill":
+            return dict(self.trtllm_config.prefill or {})
+        elif mode == "decode":
+            return dict(self.trtllm_config.decode or {})
+        elif mode == "agg":
+            raise ValueError(f"Aggregated mode is not supported for TRTLLM")
+        return {}
+
+    def get_environment_for_mode(self, mode: WorkerMode) -> dict[str, str]:
+        if mode == "prefill":
+            return dict(self.prefill_environment)
+        elif mode == "decode":
+            return dict(self.decode_environment)
+        elif mode == "agg":
+            raise ValueError(f"Aggregated mode is not supported for TRTLLM")
+        return {}
+    
+    def allocate_endpoints(
+        self,
+        num_prefill: int,
+        num_decode: int,
+        num_agg: int,
+        gpus_per_prefill: int,
+        gpus_per_decode: int,
+        gpus_per_agg: int,
+        gpus_per_node: int,
+        available_nodes: Sequence[str],
+    ) -> list["Endpoint"]:
+        """Allocate endpoints to nodes."""
+        from srtctl.core.topology import allocate_endpoints
+
+        return allocate_endpoints(
+            num_prefill=num_prefill,
+            num_decode=num_decode,
+            num_agg=num_agg,
+            gpus_per_prefill=gpus_per_prefill,
+            gpus_per_decode=gpus_per_decode,
+            gpus_per_agg=gpus_per_agg,
+            gpus_per_node=gpus_per_node,
+            available_nodes=available_nodes,
+        )
+
+    def endpoints_to_processes(
+        self,
+        endpoints: list["Endpoint"],
+        base_sys_port: int = 8081,
+    ) -> list["Process"]:
+        """Convert endpoints to processes."""
+        from srtctl.core.topology import endpoints_to_processes
+
+        return endpoints_to_processes(endpoints, base_sys_port=base_sys_port)
+    
+    def build_worker_command(
+        self,
+        process: "Process",
+        endpoint_processes: list["Process"],
+        runtime: "RuntimeContext",
+        frontend_type: str = "dynamo",
+        profiling_enabled: bool = False,
+        nsys_prefix: list[str] | None = None,
+        dump_config_path: Path | None = None,
+    ) -> list[str]:
+        """Build the command to start a TRTLLM worker process."""
+
+        mode = process.endpoint_mode
+        config = self.get_config_for_mode(mode)
+
+        config_path = runtime.log_dir / f"trtllm_config_{mode}.yaml"
+
+        config_path.write_text(yaml.safe_dump(config))
+
+        cmd = [
+            "trtllm-llmapi-launch",
+            "python3",
+            "-m",
+            "dynamo.trtllm",
+            "--model-path",
+            str(runtime.model_path),
+            "--served-model-name",
+            runtime.model_path.name,
+            "--disaggregation-mode",
+            mode,
+            "--extra-engine-args",
+            str(config_path),
+        ]
+
+        return cmd

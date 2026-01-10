@@ -88,6 +88,7 @@ def generate_minimal_sbatch_script(
         job_name=config.name,
         total_nodes=total_nodes,
         gpus_per_node=config.resources.gpus_per_node,
+        backend_type=config.backend_type,
         account=config.slurm.account or os.environ.get("SLURM_ACCOUNT", "default"),
         partition=config.slurm.partition or os.environ.get("SLURM_PARTITION", "default"),
         time_limit=config.slurm.time_limit or "01:00:00",

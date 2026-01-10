@@ -80,7 +80,7 @@ class WorkerStageMixin:
         return " && ".join(parts)
 
     def start_worker(self, process: "Process", endpoint_processes: list["Process"]) -> ManagedProcess:
-        """Start a single worker process."""
+        """Start a single worker process (one srun per node, used by SGLang)."""
         mode = process.endpoint_mode
         index = process.endpoint_index
 
@@ -160,9 +160,116 @@ class WorkerStageMixin:
             critical=True,
         )
 
+    def start_endpoint_worker(self, endpoint_processes: list["Process"]) -> ManagedProcess:
+        """Start a worker using MPI-style launching (one srun per endpoint, used by TRTLLM).
+
+        This launches a single srun command that spans all nodes in the endpoint,
+        with ntasks = total GPUs across all nodes.
+        """
+        # Use the leader process for metadata
+        leader = endpoint_processes[0]
+        mode = leader.endpoint_mode
+        index = leader.endpoint_index
+
+        # Collect all unique nodes for this endpoint
+        endpoint_nodes = list(dict.fromkeys(p.node for p in endpoint_processes))
+        num_nodes = len(endpoint_nodes)
+        total_gpus = num_nodes * len(leader.gpu_indices)
+
+        logger.info(
+            "Starting %s worker %d on %d nodes (%s) with %d total GPUs (MPI mode)",
+            mode,
+            index,
+            num_nodes,
+            ",".join(endpoint_nodes),
+            total_gpus,
+        )
+
+        # Log and config files (use leader node in name)
+        worker_log = self.runtime.log_dir / f"{leader.node}_{mode}_w{index}.out"
+        config_dump = self.runtime.log_dir / f"{leader.node}_config.json"
+
+        # Profiling setup
+        profiling = self.config.profiling
+        nsys_prefix = None
+        if profiling.is_nsys:
+            nsys_output = str(self.runtime.log_dir / f"{leader.node}_{mode}_w{index}_profile")
+            nsys_prefix = profiling.get_nsys_prefix(nsys_output)
+
+        # Build command using backend's method
+        cmd = self.backend.build_worker_command(
+            process=leader,
+            endpoint_processes=endpoint_processes,
+            runtime=self.runtime,
+            frontend_type=self.config.frontend.type,
+            profiling_enabled=profiling.enabled,
+            nsys_prefix=nsys_prefix,
+            dump_config_path=config_dump,
+        )
+
+        # Environment variables
+        env_to_set = {
+            "HEAD_NODE_IP": self.runtime.head_node_ip,
+            "ETCD_ENDPOINTS": f"http://{self.runtime.nodes.head}:2379",
+            "NATS_SERVER": f"nats://{self.runtime.nodes.head}:4222",
+            "DYN_SYSTEM_PORT": str(leader.sys_port),
+        }
+
+        # Add mode-specific environment variables from backend
+        env_to_set.update(self.backend.get_environment_for_mode(mode))
+
+        # Add config environment variables
+        env_to_set.update(self.runtime.environment)
+
+        # Add profiling environment variables
+        if profiling.enabled:
+            profile_dir = str(self.runtime.log_dir / "profiles")
+            env_to_set.update(profiling.get_env_vars(mode, profile_dir))
+
+        # Log env vars in the format: VAR=value VAR2=value2
+        env_str = " ".join(f"{k}={v}" for k, v in sorted(env_to_set.items()))
+        logger.info("Env: %s", env_str)
+        logger.info("Command: %s", shlex.join(cmd))
+        logger.info("Log: %s", worker_log)
+        if profiling.enabled:
+            logger.info("Profiling: %s mode", profiling.type)
+
+        # Build bash preamble (setup script + dynamo install)
+        bash_preamble = self._build_worker_preamble()
+
+        # Get srun config from backend
+        srun_config = self.backend.get_srun_config()
+
+        proc = start_srun_process(
+            command=cmd,
+            nodes=num_nodes,
+            ntasks=total_gpus,
+            nodelist=endpoint_nodes,
+            output=str(worker_log),
+            container_image=str(self.runtime.container_image),
+            container_mounts=self.runtime.container_mounts,
+            env_to_set=env_to_set,
+            bash_preamble=bash_preamble,
+            mpi=srun_config.mpi,
+            oversubscribe=srun_config.oversubscribe,
+            cpu_bind=srun_config.cpu_bind,
+        )
+
+        return ManagedProcess(
+            name=f"{mode}_{index}_{leader.node}",
+            popen=proc,
+            log_file=worker_log,
+            node=leader.node,
+            critical=True,
+        )
+
     def start_all_workers(self) -> NamedProcesses:
         """Start all backend workers."""
         logger.info("Starting backend workers")
+
+        # Check if backend uses MPI-style per-endpoint launching
+        srun_config = self.backend.get_srun_config()
+        launch_per_endpoint = srun_config.launch_per_endpoint
 
         grouped: dict[tuple, list[Process]] = defaultdict(list)
         for process in self.backend_processes:
@@ -170,10 +277,18 @@ class WorkerStageMixin:
             grouped[key].append(process)
 
         result: NamedProcesses = {}
-        for _endpoint_key, endpoint_processes in grouped.items():
-            for process in endpoint_processes:
-                managed = self.start_worker(process, endpoint_processes)
+
+        if launch_per_endpoint:
+            # MPI-style: one srun per endpoint (TRTLLM)
+            for _endpoint_key, endpoint_processes in grouped.items():
+                managed = self.start_endpoint_worker(endpoint_processes)
                 result[managed.name] = managed
+        else:
+            # Per-process: one srun per node (SGLang)
+            for _endpoint_key, endpoint_processes in grouped.items():
+                for process in endpoint_processes:
+                    managed = self.start_worker(process, endpoint_processes)
+                    result[managed.name] = managed
 
         logger.info("Started %d worker processes", len(result))
         return result
