@@ -261,6 +261,39 @@ class ResourceConfig:
     agg_nodes: int | None = None
     agg_workers: int | None = None
 
+    # Explicit GPUs per worker (override computed values)
+    # Use data_key to map from YAML field names to internal attribute names
+    _explicit_gpus_per_prefill: int | None = field(
+        default=None,
+        metadata={
+            "marshmallow_field": fields.Integer(
+                data_key="gpus_per_prefill",
+                load_default=None,
+                allow_none=True,
+            )
+        },
+    )
+    _explicit_gpus_per_decode: int | None = field(
+        default=None,
+        metadata={
+            "marshmallow_field": fields.Integer(
+                data_key="gpus_per_decode",
+                load_default=None,
+                allow_none=True,
+            )
+        },
+    )
+    _explicit_gpus_per_agg: int | None = field(
+        default=None,
+        metadata={
+            "marshmallow_field": fields.Integer(
+                data_key="gpus_per_agg",
+                load_default=None,
+                allow_none=True,
+            )
+        },
+    )
+
     @property
     def is_disaggregated(self) -> bool:
         return self.prefill_nodes is not None or self.decode_nodes is not None
@@ -285,12 +318,20 @@ class ResourceConfig:
 
     @property
     def gpus_per_prefill(self) -> int:
+        # Use explicit value if set
+        if self._explicit_gpus_per_prefill is not None:
+            return self._explicit_gpus_per_prefill
+        # Fall back to computed value
         if self.prefill_nodes and self.prefill_workers:
             return (self.prefill_nodes * self.gpus_per_node) // self.prefill_workers
         return self.gpus_per_node
 
     @property
     def gpus_per_decode(self) -> int:
+        # Use explicit value if set
+        if self._explicit_gpus_per_decode is not None:
+            return self._explicit_gpus_per_decode
+        # Fall back to computed value
         if self.decode_nodes and self.decode_workers:
             return (self.decode_nodes * self.gpus_per_node) // self.decode_workers
         # decode_nodes=0 with decode_workers means "share nodes with prefill"
@@ -301,6 +342,10 @@ class ResourceConfig:
 
     @property
     def gpus_per_agg(self) -> int:
+        # Use explicit value if set
+        if self._explicit_gpus_per_agg is not None:
+            return self._explicit_gpus_per_agg
+        # Fall back to computed value
         if self.agg_nodes and self.agg_workers:
             return (self.agg_nodes * self.gpus_per_node) // self.agg_workers
         return self.gpus_per_node
