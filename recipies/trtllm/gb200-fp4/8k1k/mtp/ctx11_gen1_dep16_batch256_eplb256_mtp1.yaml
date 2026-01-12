@@ -7,7 +7,7 @@ model:
 
 resources:
   gpu_type: "gb200"
-  prefill_nodes: 1
+  prefill_nodes: 11
   prefill_workers: 11
 
   decode_workers: 1
