@@ -368,6 +368,92 @@ def submit_sweep(
     console.print(f"\n[bold green]✅ Sweep complete![/] Submitted {len(configs)} jobs.")
 
 
+def find_yaml_files(directory: Path) -> list[Path]:
+    """Recursively find all YAML files in a directory.
+
+    Args:
+        directory: Directory to search
+
+    Returns:
+        Sorted list of YAML file paths
+    """
+    yaml_files = list(directory.rglob("*.yaml")) + list(directory.rglob("*.yml"))
+    return sorted(set(yaml_files))
+
+
+def submit_directory(
+    directory: Path,
+    dry_run: bool = False,
+    setup_script: str | None = None,
+    tags: list[str] | None = None,
+    force_sweep: bool = False,
+) -> None:
+    """Submit all YAML configs in a directory recursively.
+
+    Args:
+        directory: Directory containing YAML config files
+        dry_run: If True, don't submit to SLURM
+        setup_script: Optional custom setup script name
+        tags: Optional list of tags
+        force_sweep: If True, treat all configs as sweeps
+    """
+    yaml_files = find_yaml_files(directory)
+
+    if not yaml_files:
+        console.print(f"[bold yellow]⚠️  No YAML files found in:[/] {directory}")
+        return
+
+    console.print(f"[bold cyan]📁 Found {len(yaml_files)} YAML file(s) in:[/] {directory}")
+    console.print()
+
+    # Display table of files to be processed
+    table = Table(title=f"Configs to {'validate' if dry_run else 'submit'}")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("File", style="green")
+    table.add_column("Type", style="yellow")
+
+    for i, yaml_file in enumerate(yaml_files, 1):
+        relative_path = yaml_file.relative_to(directory)
+        config_type = "sweep" if (force_sweep or is_sweep_config(yaml_file)) else "single"
+        table.add_row(str(i), str(relative_path), config_type)
+
+    console.print(table)
+    console.print()
+
+    # Process each file
+    success_count = 0
+    error_count = 0
+
+    for i, yaml_file in enumerate(yaml_files, 1):
+        relative_path = yaml_file.relative_to(directory)
+        console.print(f"[bold]({i}/{len(yaml_files)})[/] Processing: {relative_path}")
+
+        try:
+            is_sweep = force_sweep or is_sweep_config(yaml_file)
+            if is_sweep:
+                submit_sweep(yaml_file, dry_run=dry_run, setup_script=setup_script, tags=tags)
+            else:
+                submit_single(config_path=yaml_file, dry_run=dry_run, setup_script=setup_script, tags=tags)
+            success_count += 1
+        except Exception as e:
+            console.print(f"[bold red]  ❌ Error:[/] {e}")
+            logging.debug("Full traceback:", exc_info=True)
+            error_count += 1
+
+        console.print()
+
+    # Summary
+    if dry_run:
+        console.print(f"[bold green]✅ Validated {success_count} config(s)[/]", end="")
+    else:
+        console.print(f"[bold green]✅ Submitted {success_count} job(s)[/]", end="")
+
+    if error_count > 0:
+        console.print(f" [bold red]({error_count} failed)[/]")
+    else:
+        console.print()
+
+
 def main():
     # If no args at all, launch interactive mode
     if len(sys.argv) == 1:
@@ -382,6 +468,7 @@ def main():
         epilog="""Examples:
   srtctl                                         # Interactive mode
   srtctl apply -f config.yaml                    # Submit job
+  srtctl apply -f ./configs/                     # Submit all YAMLs in directory
   srtctl apply -f config.yaml --sweep            # Submit sweep
   srtctl dry-run -f config.yaml                  # Dry run
 """,
@@ -391,7 +478,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def add_common_args(p):
-        p.add_argument("-f", "--file", type=Path, required=True, dest="config", help="YAML config file")
+        p.add_argument("-f", "--file", type=Path, required=True, dest="config", help="YAML config file or directory")
         p.add_argument("--sweep", action="store_true", help="Force sweep mode")
         p.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
 
@@ -410,16 +497,26 @@ def main():
         sys.exit(1)
 
     is_dry_run = args.command == "dry-run"
-    is_sweep = args.sweep or is_sweep_config(args.config)
     tags = [t.strip() for t in (getattr(args, "tags", "") or "").split(",") if t.strip()] or None
 
     try:
         setup_script = getattr(args, "setup_script", None)
 
-        if is_sweep:
-            submit_sweep(args.config, dry_run=is_dry_run, setup_script=setup_script, tags=tags)
+        # Handle directory input
+        if args.config.is_dir():
+            submit_directory(
+                args.config,
+                dry_run=is_dry_run,
+                setup_script=setup_script,
+                tags=tags,
+                force_sweep=args.sweep,
+            )
         else:
-            submit_single(config_path=args.config, dry_run=is_dry_run, setup_script=setup_script, tags=tags)
+            is_sweep = args.sweep or is_sweep_config(args.config)
+            if is_sweep:
+                submit_sweep(args.config, dry_run=is_dry_run, setup_script=setup_script, tags=tags)
+            else:
+                submit_single(config_path=args.config, dry_run=is_dry_run, setup_script=setup_script, tags=tags)
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
         logging.debug("Full traceback:", exc_info=True)
