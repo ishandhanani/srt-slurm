@@ -167,6 +167,8 @@ class TRTLLMProtocol:
             mode,
             "--extra-engine-args",
             str(container_config_path),
+            "--request-plane",
+            "nats"
         ]
 
         return cmd
