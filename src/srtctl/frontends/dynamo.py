@@ -125,7 +125,8 @@ class DynamoFrontend:
             )
 
         # Dynamo installation (required for dynamo frontend)
-        if not config.profiling.enabled:
+        # Skip if dynamo.install is False (container already has dynamo installed)
+        if not config.profiling.enabled and config.dynamo.install:
             parts.append(config.dynamo.get_install_commands())
 
         if not parts:

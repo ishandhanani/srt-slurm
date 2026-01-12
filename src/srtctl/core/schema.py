@@ -548,6 +548,8 @@ class DynamoConfig:
     Defaults to version="0.7.0" (pip install).
 
     Options:
+        install: Whether to install dynamo at all (default: True). Set to False
+                 if your container already has dynamo pre-installed.
         version: Install specific version from PyPI (e.g., "0.7.0")
         hash: Clone repo and checkout specific commit hash
         top_of_tree: Clone repo at HEAD (latest)
@@ -555,6 +557,7 @@ class DynamoConfig:
     If top_of_tree or hash is set, version is automatically cleared.
     """
 
+    install: bool = True
     version: str | None = "0.7.0"
     hash: str | None = None
     top_of_tree: bool = False

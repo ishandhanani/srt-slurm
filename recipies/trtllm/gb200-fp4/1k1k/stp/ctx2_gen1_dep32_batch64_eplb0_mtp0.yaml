@@ -137,3 +137,6 @@ benchmark:
 
 frontend:
   type: "dynamo"
+
+dynamo:
+  install: false

@@ -71,7 +71,8 @@ class WorkerStageMixin:
 
         # 2. Dynamo installation (required for dynamo.sglang when using dynamo frontend and not profiling)
         # When profiling is enabled, we use sglang.launch_server directly (no dynamo)
-        if self.config.frontend.type == "dynamo" and not self.config.profiling.enabled:
+        # Skip if dynamo.install is False (container already has dynamo installed)
+        if self.config.frontend.type == "dynamo" and not self.config.profiling.enabled and self.config.dynamo.install:
             parts.append(self.config.dynamo.get_install_commands())
 
         if not parts:
