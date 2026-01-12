@@ -98,7 +98,9 @@ class DynamoFrontend:
                 container_mounts=runtime.container_mounts,
                 env_to_set=env_to_set,
                 bash_preamble=bash_preamble,
-                mpi="none",
+                # TODO(jthomson): I don't have the faintest clue of
+                # why this is needed in later versions of Dynamo, but it is.
+                mpi="pmix", 
             )
 
             processes.append(
