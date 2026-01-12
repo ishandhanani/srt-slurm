@@ -98,6 +98,7 @@ class DynamoFrontend:
                 container_mounts=runtime.container_mounts,
                 env_to_set=env_to_set,
                 bash_preamble=bash_preamble,
+                mpi="none",
             )
 
             processes.append(
