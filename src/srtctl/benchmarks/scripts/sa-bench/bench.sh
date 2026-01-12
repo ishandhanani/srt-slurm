@@ -84,6 +84,7 @@ for concurrency in "${CONCURRENCY_LIST[@]}"; do
         --request-rate "${REQ_RATE}" \
         --percentile-metrics ttft,tpot,itl,e2el \
         --max-concurrency "$concurrency" \
+        --use-chat-template \
         --save-result --result-dir "$result_dir" --result-filename "$result_filename"
     
     echo "$(date '+%Y-%m-%d %H:%M:%S')"
