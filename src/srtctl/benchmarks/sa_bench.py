@@ -60,12 +60,24 @@ class SABenchRunner(BenchmarkRunner):
         runtime: RuntimeContext,
     ) -> list[str]:
         b = config.benchmark
+        r = config.resources
         endpoint = f"http://localhost:{runtime.frontend_port}"
 
         # Format concurrencies as x-separated string if it's a list
         concurrencies = b.concurrencies
         if isinstance(concurrencies, list):
             concurrencies = "x".join(str(c) for c in concurrencies)
+
+        # Compute GPU info for result filename
+        is_disaggregated = r.is_disaggregated
+        if is_disaggregated:
+            prefill_gpus = r.prefill_gpus
+            decode_gpus = r.decode_gpus
+            total_gpus = prefill_gpus + decode_gpus
+        else:
+            total_gpus = (r.agg_nodes or 1) * r.gpus_per_node
+            prefill_gpus = 0
+            decode_gpus = 0
 
         return [
             "bash",
@@ -76,4 +88,8 @@ class SABenchRunner(BenchmarkRunner):
             str(concurrencies) if concurrencies else "",
             str(b.req_rate) if b.req_rate else "inf",
             config.served_model_name,
+            str(is_disaggregated).lower(),
+            str(total_gpus),
+            str(prefill_gpus),
+            str(decode_gpus),
         ]

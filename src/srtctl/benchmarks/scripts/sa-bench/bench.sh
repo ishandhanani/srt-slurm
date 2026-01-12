@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # SA-Bench: Throughput/latency benchmark
-# Expects: endpoint isl osl concurrencies req_rate model_name
+# Expects: endpoint isl osl concurrencies req_rate model_name is_disaggregated total_gpus prefill_gpus decode_gpus
 
 set -e
 
@@ -13,6 +13,10 @@ OSL=$3
 CONCURRENCIES=$4
 REQ_RATE=${5:-inf}
 MODEL_NAME=${6:-"model"}
+IS_DISAGGREGATED=${7:-false}
+TOTAL_GPUS=${8:-0}
+PREFILL_GPUS=${9:-0}
+DECODE_GPUS=${10:-0}
 
 # Parse endpoint into host:port
 HOST=$(echo "$ENDPOINT" | sed 's|http://||' | cut -d: -f1)
@@ -65,7 +69,13 @@ mkdir -p "$result_dir"
 
 for concurrency in "${CONCURRENCY_LIST[@]}"; do
     num_prompts=$((concurrency * 8))
-    result_filename="isl_${ISL}_osl_${OSL}_concurrency_${concurrency}_req_rate_${REQ_RATE}.json"
+    
+    # Generate result filename based on mode
+    if [ "$IS_DISAGGREGATED" = "true" ]; then
+        result_filename="results_concurrency_${concurrency}_gpus${TOTAL_GPUS}_ctx_${PREFILL_GPUS}_gen_${DECODE_GPUS}.json"
+    else
+        result_filename="results_concurrency_${concurrency}_gpus_${TOTAL_GPUS}.json"
+    fi
     
     echo "Running benchmark with concurrency: $concurrency"
     echo "$(date '+%Y-%m-%d %H:%M:%S')"
