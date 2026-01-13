@@ -24,7 +24,7 @@ from marshmallow_dataclass import dataclass
 
 if TYPE_CHECKING:
     from srtctl.core.runtime import RuntimeContext
-    from srtctl.core.topology import Endpoint, Process
+    from srtctl.core.topology import Endpoint, NodePortAllocator, Process
 
 # Type alias for worker modes
 WorkerMode = Literal["prefill", "decode", "agg"]
@@ -171,11 +171,12 @@ class SGLangProtocol:
         self,
         endpoints: list["Endpoint"],
         base_sys_port: int = 8081,
+        port_allocator: "NodePortAllocator | None" = None,
     ) -> list["Process"]:
         """Convert endpoints to processes."""
         from srtctl.core.topology import endpoints_to_processes
 
-        return endpoints_to_processes(endpoints, base_sys_port=base_sys_port)
+        return endpoints_to_processes(endpoints, base_sys_port=base_sys_port, port_allocator=port_allocator)
 
     def build_worker_command(
         self,
@@ -250,7 +251,24 @@ class SGLangProtocol:
             cmd.extend(["--disaggregation-mode", mode])
             # Bootstrap port only needed for sglang frontend (dynamo handles internally)
             if frontend_type == "sglang" and mode == "prefill" and process.bootstrap_port is not None:
-                cmd.extend(["--disaggregation-bootstrap-port", str(process.bootstrap_port)])
+                user_bootstrap_port = config.get("disaggregation-bootstrap-port")
+                if user_bootstrap_port is None:
+                    cmd.extend(["--disaggregation-bootstrap-port", str(process.bootstrap_port)])
+                else:
+                    try:
+                        user_port_int = int(user_bootstrap_port)
+                    except (TypeError, ValueError) as e:
+                        raise ValueError(
+                            f"Invalid disaggregation-bootstrap-port={user_bootstrap_port!r} in sglang_config.prefill"
+                        ) from e
+                    if user_port_int != process.bootstrap_port:
+                        raise ValueError(
+                            "disaggregation-bootstrap-port mismatch for sglang prefill worker: "
+                            f"config={user_port_int}, topology={process.bootstrap_port}. "
+                            "For sglang router frontend, router and prefill workers must use the same bootstrap port. "
+                            "If you run multiple prefill workers on the same node, do not set a fixed "
+                            "disaggregation-bootstrap-port in the recipe."
+                        )
 
         # Add multi-node coordination flags
         if is_multi_node:
@@ -277,7 +295,7 @@ class SGLangProtocol:
             kv_cfg["endpoint"] = f"tcp://*:{process.kv_events_port}"
             cmd.extend(["--kv-events-config", json.dumps(kv_cfg)])
 
-        # Add all config flags
+        # Add all config flags.
         cmd.extend(_config_to_cli_args(config))
 
         return cmd

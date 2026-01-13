@@ -108,12 +108,17 @@ class WorkerStageMixin:
         )
 
         # Environment variables
-        env_to_set = {
-            "HEAD_NODE_IP": self.runtime.head_node_ip,
-            "ETCD_ENDPOINTS": f"http://{self.runtime.nodes.head}:2379",
-            "NATS_SERVER": f"nats://{self.runtime.nodes.head}:4222",
-            "DYN_SYSTEM_PORT": str(process.sys_port),
-        }
+        env_to_set: dict[str, str] = {"HEAD_NODE_IP": self.runtime.head_node_ip}
+
+        # Only Dynamo workers require etcd/NATS + system status server port.
+        if self.config.frontend.type == "dynamo":
+            env_to_set.update(
+                {
+                    "ETCD_ENDPOINTS": f"http://{self.runtime.nodes.head}:2379",
+                    "NATS_SERVER": f"nats://{self.runtime.nodes.head}:4222",
+                    "DYN_SYSTEM_PORT": str(process.sys_port),
+                }
+            )
 
         # Keep request-plane consistent across frontend/workers. Dynamo frontend defaults to NATS request plane.
         if self.config.frontend.type == "dynamo" and "DYN_REQUEST_PLANE" not in env_to_set:
@@ -130,8 +135,9 @@ class WorkerStageMixin:
 
         # Add profiling environment variables
         if profiling.enabled:
-            profile_dir = str(self.runtime.log_dir / "profiles")
-            env_to_set.update(profiling.get_env_vars(mode, profile_dir))
+            # /logs is the mounted host log directory inside the container.
+            profile_dir_in_container = "/logs/profiles"
+            env_to_set.update(profiling.get_env_vars(mode, profile_dir_in_container))
 
         # Set CUDA_VISIBLE_DEVICES if not using all GPUs
         if len(process.gpu_indices) < self.runtime.gpus_per_node:

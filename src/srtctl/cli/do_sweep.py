@@ -33,7 +33,7 @@ from srtctl.core.processes import (
 from srtctl.core.runtime import RuntimeContext
 from srtctl.core.schema import SrtConfig
 from srtctl.core.slurm import get_slurm_job_id, start_srun_process
-from srtctl.core.topology import Endpoint, Process
+from srtctl.core.topology import Endpoint, NodePortAllocator, Process
 from srtctl.logging_utils import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -87,10 +87,46 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
             job_id_int = 0
 
         base_sys_port = 8081 + ((job_id_int % 2000) * 10)  # 8081..28071
-        return self.backend.endpoints_to_processes(self.endpoints, base_sys_port=base_sys_port)
 
-    def start_head_infrastructure(self, registry: ProcessRegistry) -> ManagedProcess:
-        """Start NATS and etcd on the head node."""
+        port_allocator: NodePortAllocator | None = None
+        if self.config.frontend.type == "sglang" and getattr(self.backend, "type", None) == "sglang":
+            prefill_cfg: dict[str, object] = {}
+            try:
+                prefill_cfg = self.backend.get_config_for_mode("prefill")  # type: ignore[assignment]
+            except Exception:
+                prefill_cfg = {}
+
+            user_bootstrap_port = prefill_cfg.get("disaggregation-bootstrap-port")
+            if user_bootstrap_port is not None:
+                try:
+                    base_bootstrap_port = int(user_bootstrap_port)
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Invalid disaggregation-bootstrap-port=%r; falling back to default bootstrap port allocation",
+                        user_bootstrap_port,
+                    )
+                else:
+                    port_allocator = NodePortAllocator(base_bootstrap_port=base_bootstrap_port)
+
+        return self.backend.endpoints_to_processes(
+            self.endpoints,
+            base_sys_port=base_sys_port,
+            port_allocator=port_allocator,
+        )
+
+    def start_head_infrastructure(self, registry: ProcessRegistry) -> ManagedProcess | None:
+        """Start head node infrastructure when required by the chosen frontend.
+
+        Dynamo frontend requires NATS+etcd for discovery/control planes.
+        SGLang frontend uses direct worker connections and does not require these services.
+        """
+        if self.config.frontend.type != "dynamo":
+            logger.info(
+                "Skipping head node infrastructure (frontend.type=%s does not require NATS/etcd)",
+                self.config.frontend.type,
+            )
+            return None
+
         logger.info("Starting head node infrastructure")
         logger.info("Head node: %s", self.runtime.nodes.head)
 
@@ -197,7 +233,8 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
 
         try:
             head_proc = self.start_head_infrastructure(registry)
-            registry.add_process(head_proc)
+            if head_proc is not None:
+                registry.add_process(head_proc)
 
             worker_procs = self.start_all_workers()
             registry.add_processes(worker_procs)
