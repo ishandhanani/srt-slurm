@@ -667,8 +667,6 @@ class SrtConfig:
                     "Aggregated mode requires profiling.aggregated to be set when profiling is enabled."
                 )
 
-
-
     @classmethod
     def from_yaml(cls, yaml_path: Path) -> "SrtConfig":
         with open(yaml_path) as f:

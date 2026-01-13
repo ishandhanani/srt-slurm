@@ -124,9 +124,9 @@ class TestGB200FP4Cluster:
                 config = load_config(str(recipe_path))
                 r = config.resources
                 total_nodes_needed = (r.prefill_nodes or 0) + (r.decode_nodes or 0) + (r.agg_nodes or 0)
-                assert total_nodes_needed <= self.RACK.NUM_NODES, (
-                    f"{recipe_path.name}: needs {total_nodes_needed} nodes, rack has {self.RACK.NUM_NODES}"
-                )
+                assert (
+                    total_nodes_needed <= self.RACK.NUM_NODES
+                ), f"{recipe_path.name}: needs {total_nodes_needed} nodes, rack has {self.RACK.NUM_NODES}"
 
     @pytest.mark.parametrize("recipe_path", RECIPES, ids=lambda p: p.name)
     def test_endpoint_allocation(self, recipe_path):
@@ -154,14 +154,14 @@ class TestGB200FP4Cluster:
                 assert len(decode_eps) == r.num_decode
 
                 for ep in prefill_eps:
-                    assert ep.total_gpus == r.gpus_per_prefill, (
-                        f"prefill endpoint {ep.index} has {ep.total_gpus} GPUs, expected {r.gpus_per_prefill}"
-                    )
+                    assert (
+                        ep.total_gpus == r.gpus_per_prefill
+                    ), f"prefill endpoint {ep.index} has {ep.total_gpus} GPUs, expected {r.gpus_per_prefill}"
 
                 for ep in decode_eps:
-                    assert ep.total_gpus == r.gpus_per_decode, (
-                        f"decode endpoint {ep.index} has {ep.total_gpus} GPUs, expected {r.gpus_per_decode}"
-                    )
+                    assert (
+                        ep.total_gpus == r.gpus_per_decode
+                    ), f"decode endpoint {ep.index} has {ep.total_gpus} GPUs, expected {r.gpus_per_decode}"
 
 
 class TestH100Cluster:
@@ -234,9 +234,9 @@ class TestH100Cluster:
                     )
 
                     for ep in [e for e in endpoints if e.mode == "prefill"]:
-                        assert ep.num_nodes == expected_nodes, (
-                            f"prefill endpoint should span {expected_nodes} nodes, got {ep.num_nodes}"
-                        )
+                        assert (
+                            ep.num_nodes == expected_nodes
+                        ), f"prefill endpoint should span {expected_nodes} nodes, got {ep.num_nodes}"
 
 
 class TestCIConfigs:
@@ -375,9 +375,9 @@ class TestQwen32BCluster:
                 for ep in decode_eps:
                     node1_decode_gpus.update(ep.gpu_indices)
 
-                assert node1_prefill_gpus.isdisjoint(node1_decode_gpus), (
-                    f"GPU overlap on node1! prefill uses {node1_prefill_gpus}, decode uses {node1_decode_gpus}"
-                )
+                assert node1_prefill_gpus.isdisjoint(
+                    node1_decode_gpus
+                ), f"GPU overlap on node1! prefill uses {node1_prefill_gpus}, decode uses {node1_decode_gpus}"
 
     def test_disagg_kv_router_cuda_visible_devices(self):
         """Processes on shared node have non-overlapping CUDA_VISIBLE_DEVICES."""
@@ -414,15 +414,20 @@ class TestQwen32BCluster:
                 all_gpus_on_node1 = set()
                 for proc in node1_processes:
                     for gpu in proc.gpu_indices:
-                        assert gpu not in all_gpus_on_node1, (
-                            f"GPU {gpu} assigned to multiple processes on {nodes[1]}!"
-                        )
+                        assert gpu not in all_gpus_on_node1, f"GPU {gpu} assigned to multiple processes on {nodes[1]}!"
                         all_gpus_on_node1.add(gpu)
 
                 # All 8 GPUs on node1 should be used
-                assert all_gpus_on_node1 == {0, 1, 2, 3, 4, 5, 6, 7}, (
-                    f"Expected all 8 GPUs used on node1, got {all_gpus_on_node1}"
-                )
+                assert all_gpus_on_node1 == {
+                    0,
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                    7,
+                }, f"Expected all 8 GPUs used on node1, got {all_gpus_on_node1}"
 
                 # Verify CUDA_VISIBLE_DEVICES strings are correct
                 for proc in node1_processes:
@@ -442,10 +447,7 @@ class TestQwen32BCluster:
                 config = load_config(str(recipe_path))
                 r = config.resources
 
-                total_gpus_needed = (
-                    r.num_prefill * r.gpus_per_prefill
-                    + r.num_decode * r.gpus_per_decode
-                )
+                total_gpus_needed = r.num_prefill * r.gpus_per_prefill + r.num_decode * r.gpus_per_decode
                 total_gpus_available = r.total_nodes * r.gpus_per_node
 
                 assert total_gpus_needed <= total_gpus_available, (

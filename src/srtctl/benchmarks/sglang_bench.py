@@ -77,4 +77,3 @@ class SGLangBenchRunner(BenchmarkRunner):
             str(concurrencies) if concurrencies else "",
             str(b.req_rate) if b.req_rate else "inf",
         ]
-

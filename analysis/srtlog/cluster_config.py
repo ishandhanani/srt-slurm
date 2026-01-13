@@ -3,8 +3,9 @@ Cluster configuration reader for SLURM settings
 """
 
 import logging
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 logger = logging.getLogger(__name__)
 

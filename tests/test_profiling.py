@@ -280,4 +280,3 @@ class TestProfilingIntegration:
 
     def test_sglang_bench_script_exists(self):
         assert (SCRIPTS_DIR / "sglang-bench" / "bench.sh").exists()
-

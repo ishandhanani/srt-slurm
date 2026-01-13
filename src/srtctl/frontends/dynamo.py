@@ -124,7 +124,6 @@ class DynamoFrontend:
                 f"if [ -f '{script_path}' ]; then bash '{script_path}'; else echo 'WARNING: {script_path} not found'; fi"
             )
 
-
         parts.append(config.dynamo.get_install_commands())
 
         if not parts:

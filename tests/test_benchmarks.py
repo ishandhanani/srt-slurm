@@ -72,9 +72,7 @@ class TestSABenchRunner:
             name="test",
             model=ModelConfig(path="/model", container="/image", precision="fp4"),
             resources=ResourceConfig(gpu_type="h100"),
-            benchmark=BenchmarkConfig(
-                type="sa-bench", isl=1024, osl=1024, concurrencies="4x8"
-            ),
+            benchmark=BenchmarkConfig(type="sa-bench", isl=1024, osl=1024, concurrencies="4x8"),
         )
         errors = runner.validate_config(config)
         assert errors == []
@@ -96,4 +94,3 @@ class TestScriptsExist:
         """MMLU script exists."""
         script = SCRIPTS_DIR / "mmlu" / "bench.sh"
         assert script.exists()
-

@@ -3,14 +3,11 @@
 
 """Tests for health check parsing (Dynamo and SGLang router)."""
 
-import pytest
-
 from srtctl.core.health import (
     WorkerHealthResult,
     check_dynamo_health,
     check_sglang_router_health,
 )
-
 
 # ============================================================================
 # Dynamo Health Check Tests
@@ -103,7 +100,7 @@ class TestDynamoHealthDisaggregated:
 
 class TestDynamoHealthAggregated:
     """Test Dynamo /health parsing for aggregated mode (backend workers).
-    
+
     In aggregated mode, workers report as "backend" and count as decode.
     Caller should pass expected_prefill=0, expected_decode=num_agg.
     """
@@ -391,9 +388,7 @@ class TestSGLangRouterHealthErrors:
 
     def test_missing_count_fields_defaults_to_zero(self):
         """Missing count fields default to 0."""
-        response = {
-            "stats": {}
-        }
+        response = {"stats": {}}
 
         result = check_sglang_router_health(response, expected_prefill=1, expected_decode=1)
 
@@ -432,4 +427,3 @@ class TestWorkerHealthResult:
 
         assert result.prefill_ready == 2
         assert result.decode_ready == 4
-
