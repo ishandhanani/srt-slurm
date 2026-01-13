@@ -72,7 +72,7 @@ for concurrency in "${CONCURRENCY_LIST[@]}"; do
     
     # Generate result filename based on mode
     if [ "$IS_DISAGGREGATED" = "true" ]; then
-        result_filename="results_concurrency_${concurrency}_gpus${TOTAL_GPUS}_ctx_${PREFILL_GPUS}_gen_${DECODE_GPUS}.json"
+        result_filename="results_concurrency_${concurrency}_gpus_${TOTAL_GPUS}_ctx_${PREFILL_GPUS}_gen_${DECODE_GPUS}.json"
     else
         result_filename="results_concurrency_${concurrency}_gpus_${TOTAL_GPUS}.json"
     fi
