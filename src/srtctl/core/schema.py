@@ -667,18 +667,7 @@ class SrtConfig:
                     "Aggregated mode requires profiling.aggregated to be set when profiling is enabled."
                 )
 
-        # Profiling requires single worker per role
-        if is_disaggregated:
-            if r.num_prefill != 1 or r.num_decode != 1:
-                raise ValidationError(
-                    f"Profiling mode requires exactly 1 prefill and 1 decode worker. "
-                    f"Got prefill_workers={r.num_prefill}, decode_workers={r.num_decode}"
-                )
-        else:
-            if r.num_agg != 1:
-                raise ValidationError(
-                    f"Profiling mode requires exactly 1 aggregated worker. Got agg_workers={r.num_agg}"
-                )
+
 
     @classmethod
     def from_yaml(cls, yaml_path: Path) -> "SrtConfig":
