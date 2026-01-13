@@ -81,12 +81,22 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
         """Compute physical process topology from endpoints (cached)."""
         # DYN_SYSTEM_PORT is parsed as i16 by dynamo runtime, so keep ports < 32768.
         # Also avoid collisions across concurrent jobs by offsetting from the job id.
+        #
+        # Note: srtctl allocates one sys_port per Process and increments sequentially from base_sys_port.
+        # Therefore, base_sys_port must reserve a sufficiently large consecutive port window per job
+        # to avoid collisions with other jobs running concurrently.
         try:
             job_id_int = int(self.runtime.job_id)
         except ValueError:
+            logger.warning("Non-numeric job_id '%s', using base sys port offset 0", self.runtime.job_id)
             job_id_int = 0
 
-        base_sys_port = 8081 + ((job_id_int % 2000) * 10)  # 8081..28071
+        sys_port_min = 8081
+        sys_port_max_i16 = 32767
+        sys_port_stride = 200  # Reserve up to 200 consecutive sys ports per job.
+        sys_port_slots = ((sys_port_max_i16 - sys_port_min) // sys_port_stride) + 1
+
+        base_sys_port = sys_port_min + ((job_id_int % sys_port_slots) * sys_port_stride)
 
         port_allocator: NodePortAllocator | None = None
         if self.config.frontend.type == "sglang" and getattr(self.backend, "type", None) == "sglang":
@@ -108,11 +118,19 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
                 else:
                     port_allocator = NodePortAllocator(base_bootstrap_port=base_bootstrap_port)
 
-        return self.backend.endpoints_to_processes(
+        processes = self.backend.endpoints_to_processes(
             self.endpoints,
             base_sys_port=base_sys_port,
             port_allocator=port_allocator,
         )
+        if len(processes) > sys_port_stride:
+            logger.warning(
+                "This job allocates %d processes, which may exceed the reserved sys_port window (%d). "
+                "Consider increasing sys_port_stride to reduce cross-job collision risk.",
+                len(processes),
+                sys_port_stride,
+            )
+        return processes
 
     def start_head_infrastructure(self, registry: ProcessRegistry) -> ManagedProcess | None:
         """Start head node infrastructure when required by the chosen frontend.

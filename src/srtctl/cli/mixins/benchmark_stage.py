@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from srtctl.core.processes import ProcessRegistry
     from srtctl.core.runtime import RuntimeContext
     from srtctl.core.schema import SrtConfig
-    from srtctl.core.topology import Endpoint
+    from srtctl.core.topology import Endpoint, Process
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,11 @@ class BenchmarkStageMixin:
     @property
     def endpoints(self) -> list["Endpoint"]:
         """Endpoint allocation topology."""
+        ...
+
+    @property
+    def backend_processes(self) -> list["Process"]:
+        """Physical process topology (provided by WorkerStageMixin / orchestrator)."""
         ...
 
     def run_benchmark(self, registry: "ProcessRegistry", stop_event: threading.Event) -> int:
