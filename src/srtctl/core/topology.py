@@ -333,7 +333,15 @@ def allocate_endpoints(
     if num_prefill > 0:
         endpoints.extend(allocate_workers_simple("prefill", num_prefill, gpus_per_prefill))
 
+    # When there's a partial allocation on the current node (gpu_offset > 0) and
+    # there are more nodes available, advance to ensure prefill and decode don't
+    # share a node. This prevents the bug where a multi-node decode worker overlaps
+    # with a partial-node prefill worker.
+    # When there are no more nodes (decode_nodes=0 config), allow sharing.
     if num_decode > 0:
+        if gpu_offset > 0 and (node_idx + 1) < len(available_nodes):
+            node_idx += 1
+            gpu_offset = 0
         endpoints.extend(allocate_workers_simple("decode", num_decode, gpus_per_decode))
 
     if num_agg > 0:

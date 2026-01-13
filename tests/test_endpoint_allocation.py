@@ -137,6 +137,84 @@ class TestAllocateEndpoints:
             assert ep.mode == "agg"
             assert ep.total_gpus == 4
 
+    def test_prefill_decode_never_share_node_partial_allocation(self):
+        """Test that prefill and decode workers are never colocated on the same node.
+
+        This tests the bug fix for the case where:
+        - 3 prefill workers with 2 GPUs each on 4-GPU nodes
+        - prefill 0: node0 (GPUs 0,1)
+        - prefill 1: node0 (GPUs 2,3) - node full, advance
+        - prefill 2: node1 (GPUs 0,1) - partial allocation
+
+        Without the fix, decode workers would start at node1, sharing with prefill 2.
+        With the fix, decode workers should start at node2.
+        """
+        endpoints = allocate_endpoints(
+            num_prefill=3,
+            num_decode=1,
+            num_agg=0,
+            gpus_per_prefill=2,
+            gpus_per_decode=32,  # 8 nodes * 4 GPUs/node
+            gpus_per_agg=0,
+            gpus_per_node=4,
+            available_nodes=tuple(f"node{i}" for i in range(11)),  # Plenty of nodes
+        )
+
+        # Get prefill and decode endpoints
+        prefill_eps = [e for e in endpoints if e.mode == "prefill"]
+        decode_eps = [e for e in endpoints if e.mode == "decode"]
+
+        assert len(prefill_eps) == 3
+        assert len(decode_eps) == 1
+
+        # Collect all nodes used by prefill workers
+        prefill_nodes = set()
+        for ep in prefill_eps:
+            prefill_nodes.update(ep.nodes)
+
+        # Collect all nodes used by decode workers
+        decode_nodes = set()
+        for ep in decode_eps:
+            decode_nodes.update(ep.nodes)
+
+        # Critical assertion: prefill and decode nodes must not overlap
+        overlap = prefill_nodes & decode_nodes
+        assert len(overlap) == 0, f"Prefill and decode workers share nodes: {overlap}"
+
+        # Verify expected allocation
+        assert prefill_eps[0].nodes == ("node0",)
+        assert prefill_eps[0].gpu_indices == frozenset({0, 1})
+        assert prefill_eps[1].nodes == ("node0",)
+        assert prefill_eps[1].gpu_indices == frozenset({2, 3})
+        assert prefill_eps[2].nodes == ("node1",)
+        assert prefill_eps[2].gpu_indices == frozenset({0, 1})
+
+        # Decode should start at node2, not node1
+        assert decode_eps[0].nodes[0] == "node2"
+
+    def test_prefill_decode_never_share_node_single_partial_prefill(self):
+        """Test prefill/decode separation when only one prefill worker uses partial node."""
+        endpoints = allocate_endpoints(
+            num_prefill=1,
+            num_decode=1,
+            num_agg=0,
+            gpus_per_prefill=2,
+            gpus_per_decode=4,
+            gpus_per_agg=0,
+            gpus_per_node=4,
+            available_nodes=("node0", "node1"),
+        )
+
+        prefill_eps = [e for e in endpoints if e.mode == "prefill"]
+        decode_eps = [e for e in endpoints if e.mode == "decode"]
+
+        # Prefill on node0 (GPUs 0,1), decode should be on node1 (not sharing node0)
+        assert prefill_eps[0].nodes == ("node0",)
+        assert prefill_eps[0].gpu_indices == frozenset({0, 1})
+
+        assert decode_eps[0].nodes == ("node1",)
+        assert decode_eps[0].gpu_indices == frozenset({0, 1, 2, 3})
+
 
 class TestEndpointsToProcesses:
     """Tests for endpoints_to_processes function."""
