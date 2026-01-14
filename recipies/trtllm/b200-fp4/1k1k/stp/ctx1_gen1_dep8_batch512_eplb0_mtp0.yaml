@@ -2,7 +2,7 @@ name: "ctx1_gen1_dep8_batch512_eplb0_mtp0"
 
 model:
   path: "dsr1"
-  container: "jwillthomson/dynamo-0.8.0_trtllm-1.2.0rc6-post1-x86-router-patch"
+  container: "jwillthomson/dynamo-0.8.0_trtllm-1.2.0rc6-post1-router-patch-x86"
   precision: "fp4"
 
 resources:
