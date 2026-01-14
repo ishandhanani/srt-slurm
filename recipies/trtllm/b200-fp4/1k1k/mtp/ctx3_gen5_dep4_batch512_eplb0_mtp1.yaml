@@ -12,7 +12,8 @@ resources:
   gpus_per_prefill: 4
 
   decode_workers: 5
-  decode_nodes: 5
+  decode_nodes: 3
+  gpus_per_decode: 4
 
   gpus_per_node: 8
 
