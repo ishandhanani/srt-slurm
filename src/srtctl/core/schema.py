@@ -353,12 +353,12 @@ class ResourceConfig:
     @property
     def prefill_gpus(self) -> int:
         """Total GPUs used by all prefill workers."""
-        return (self.prefill_nodes or 0) * self.gpus_per_node
+        return self.num_prefill * self.gpus_per_prefill
 
     @property
     def decode_gpus(self) -> int:
         """Total GPUs used by all decode workers."""
-        return (self.decode_nodes or 0) * self.gpus_per_node
+        return self.num_decode * self.gpus_per_decode
 
     Schema: ClassVar[type[Schema]] = Schema
 
