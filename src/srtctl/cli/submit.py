@@ -96,6 +96,7 @@ def generate_minimal_sbatch_script(
         timestamp=timestamp,
         use_gpus_per_node_directive=get_srtslurm_setting("use_gpus_per_node_directive", True),
         use_segment_sbatch_directive=get_srtslurm_setting("use_segment_sbatch_directive", True),
+        use_exclusive_sbatch_directive=get_srtslurm_setting("use_exclusive_sbatch_directive", False),
         sbatch_directives=config.sbatch_directives,
         container_image=container_image,
         srtctl_source=str(srtctl_source.resolve()),

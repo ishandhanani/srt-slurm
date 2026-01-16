@@ -110,6 +110,7 @@ gpus_per_node: 4
 # SLURM directive compatibility
 use_gpus_per_node_directive: true # Set false if cluster doesn't support --gpus-per-node
 use_segment_sbatch_directive: true # Set false if cluster doesn't support --segment
+use_exclusive_sbatch_directive: false # Set true if cluster requires --exclusive
 
 # Path to srtctl repo root (auto-set by make setup)
 srtctl_root: "/path/to/srtctl"

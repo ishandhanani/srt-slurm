@@ -12,7 +12,8 @@ default_time_limit: "04:00:00"
 use_gpus_per_node_directive: true  # Default: true
 # Set to false if your cluster doesn't support --segment for segment-based scheduling
 use_segment_sbatch_directive: true  # Default: true
-
+# Set to true if your cluster requires --exclusive to be set.
+use_exclusive_sbatch_directive: false # Default: false
 # Container registry
 default_container: "/shared/containers/sglang-latest.sqsh"
 containers:

@@ -14,6 +14,9 @@
 {% if use_segment_sbatch_directive %}
 #SBATCH --segment={{ total_nodes }}
 {% endif %}
+{% if use_exclusive_sbatch_directive %}
+#SBATCH --exclusive
+{% endif %}
 #SBATCH --account={{ account }}
 #SBATCH --time={{ time_limit }}
 #SBATCH --output={{ srtctl_source }}/outputs/%j/logs/sweep_%j.log

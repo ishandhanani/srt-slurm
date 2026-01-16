@@ -35,3 +35,13 @@ use_segment_sbatch_directive: false
 ```
 
 The `--segment` directive ensures all allocated nodes are within the same network segment/switch for optimal interconnect performance between prefill and decode workers. If your cluster doesn't support it, SLURM will still allocate nodes but may scatter them across the cluster.
+
+## Exclusive Node Access
+
+Some clusters require jobs to explicitly request exclusive access to nodes. If your cluster requires this, enable the `--exclusive` directive:
+
+```yaml
+use_exclusive_sbatch_directive: true
+```
+
+This adds `#SBATCH --exclusive` to the job script, ensuring your job has sole access to the allocated nodes. This is often required on clusters where GPU jobs must not share nodes with other jobs.

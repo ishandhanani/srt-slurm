@@ -62,6 +62,7 @@ class ClusterConfig:
     network_interface: str | None = None
     use_gpus_per_node_directive: bool = True
     use_segment_sbatch_directive: bool = True
+    use_exclusive_sbatch_directive: bool = False
     srtctl_root: str | None = None
     model_paths: dict[str, str] | None = None
     containers: dict[str, str] | None = None
