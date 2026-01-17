@@ -2,7 +2,7 @@ name: "ctx10_gen1_dep8_batch256_eplb0_mtp1"
 
 model:
   path: "dsr1"
-  container: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0"
+  container: "nvcr.io#nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0"
   precision: "fp4"
 
 resources:
