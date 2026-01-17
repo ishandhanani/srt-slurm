@@ -2,7 +2,7 @@ name: "ctx3_gen5_dep4_batch512_eplb0_mtp1"
 
 model:
   path: "dsr1"
-  container: "jwillthomson/dynamo-0.8.0_trtllm-1.2.0rc6-post1-router-patch-x86"
+  container: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0"
   precision: "fp4"
 
 resources:

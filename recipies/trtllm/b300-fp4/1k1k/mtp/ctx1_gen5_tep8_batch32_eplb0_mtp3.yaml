@@ -2,7 +2,7 @@ name: "ctx1_gen5_tep8_batch32_eplb0_mtp3"
 
 model:
   path: "dsr1"
-  container: "jwillthomson/dynamo-0.8.0_trtllm-1.2.0rc6-post1-router-patch-x86"
+  container: "nvcr.io/nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0"
   precision: "fp4"
 
 resources:
@@ -122,7 +122,7 @@ benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 1024
-  concurrencies: "5x10x20x25x60x120x200"
+  concurrencies: "10x20x25x60x120x200"
   req_rate: "inf"
 
 frontend:
