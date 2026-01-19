@@ -1,0 +1,120 @@
+# GB200 FP8 Max Throughput Configuration
+
+name: "bs128-1p1d-h200-fp8"
+
+model:
+  path: "dsfp8"
+  container: "ishandhanani/sglang:rt-cu13-yamy128k-full"
+  precision: "fp8"
+
+resources:
+  gpu_type: "h200"
+  prefill_nodes: 1
+  prefill_workers: 1
+  decode_nodes: 1
+  decode_workers: 1
+  gpus_per_node: 8
+
+backend:
+
+  # Prefill-specific environment variables
+  prefill_environment:
+    SGLANG_DG_CACHE_DIR: "/configs/dg-10212025"
+
+  # Decode-specific environment variables
+  decode_environment:
+    SGLANG_DG_CACHE_DIR: "/configs/dg-10212025"
+
+  sglang_config:
+    prefill:
+      # Model configuration
+      served-model-name: "deepseek-ai/DeepSeek-R1"
+      model-path: "/model/"
+      skip-tokenizer-init: true
+      trust-remote-code: true
+
+      # Parallelism
+      tp-size: 8
+      dp-size: 1
+      ep-size: 8 
+      enable-dp-attention: false
+
+      # KV cache and attention
+      attention-backend: "flashinfer"
+      kv-cache-dtype: "fp8_e4m3"
+
+      # Radix cache disabled
+      disable-radix-cache: true
+
+      # Other flags
+      # stream-interval: 50
+      max-running-requests: 16  # sum of all dp
+      context-length: 9300
+      watchdog-timeout: 1000000
+      # disable-shared-experts-fusion: true
+      # eplb-algorithm: "deepseek"
+      disaggregation-bootstrap-port: 30001
+
+      # Prefill-specific mode
+      disaggregation-mode: "prefill"
+
+      # Memory and token limits
+      mem-fraction-static: 0.85
+      max-total-tokens: 131136
+      max-prefill-tokens: 131136
+      chunked-prefill-size: -1
+
+      # Request handling
+      load-balance-method: "round_robin"
+
+
+    decode:
+      # Model configuration
+      served-model-name: "deepseek-ai/DeepSeek-R1"
+      model-path: "/model/"
+      skip-tokenizer-init: true
+      trust-remote-code: true
+
+      # Parallelism
+      tp-size: 8
+      dp-size: 8
+      ep-size: 8
+      enable-dp-attention: true
+
+      # KV cache and attention
+      attention-backend: "flashinfer"
+      kv-cache-dtype: "fp8_e4m3"
+
+      # Radix cache disabled
+      disable-radix-cache: true
+
+      # Other flags
+      # stream-interval: 50
+      # decode-log-interval: 1000
+      max-running-requests: 256
+      context-length: 9300
+      watchdog-timeout: 1000000
+      # disable-shared-experts-fusion: true
+      # eplb-algorithm: "deepseek"
+      disaggregation-bootstrap-port: 30001
+
+      # Decode-specific mode
+      disaggregation-mode: "decode"
+
+      # Memory and token limits
+      mem-fraction-static: 0.85
+      chunked-prefill-size: -1
+
+      max-total-tokens: 297600
+
+      # CUDA graphs
+      cuda-graph-bs: [1, 2, 4, 8, 16, 32, 64, 128, 256]
+      cuda-graph-max-bs: 256
+
+benchmark:
+  type: "sa-bench"
+  isl: 8192
+  osl: 1024
+  concurrencies: "64x128x256"
+  req_rate: "inf"
+

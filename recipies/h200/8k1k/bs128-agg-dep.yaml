@@ -1,0 +1,70 @@
+# GB200 FP8 Max Throughput Configuration
+
+name: "h200-fp8-agg-dep"
+
+model:
+  path: "dsfp8"
+  container: "ishandhanani/sglang:rt-cu13-yamy128k-full"
+  precision: "fp8"
+
+resources:
+  gpu_type: "h200"
+  agg_nodes: 1
+  agg_workers: 1
+  gpus_per_node: 8
+
+backend:
+
+  # Prefill-specific environment variables
+  prefill_environment:
+    SGLANG_DG_CACHE_DIR: "/configs/dg-10212025"
+
+  # Decode-specific environment variables
+  decode_environment:
+    SGLANG_DG_CACHE_DIR: "/configs/dg-10212025"
+
+  sglang_config:
+    aggregated:
+      # Model configuration
+      served-model-name: "deepseek-ai/DeepSeek-R1"
+      model-path: "/model/"
+      skip-tokenizer-init: true
+      trust-remote-code: true
+
+      # Parallelism
+      tp-size: 8
+      dp-size: 8
+      ep-size: 8 
+      enable-dp-attention: true
+
+      # KV cache and attention
+      attention-backend: "flashinfer"
+      kv-cache-dtype: "fp8_e4m3"
+
+      # Radix cache disabled
+      disable-radix-cache: true
+
+      # Other flags
+      # stream-interval: 50
+      max-running-requests: 128  # sum of all dp
+      context-length: 9300
+      watchdog-timeout: 1000000
+      # disable-shared-experts-fusion: true
+      # eplb-algorithm: "deepseek"
+
+      # Memory and token limits
+      mem-fraction-static: 0.95
+      max-total-tokens: 148800
+      chunked-prefill-size: -1
+
+      # CUDA graphs
+      cuda-graph-bs: [1, 2, 4, 8, 16, 32, 64, 128 ]
+      cuda-graph-max-bs: 128
+
+benchmark:
+  type: "sa-bench"
+  isl: 8192
+  osl: 1024
+  concurrencies: "4x8"
+  req_rate: "inf"
+
