@@ -12,27 +12,71 @@
 _resolve_ip() {
     local network_interface=$1
 
+    _is_bad_ip() {
+        local ip=$1
+        case "$ip" in
+            ""|0.0.0.0|127.*|169.254.*) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
+
+    _is_private_ip() {
+        local ip=$1
+        case "$ip" in
+            10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
+
+    _select_best_ip() {
+        # Prefer RFC1918 IPs, avoid loopback and link-local.
+        local ip
+        for ip in "$@"; do
+            if _is_bad_ip "$ip"; then
+                continue
+            fi
+            if _is_private_ip "$ip"; then
+                echo "$ip"
+                return 0
+            fi
+        done
+        for ip in "$@"; do
+            if _is_bad_ip "$ip"; then
+                continue
+            fi
+            echo "$ip"
+            return 0
+        done
+        return 1
+    }
+
     # Method 1: Use specific interface if provided
     if [ -n "$network_interface" ]; then
-        ip=$(ip addr show $network_interface 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+        ips=$(ip addr show "$network_interface" 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+        if [ -n "$ips" ]; then
+            ip=$(_select_best_ip $ips)
+            if [ -n "$ip" ]; then
+                echo "$ip"
+                return 0
+            fi
+        fi
+    fi
+
+    # Method 2: Use ip route to find default source IP
+    ip=$(ip route get 8.8.8.8 2>/dev/null | awk -F'src ' 'NR==1{split($2,a," ");print a[1]}')
+    if [ -n "$ip" ] && ! _is_bad_ip "$ip"; then
+        echo "$ip"
+        return 0
+    fi
+
+    # Method 3: Use hostname -I (prefer RFC1918, avoid loopback/link-local)
+    ips=$(hostname -I 2>/dev/null)
+    if [ -n "$ips" ]; then
+        ip=$(_select_best_ip $ips)
         if [ -n "$ip" ]; then
             echo "$ip"
             return 0
         fi
-    fi
-
-    # Method 2: Use hostname -I (gets first non-loopback IP)
-    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-    if [ -n "$ip" ]; then
-        echo "$ip"
-        return 0
-    fi
-
-    # Method 3: Use ip route to find default source IP
-    ip=$(ip route get 8.8.8.8 2>/dev/null | awk -F'src ' 'NR==1{split($2,a," ");print a[1]}')
-    if [ -n "$ip" ]; then
-        echo "$ip"
-        return 0
     fi
 
     return 1
@@ -64,27 +108,69 @@ get_node_ip() {
 
     # Create inline script with the resolution logic
     local ip_script="
+        _is_bad_ip() {
+            ip=\$1
+            case \"\$ip\" in
+                \"\"|0.0.0.0|127.*|169.254.*) return 0 ;;
+                *) return 1 ;;
+            esac
+        }
+
+        _is_private_ip() {
+            ip=\$1
+            case \"\$ip\" in
+                10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) return 0 ;;
+                *) return 1 ;;
+            esac
+        }
+
+        _select_best_ip() {
+            for ip in \"\$@\"; do
+                if _is_bad_ip \"\$ip\"; then
+                    continue
+                fi
+                if _is_private_ip \"\$ip\"; then
+                    echo \"\$ip\"
+                    return 0
+                fi
+            done
+            for ip in \"\$@\"; do
+                if _is_bad_ip \"\$ip\"; then
+                    continue
+                fi
+                echo \"\$ip\"
+                return 0
+            done
+            return 1
+        }
+
         # Method 1: Use specific interface if provided
         if [ -n \"$network_interface\" ]; then
-            ip=\$(ip addr show $network_interface 2>/dev/null | grep 'inet ' | awk '{print \$2}' | cut -d'/' -f1)
+            ips=\$(ip addr show $network_interface 2>/dev/null | grep 'inet ' | awk '{print \$2}' | cut -d'/' -f1)
+            if [ -n \"\$ips\" ]; then
+                ip=\$(_select_best_ip \$ips)
+                if [ -n \"\$ip\" ]; then
+                    echo \"\$ip\"
+                    exit 0
+                fi
+            fi
+        fi
+
+        # Method 2: Use ip route to find default source IP
+        ip=\$(ip route get 8.8.8.8 2>/dev/null | awk -F'src ' 'NR==1{split(\$2,a,\" \");print a[1]}')
+        if [ -n \"\$ip\" ] && ! _is_bad_ip \"\$ip\"; then
+            echo \"\$ip\"
+            exit 0
+        fi
+
+        # Method 3: Use hostname -I (prefer RFC1918, avoid loopback/link-local)
+        ips=\$(hostname -I 2>/dev/null)
+        if [ -n \"\$ips\" ]; then
+            ip=\$(_select_best_ip \$ips)
             if [ -n \"\$ip\" ]; then
                 echo \"\$ip\"
                 exit 0
             fi
-        fi
-
-        # Method 2: Use hostname -I (gets first non-loopback IP)
-        ip=\$(hostname -I 2>/dev/null | awk '{print \$1}')
-        if [ -n \"\$ip\" ]; then
-            echo \"\$ip\"
-            exit 0
-        fi
-
-        # Method 3: Use ip route to find default source IP
-        ip=\$(ip route get 8.8.8.8 2>/dev/null | awk -F'src ' 'NR==1{split(\$2,a,\" \");print a[1]}')
-        if [ -n \"\$ip\" ]; then
-            echo \"\$ip\"
-            exit 0
         fi
 
         exit 1
