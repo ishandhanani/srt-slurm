@@ -1,4 +1,4 @@
-name: "ctx1_gen4_tep8_batch1_eplb0_mtp0"
+name: "ctx1_gen3_tep8_batch16_eplb0_mtp0"
 
 model:
   path: "dsr1"
@@ -11,8 +11,8 @@ resources:
   prefill_workers: 1
   gpus_per_prefill: 2
 
-  decode_workers: 4
-  decode_nodes: 4
+  decode_workers: 3
+  decode_nodes: 3
 
   gpus_per_node: 8
 
@@ -54,9 +54,9 @@ backend:
 
   trtllm_config:
     prefill:
-      max_batch_size: 8
-      max_num_tokens: 10240
-      max_seq_len: 1044
+      max_batch_size: 2
+      max_num_tokens: 16896
+      max_seq_len: 8232
       tensor_parallel_size: 2
       moe_expert_parallel_size: 2
       enable_attention_dp: true
@@ -80,13 +80,17 @@ backend:
       enable_attention_dp: false
       enable_lm_head_tp_in_adp: false
       pipeline_parallel_size: 1
-      max_batch_size: 1
-      max_num_tokens: 1
-      max_seq_len: 2068
+      max_batch_size: 16
+      max_num_tokens: 16
+      max_seq_len: 9256
       cuda_graph_config:
         enable_padding: true
         batch_sizes:
         - 1
+        - 2
+        - 4
+        - 8
+        - 16
       print_iter_log: true
       kv_cache_config:
         enable_block_reuse: false
@@ -104,9 +108,9 @@ backend:
 
 benchmark:
   type: "sa-bench"
-  isl: 1024
+  isl: 8192
   osl: 1024
-  concurrencies: "6"
+  concurrencies: "63"
   req_rate: "inf"
 
 frontend:
