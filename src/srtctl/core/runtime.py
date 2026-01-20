@@ -179,6 +179,13 @@ class RuntimeContext:
         if SCRIPTS_DIR.exists():
             container_mounts[SCRIPTS_DIR.resolve()] = Path("/srtctl-benchmarks")
 
+        # Add cluster-level mounts from srtslurm.yaml
+        cluster_mounts = get_srtslurm_setting("default_mounts")
+        if cluster_mounts:
+            for host_path, container_path in cluster_mounts.items():
+                expanded_host = os.path.expandvars(host_path)
+                container_mounts[Path(expanded_host).resolve()] = Path(container_path)
+
         # Add extra mounts from config
         if config.extra_mount:
             for mount_spec in config.extra_mount:

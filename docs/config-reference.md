@@ -817,6 +817,30 @@ The following mounts are always added automatically:
 | `configs/` directory   | `/configs`           | NATS, etcd binaries          |
 | Benchmark scripts      | `/srtctl-benchmarks` | Bundled benchmark scripts    |
 
+### Cluster-Level Mounts
+
+You can also define cluster-wide mounts in `srtslurm.yaml` using the `default_mounts` field. These are applied to all jobs on the cluster, after the built-in defaults but before job-level mounts.
+
+```yaml
+# In srtslurm.yaml
+default_mounts:
+  "/cluster/special/libs": "/opt/libs"
+  "$SCRATCH": "/scratch"
+```
+
+Environment variables (e.g., `$SCRATCH`, `$HOME`) are expanded. This is useful for mounting cluster-specific paths that are required by certain images without adding them to every job config.
+
+### Mount Priority
+
+Mounts have the following priority (highest to lowest):
+
+1. **Job-level `container_mounts`** - FormattablePath dict (highest priority)
+2. **Job-level `extra_mount`** - simple `host:container` strings
+3. **Cluster-level** - `default_mounts` from `srtslurm.yaml`
+4. **Built-in defaults** - model, logs, configs, benchmark scripts (lowest priority)
+
+Job-level mounts always take precedence over cluster-level and built-in defaults.
+
 ---
 
 ## environment

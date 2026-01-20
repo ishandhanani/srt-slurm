@@ -67,6 +67,9 @@ class ClusterConfig:
     model_paths: dict[str, str] | None = None
     containers: dict[str, str] | None = None
     cloud: dict[str, str] | None = None
+    # Cluster-level container mounts (host_path -> container_path)
+    # Applied to all jobs on this cluster, useful for cluster-specific paths
+    default_mounts: dict[str, str] | None = None
 
     Schema: ClassVar[type[Schema]] = Schema
 
