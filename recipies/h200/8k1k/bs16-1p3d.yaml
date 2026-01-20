@@ -36,12 +36,10 @@ backend:
       # Parallelism
       tp-size: 8
       dp-size: 1
-      ep-size: 8 
-      enable-dp-attention: false
+      ep-size: 1 
 
       # KV cache and attention
       attention-backend: "flashinfer"
-      kv-cache-dtype: "fp8_e4m3"
 
       # Radix cache disabled
       disable-radix-cache: true
@@ -49,24 +47,19 @@ backend:
       # Other flags
       # stream-interval: 50
       max-running-requests: 16
-      context-length: 9300
-      watchdog-timeout: 1000000
-      # disable-shared-experts-fusion: true
-      # eplb-algorithm: "deepseek"
-      disaggregation-bootstrap-port: 30001
+      
 
       # Prefill-specific mode
+      disaggregation-bootstrap-port: 30001
       disaggregation-mode: "prefill"
 
       # Memory and token limits
-      mem-fraction-static: 0.85
-      max-total-tokens: 131136
-      max-prefill-tokens: 131136
-      chunked-prefill-size: -1
+      mem-fraction-static: 0.82
+      max-prefill-tokens: 32768
+      chunked-prefill-size: 32768
 
       # Request handling
       load-balance-method: "round_robin"
-
 
     decode:
       # Model configuration
@@ -78,36 +71,22 @@ backend:
       # Parallelism
       tp-size: 8
       dp-size: 1
-      ep-size: 8
-      enable-dp-attention: false
+      ep-size: 1
 
       # KV cache and attention
       attention-backend: "flashinfer"
-      kv-cache-dtype: "fp8_e4m3"
-
-      # Radix cache disabled
-      disable-radix-cache: true
 
       # Other flags
-      # stream-interval: 50
-      # decode-log-interval: 1000
-      max-running-requests: 32
-      context-length: 9300
-      watchdog-timeout: 1000000
-      # disable-shared-experts-fusion: true
-      # eplb-algorithm: "deepseek"
-      disaggregation-bootstrap-port: 30001
+      disable-radix-cache: true
+      stream-interval: 10
 
-      # Decode-specific mode
+      # Disagg
+      disaggregation-bootstrap-port: 30001
       disaggregation-mode: "decode"
 
       # Memory and token limits
-      mem-fraction-static: 0.85
-      chunked-prefill-size: -1
-
-      max-total-tokens: 297600
-      # CUDA graphs
-      cuda-graph-bs: [1, 2, 4, 8, 16, 32]
+      mem-fraction-static: 0.82
+      max-running-requests: 32
       cuda-graph-max-bs: 32
 
 benchmark:

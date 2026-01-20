@@ -39,32 +39,26 @@ backend:
 
       # KV cache and attention
       attention-backend: "flashinfer"
-      kv-cache-dtype: "fp8_e4m3"
 
       # Radix cache disabled
       disable-radix-cache: true
 
       # Other flags
-      # stream-interval: 50
-      max-running-requests: 128  # sum of all dp
-      context-length: 9300
-      watchdog-timeout: 1000000
-      # disable-shared-experts-fusion: true
-      # eplb-algorithm: "deepseek"
+      stream-interval: 10
+      max-running-requests: 256  # sum of all dp
 
       # Memory and token limits
-      mem-fraction-static: 0.95
-      max-total-tokens: 148800
-      chunked-prefill-size: -1
+      mem-fraction-static: 0.82
+      max-prefill-tokens: 32768
+      chunked-prefill-size: 32768
 
       # CUDA graphs
-      cuda-graph-bs: [1, 2, 4, 8, 16, 32, 64, 128 ]
-      cuda-graph-max-bs: 128
+      cuda-graph-max-bs: 256
 
 benchmark:
   type: "sa-bench"
   isl: 8192
   osl: 1024
-  concurrencies: "4x8"
+  concurrencies: "4x16x32x64x128x256"
   req_rate: "inf"
 
