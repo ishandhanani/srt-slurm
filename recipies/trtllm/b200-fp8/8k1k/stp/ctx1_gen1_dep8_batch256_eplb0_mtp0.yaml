@@ -1,4 +1,4 @@
-name: ctx1_gen1_dep8_batch128_eplb0_mtp0
+name: ctx1_gen1_dep8_batch256_eplb0_mtp0
 
 model:
   path: "dsr1-fp8"
@@ -74,14 +74,14 @@ backend:
         max_tokens_in_buffer: 8320
       cuda_graph_config:
         enable_padding: true
-        max_batch_size: 128
+        max_batch_size: 256
       disable_overlap_scheduler: false
       enable_attention_dp: true
       kv_cache_config:
         dtype: fp8
         enable_block_reuse: false
         free_gpu_memory_fraction: 0.8
-      max_batch_size: 128
+      max_batch_size: 256
       max_num_tokens: 512
       max_seq_len: 9344
       moe_config:
@@ -97,7 +97,7 @@ benchmark:
   type: "sa-bench"
   isl: 8192
   osl: 1024
-  concurrencies: [128]
+  concurrencies: [256]
   req_rate: "inf"
 
 frontend:
