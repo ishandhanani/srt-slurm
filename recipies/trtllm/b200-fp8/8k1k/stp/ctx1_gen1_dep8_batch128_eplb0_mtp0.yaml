@@ -1,7 +1,7 @@
-name: "ctx1_gen1_dep8_batch128_eplb0_mtp0"
+name: ctx1_gen1_dep8_batch128_eplb0_mtp0
 
 model:
-  path: "dsr1"
+  path: "dsr1-fp8"
   container: "nvcr.io#nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0"
   precision: "fp8"
 
@@ -9,9 +9,11 @@ resources:
   gpu_type: "b200"
   prefill_nodes: 1
   prefill_workers: 1
+  gpus_per_prefill: 8
 
   decode_workers: 1
   decode_nodes: 1
+  gpus_per_decode: 8
 
   gpus_per_node: 8
 
@@ -34,6 +36,7 @@ backend:
     OMPI_MCA_coll_ucc_enable: "0"
     TLLM_ALL_RANK_LOG: "1"
     TLLM_LOG_LEVEL: "INFO"
+    TRTLLM_ENABLE_PDL: "1"
     TRTLLM_SERVER_DISABLE_GC: "1"
     TRTLLM_WORKER_DISABLE_GC: "1"
     UCX_CUDA_IPC_ENABLE_MNNVL: "n"
@@ -89,15 +92,20 @@ backend:
       stream_interval: 20
       tensor_parallel_size: 8
 
+
 benchmark:
   type: "sa-bench"
   isl: 8192
   osl: 1024
-  concurrencies: "128"
+  concurrencies: [128]
   req_rate: "inf"
 
 frontend:
   type: "dynamo"
+
+health_check:
+  max_attempts: 360
+  interval_seconds: 10
 
 dynamo:
   install: false
