@@ -12,13 +12,13 @@ ISL=$2
 OSL=$3
 CONCURRENCIES=$4
 REQ_RATE=${5:-inf}
+MODEL_PATH=${6:-/model/}
 
 # Parse endpoint into host:port
 HOST=$(echo "$ENDPOINT" | sed 's|http://||' | cut -d: -f1)
 PORT=$(echo "$ENDPOINT" | sed 's|http://||' | cut -d: -f2 | cut -d/ -f1)
 
 MODEL_NAME="deepseek-ai/DeepSeek-R1"
-MODEL_PATH="/model/"
 WORK_DIR="$(dirname "$0")"
 
 echo "SA-Bench Config: endpoint=${ENDPOINT}; isl=${ISL}; osl=${OSL}; concurrencies=${CONCURRENCIES}; req_rate=${REQ_RATE}"
