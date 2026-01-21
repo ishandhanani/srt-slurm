@@ -2,7 +2,7 @@ name: "bs4-1p7d-h200-fp8"
 
 model:
   path: "dsfp8"
-  container: "ishandhanani/sglang:rt-cu13-yamy128k-full"
+  container: "sglang:dev-cu13"
   precision: "fp8"
 
 resources:
@@ -50,6 +50,7 @@ backend:
       # Prefill-specific mode
       disaggregation-bootstrap-port: 30001
       disaggregation-mode: "prefill"
+      disaggregation-transfer-backend: nixl
 
       # Memory and token limits
       mem-fraction-static: 0.82
@@ -81,6 +82,7 @@ backend:
       # Disagg
       disaggregation-bootstrap-port: 30001
       disaggregation-mode: "decode"
+      disaggregation-transfer-backend: nixl
 
       # Memory and token limits
       mem-fraction-static: 0.82

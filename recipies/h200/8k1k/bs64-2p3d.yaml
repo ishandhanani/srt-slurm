@@ -2,7 +2,7 @@ name: "bs64-2p3d-h200-fp8"
 
 model:
   path: "dsfp8"
-  container: "ishandhanani/sglang:rt-cu13-yamy128k-full"
+  container: "sglang:dev-cu13"
   precision: "fp8"
 
 resources:
@@ -50,6 +50,7 @@ backend:
       # Prefill-specific mode
       disaggregation-bootstrap-port: 30001
       disaggregation-mode: "prefill"
+      disaggregation-transfer-backend: nixl
 
       # Memory and token limits
       mem-fraction-static: 0.82
@@ -81,7 +82,10 @@ backend:
       # Disagg
       disaggregation-bootstrap-port: 30001
       disaggregation-mode: "decode"
+      disaggregation-transfer-backend: nixl
 
+      context-length: 72000
+      max-total-tokens: 128000 
       # Memory and token limits
       mem-fraction-static: 0.82
       max-running-requests: 128
@@ -93,4 +97,3 @@ benchmark:
   osl: 1024
   concurrencies: "32x64x128"
   req_rate: "inf"
-

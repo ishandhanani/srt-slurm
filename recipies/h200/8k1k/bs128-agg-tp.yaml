@@ -2,7 +2,7 @@ name: "agg-tp-h200-fp8"
 
 model:
   path: "dsfp8"
-  container: "ishandhanani/sglang:rt-cu13-yamy128k-full"
+  container: "sglang:dev-cu13"
   precision: "fp8"
 
 resources:
