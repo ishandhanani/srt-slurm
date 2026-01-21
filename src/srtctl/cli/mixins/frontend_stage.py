@@ -146,6 +146,9 @@ class FrontendStageMixin:
             container_image=str(self.runtime.container_image),
             container_mounts=self.runtime.container_mounts,
             use_bash_wrapper=False,  # Already wrapped in bash -c
+            srun_options={
+                "container-remap-root": "",
+            },
         )
 
         return ManagedProcess(

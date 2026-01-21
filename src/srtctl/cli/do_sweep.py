@@ -135,7 +135,7 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
 
     def _print_connection_info(self) -> None:
         """Print srun commands for connecting to nodes."""
-        container_args = f"--container-image={self.runtime.container_image}"
+        container_args = f"--container-image={self.runtime.container_image} --container-remap-root"
         mounts_str = ",".join(f"{src}:{dst}" for src, dst in self.runtime.container_mounts.items())
         if mounts_str:
             container_args += f" --container-mounts={mounts_str}"

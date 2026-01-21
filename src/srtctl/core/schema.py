@@ -585,7 +585,7 @@ class DynamoConfig:
         if self.version is not None:
             return (
                 f"echo 'Installing dynamo {self.version}...' && "
-                f"pip install --quiet ai-dynamo-runtime=={self.version} ai-dynamo=={self.version} && "
+                f"pip install --break-system-packages --quiet ai-dynamo-runtime=={self.version} ai-dynamo=={self.version} && "
                 f"echo 'Dynamo {self.version} installed'"
             )
 
