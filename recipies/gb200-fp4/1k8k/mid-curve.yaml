@@ -56,7 +56,7 @@ backend:
     SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
     SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
     SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK: "1024"
-    SGLANG_CUTEDSL_MOE_NVFP4_DISPATCH: "1"
+    SGLANG_MOE_NVFP4_DISPATCH: "1"
     SGLANG_FLASHINFER_FP4_GEMM_BACKEND: "cutlass"
 
   sglang_config:
@@ -82,7 +82,7 @@ backend:
       stream-interval: 50
       decode-log-interval: 1000
       watchdog-timeout: 1000000
-      context-length: 2176
+      context-length: 9200
       disable-shared-experts-fusion: true
       eplb-algorithm: "deepseek"
       disaggregation-bootstrap-port: 30001
@@ -132,7 +132,7 @@ backend:
       stream-interval: 50
       decode-log-interval: 1000
       watchdog-timeout: 1000000
-      context-length: 2176
+      context-length: 9200
       disable-shared-experts-fusion: true
       eplb-algorithm: "deepseek"
       disaggregation-bootstrap-port: 30001
@@ -172,6 +172,6 @@ backend:
 benchmark:
   type: "sa-bench"
   isl: 1024
-  osl: 1024
-  concurrencies: "1x128x512x2048x4096x8192x12000x15000"
+  osl: 8192
+  concurrencies: "1x128x512x2048x4096x8192"
   req_rate: "inf"

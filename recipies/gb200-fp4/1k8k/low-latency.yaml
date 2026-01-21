@@ -32,7 +32,7 @@ backend:
     NCCL_CUMEM_ENABLE: "1"
     SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
     SGLANG_ENABLE_JIT_DEEPGEMM: "false"
-    SGLANG_ENABLE_FLASHINFER_GEMM: "true" #instead of SGLANG_FLASHINFER_FP4_GEMM_BACKEND
+    SGLANG_ENABLE_FLASHINFER_GEMM: "true" 
 
   decode_environment:
     TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
@@ -51,7 +51,7 @@ backend:
     NCCL_CUMEM_ENABLE: "1"
     SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
     SGLANG_ENABLE_JIT_DEEPGEMM: "false"
-    SGLANG_ENABLE_FLASHINFER_GEMM: "true" #instead of SGLANG_FLASHINFER_FP4_GEMM_BACKEND
+    SGLANG_ENABLE_FLASHINFER_GEMM: "true" 
 
   sglang_config:
     prefill:
@@ -66,14 +66,13 @@ backend:
       moe-runner-backend: "flashinfer_trtllm"
       stream-interval: 10
       watchdog-timeout: 1000000
-      context-length: 2200
+      context-length: 9200
       mem-fraction-static: 0.95
       max-total-tokens: 8192
       chunked-prefill-size: 8192
-      cuda-graph-max-bs: 256
+      disable-cuda-graph: true
       max-running-requests: 512
       scheduler-recv-interval: 10
-      enable-symm-mem: true
       moe-dense-tp-size: 1
       load-balance-method: "round_robin"
       disaggregation-bootstrap-port: 30001
@@ -95,12 +94,11 @@ backend:
       disaggregation-bootstrap-port: 30001
       stream-interval: 10
       watchdog-timeout: 1000000
-      context-length: 2200
+      context-length: 9200
       mem-fraction-static: 0.95
       chunked-prefill-size: 8192
       cuda-graph-max-bs: 256
       scheduler-recv-interval: 10
-      enable-symm-mem: true
       moe-dense-tp-size: 1
       tensor-parallel-size: 4
       expert-parallel-size: 1
@@ -108,6 +106,6 @@ backend:
 benchmark:
   type: "sa-bench"
   isl: 1024
-  osl: 1024
-  concurrencies: "4x8x32x64x112x128x256"
+  osl: 8192
+  concurrencies: "4x8x32x64x112"
   req_rate: "inf"
