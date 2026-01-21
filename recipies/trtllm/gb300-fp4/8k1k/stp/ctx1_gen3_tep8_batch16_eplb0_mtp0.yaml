@@ -106,6 +106,7 @@ benchmark:
 
 frontend:
   type: "dynamo"
+  enable_multiple_frontends: false
 
 dynamo:
   install: false
