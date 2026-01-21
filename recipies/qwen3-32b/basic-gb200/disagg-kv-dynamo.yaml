@@ -10,14 +10,14 @@ model:
   precision: "bf16"
 
 resources:
-  gpu_type: "h100"
-  gpus_per_node: 8
+  gpu_type: "gb200"
+  gpus_per_node: 4
   # Disaggregated mode: 6 prefill + 2 decode
   # 6 prefill workers @ TP2 = 12 GPUs (1.5 nodes)
   # 2 decode workers @ TP2 = 4 GPUs (0.5 nodes)
   # Total: 16 GPUs across 2 nodes
-  prefill_nodes: 2
-  decode_nodes: 0  
+  prefill_nodes: 3
+  decode_nodes: 1 
   prefill_workers: 6
   decode_workers: 2
 
@@ -63,6 +63,7 @@ backend:
       json-model-override-args: '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768},"max_position_embeddings":131072}'
       context-length: 131072
       page-size: 64
+      disaggregation-transfer-backend: "nixl"
 
     decode:
       served-model-name: "Qwen/Qwen3-32B"
@@ -75,6 +76,7 @@ backend:
       json-model-override-args: '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768},"max_position_embeddings":131072}'
       context-length: 131072
       page-size: 64
+      disaggregation-transfer-backend: "nixl"
 
 # Mooncake benchmark using aiperf
 benchmark:

@@ -87,6 +87,7 @@ class SABenchRunner(BenchmarkRunner):
             str(b.osl),
             str(concurrencies) if concurrencies else "",
             str(b.req_rate) if b.req_rate else "inf",
+            config.model.path,
             config.served_model_name,
             str(is_disaggregated).lower(),
             str(total_gpus),

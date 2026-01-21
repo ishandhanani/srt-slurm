@@ -600,6 +600,7 @@ class DynamoConfig:
             "cd dynamo && "
             f"{checkout_cmd + ' && ' if checkout_cmd else ''}"
             "cd lib/bindings/python/ && "
+            "export RUSTFLAGS=\"${RUSTFLAGS:-} -C target-cpu=native\" && "
             "maturin build -o /tmp && "
             "pip install /tmp/ai_dynamo_runtime*.whl && "
             "cd /sgl-workspace/dynamo/ && "

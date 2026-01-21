@@ -36,6 +36,32 @@ def get_local_ip() -> str:
     import socket
     import subprocess
 
+    def _is_bad_ip(ip: str) -> bool:
+        return not ip or ip == "0.0.0.0" or ip.startswith("127.") or ip.startswith("169.254.")
+
+    def _is_private_ip(ip: str) -> bool:
+        if ip.startswith("10.") or ip.startswith("192.168."):
+            return True
+        if ip.startswith("172."):
+            try:
+                second = int(ip.split(".", 2)[1])
+            except Exception:
+                return False
+            return 16 <= second <= 31
+        return False
+
+    def _select_best_ip(candidates: list[str]) -> str | None:
+        for ip in candidates:
+            if _is_bad_ip(ip):
+                continue
+            if _is_private_ip(ip):
+                return ip
+        for ip in candidates:
+            if _is_bad_ip(ip):
+                continue
+            return ip
+        return None
+
     # Method 1: hostname -I
     try:
         result = subprocess.run(
@@ -45,8 +71,8 @@ def get_local_ip() -> str:
             timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
-            ip = result.stdout.strip().split()[0]
-            if ip and not ip.startswith("127."):
+            ips = [s for s in result.stdout.strip().split() if s]
+            if (ip := _select_best_ip(ips)) is not None:
                 return ip
     except Exception:
         pass
@@ -64,7 +90,7 @@ def get_local_ip() -> str:
             parts = result.stdout.split("src ")
             if len(parts) > 1:
                 ip = parts[1].split()[0]
-                if ip and not ip.startswith("127."):
+                if not _is_bad_ip(ip):
                     return ip
     except Exception:
         pass
@@ -73,7 +99,7 @@ def get_local_ip() -> str:
     try:
         hostname = socket.gethostname()
         ip = socket.gethostbyname(hostname)
-        if ip and not ip.startswith("127."):
+        if not _is_bad_ip(ip):
             return ip
     except socket.gaierror:
         pass

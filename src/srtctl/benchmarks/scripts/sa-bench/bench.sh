@@ -12,11 +12,12 @@ ISL=$2
 OSL=$3
 CONCURRENCIES=$4
 REQ_RATE=${5:-inf}
-MODEL_NAME=${6:-"model"}
-IS_DISAGGREGATED=${7:-false}
-TOTAL_GPUS=${8:-0}
-PREFILL_GPUS=${9:-0}
-DECODE_GPUS=${10:-0}
+MODEL_PATH=${6:-/model/}
+MODEL_NAME=${7:-"model"}
+IS_DISAGGREGATED=${8:-false}
+TOTAL_GPUS=${9:-0}
+PREFILL_GPUS=${10:-0}
+DECODE_GPUS=${11:-0}
 
 # Parse endpoint into host:port
 HOST=$(echo "$ENDPOINT" | sed 's|http://||' | cut -d: -f1)

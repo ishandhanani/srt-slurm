@@ -11,5 +11,5 @@ sed -i '/_record_remove_event(child)/d' /sgl-workspace/sglang/python/sglang/srt/
 
 cd /sgl-workspace/sglang
 
-# install updated sglang router 
-pip install sglang-router --upgrade
+# install sglang router version 0.3.0
+pip install sglang-router==0.3.0
