@@ -115,6 +115,7 @@ class WorkerStageMixin:
             "ETCD_ENDPOINTS": f"http://{self.runtime.nodes.head}:2379",
             "NATS_SERVER": f"nats://{self.runtime.nodes.head}:4222",
             "DYN_SYSTEM_PORT": str(process.sys_port),
+            "DYN_REQUEST_PLANE": "nats",
         }
 
         # Add mode-specific environment variables from backend
