@@ -1,7 +1,7 @@
 name: "gb200-fp4-1p2d"
 
 model:
-  path: "dsfp4"
+  path: "dsr1"
   container: "lmsysorg/sglang:dev-cu13"
   precision: "fp4"
 
@@ -14,7 +14,6 @@ resources:
   gpus_per_node: 4
 
 backend:
-
   prefill_environment:
     TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
     PYTHONUNBUFFERED: "1"
@@ -32,7 +31,7 @@ backend:
     NCCL_CUMEM_ENABLE: "1"
     SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
     SGLANG_ENABLE_JIT_DEEPGEMM: "false"
-    SGLANG_ENABLE_FLASHINFER_GEMM: "true" 
+    SGLANG_ENABLE_FLASHINFER_GEMM: "true"
 
   decode_environment:
     TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
@@ -51,7 +50,7 @@ backend:
     NCCL_CUMEM_ENABLE: "1"
     SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
     SGLANG_ENABLE_JIT_DEEPGEMM: "false"
-    SGLANG_ENABLE_FLASHINFER_GEMM: "true" 
+    SGLANG_ENABLE_FLASHINFER_GEMM: "true"
 
   sglang_config:
     prefill:

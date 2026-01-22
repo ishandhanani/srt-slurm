@@ -1,10 +1,10 @@
-# 4P1D, with 8 Decode Nodes. Does not use single batch overlap but allows us to currently drive higher 
+# 4P1D, with 8 Decode Nodes. Does not use single batch overlap but allows us to currently drive higher
 # per gpu throughput
 
 name: "gb200-fp4-max-tpt-2"
 
 model:
-  path: "dsfp4"
+  path: "dsr1"
   container: "lmsysorg/sglang:dev-cu13"
   precision: "fp4"
 
@@ -17,7 +17,6 @@ resources:
   gpus_per_node: 4
 
 backend:
-
   # Prefill-specific environment variables
   prefill_environment:
     TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
@@ -155,7 +154,73 @@ backend:
       ep-num-redundant-experts: 32
 
       # CUDA graphs (extensive batch size list)
-      cuda-graph-bs: [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216, 224, 232, 240, 248, 256, 264, 272, 280, 288, 296, 304, 312, 320, 328, 336, 344, 352, 360, 368, 376, 384, 416, 448, 480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 1024]
+      cuda-graph-bs:
+        [
+          1,
+          2,
+          4,
+          8,
+          16,
+          24,
+          32,
+          40,
+          48,
+          56,
+          64,
+          72,
+          80,
+          88,
+          96,
+          104,
+          112,
+          120,
+          128,
+          136,
+          144,
+          152,
+          160,
+          168,
+          176,
+          184,
+          192,
+          200,
+          208,
+          216,
+          224,
+          232,
+          240,
+          248,
+          256,
+          264,
+          272,
+          280,
+          288,
+          296,
+          304,
+          312,
+          320,
+          328,
+          336,
+          344,
+          352,
+          360,
+          368,
+          376,
+          384,
+          416,
+          448,
+          480,
+          512,
+          544,
+          576,
+          608,
+          640,
+          672,
+          704,
+          736,
+          768,
+          1024,
+        ]
       num-reserved-decode-tokens: 112
 
       # Additional decode optimizations
