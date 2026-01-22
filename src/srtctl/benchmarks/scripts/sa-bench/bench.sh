@@ -43,6 +43,8 @@ curl -s "${ENDPOINT}/v1/chat/completions" \
     }" | head -c 200
 echo ""
 
+ulimit -n 65536
+
 # Warmup
 for concurrency in "${CONCURRENCY_LIST[@]}"; do
     echo "Warming up with concurrency $concurrency"
