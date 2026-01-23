@@ -56,6 +56,7 @@ backend:
     SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
     SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK: "1024"
     SGLANG_MOE_NVFP4_DISPATCH: "1"
+    SGLANG_CUTEDSL_MOE_NVFP4_DISPATCH: "1" # Used in older sglang versions
 
   sglang_config:
     prefill:
