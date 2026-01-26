@@ -119,10 +119,11 @@ def setup_logging():
     )
 
 
-def start_nats(binary_path: str = "/configs/nats-server") -> subprocess.Popen:
+def start_nats(host_ip: str, binary_path: str = "/configs/nats-server") -> subprocess.Popen:
     """Start NATS server.
 
     Args:
+        host_ip: IP address of this node (for binding)
         binary_path: Path to nats-server binary
 
     Returns:
@@ -139,7 +140,19 @@ def start_nats(binary_path: str = "/configs/nats-server") -> subprocess.Popen:
     os.makedirs(nats_store_dir, exist_ok=True)
 
     logger.info("Starting NATS server...")
-    cmd = [binary_path, "-js", "-sd", nats_store_dir]
+    # IMPORTANT:
+    # The orchestrator and workers connect via `nats://<infra_node>:4222`.
+    # Bind to the node's private IP (cluster interface) rather than 0.0.0.0.
+    cmd = [
+        binary_path,
+        "-js",
+        "-sd",
+        nats_store_dir,
+        "-a",
+        host_ip,
+        "-p",
+        str(NATS_PORT),
+    ]
 
     proc = subprocess.Popen(
         cmd,
@@ -264,21 +277,21 @@ def main():
     etcd_proc = None
 
     try:
-        nats_proc = start_nats(args.nats_binary)
+        nats_proc = start_nats(host_ip, args.nats_binary)
         etcd_proc = start_etcd(host_ip, args.etcd_binary, log_dir)
 
         # Wait for services
-        if not wait_for_service("localhost", NATS_PORT, "NATS"):
+        if not wait_for_service(host_ip, NATS_PORT, "NATS"):
             logger.error("NATS failed to start")
             sys.exit(1)
 
-        if not wait_for_service("localhost", ETCD_CLIENT_PORT, "etcd"):
+        if not wait_for_service(host_ip, ETCD_CLIENT_PORT, "etcd"):
             logger.error("etcd failed to start")
             sys.exit(1)
 
         logger.info("Head node infrastructure is ready")
-        logger.info("  NATS: nats://localhost:%d", NATS_PORT)
-        logger.info("  etcd: http://localhost:%d", ETCD_CLIENT_PORT)
+        logger.info("  NATS: nats://%s:%d", host_ip, NATS_PORT)
+        logger.info("  etcd: http://%s:%d", host_ip, ETCD_CLIENT_PORT)
 
         # Keep running - wait for either process to exit
         while True:

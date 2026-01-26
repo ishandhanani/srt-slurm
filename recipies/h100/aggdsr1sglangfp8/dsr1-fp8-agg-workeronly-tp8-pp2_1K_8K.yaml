@@ -1,0 +1,62 @@
+name: "h100-dsr1-fp8-agg-workeronly-tp8-pp2_1K_8K"
+
+model:
+  path: "dsr1-0528"
+  container: "sglang-0.5.5"
+  precision: "fp8"
+
+resources:
+  gpu_type: "h100"
+  gpus_per_node: 8
+  # TP*PP = 8*2 = 16 GPUs total → 2 nodes @ 8 GPUs each
+  agg_nodes: 2
+  agg_workers: 1
+
+frontend:
+  # worker-only mode (no router / no dynamo frontend)
+  type: none
+
+backend:
+  type: sglang
+
+  aggregated_environment:
+    TORCH_CUDA_ARCH_LIST: "9.0"
+    TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
+
+  sglang_config:
+    aggregated:
+      # srtctl mounts host model dir -> /model inside container
+      model-path: "/model/"
+      tokenizer-path: "/model/"
+      served-model-name: "deepseek-ai/DeepSeek-R1-0528"
+      trust-remote-code: true
+
+      tensor-parallel-size: 8
+      data-parallel-size: 1
+      pipeline-parallel-size: 2
+
+      disable-radix-cache: true
+      max-running-requests: 128
+      cuda-graph-max-bs: 128
+      chunked-prefill-size: 16000
+      max-prefill-tokens: 16000
+      mem-fraction-static: 0.70
+      kv-cache-dtype: "auto"
+      attention-backend: "flashinfer"
+      stream-interval: 10
+      decode-log-interval: 1
+
+benchmark:
+  type: "sa-bench"
+  isl: 1024
+  osl: 8192
+  concurrencies: "64"
+  req_rate: "inf"
+
+# DSR1 can take a long time to load weights across 2 nodes.
+# Default health timeout (max_attempts * interval_seconds) was too short and caused premature job failure.
+health_check:
+  max_attempts: 540        # 540 * 10s = 5400s (matches 1:30:00 time limit)
+  interval_seconds: 10
+
+

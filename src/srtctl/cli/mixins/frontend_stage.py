@@ -183,6 +183,11 @@ class FrontendStageMixin:
             List of ManagedProcess instances for all frontend processes.
         """
         logger.info("Starting frontend layer")
+        # Worker-only mode: skip nginx/router/frontend entirely
+        if self.config.frontend.type == "none":
+            logger.info("Frontend disabled (frontend.type=none)")
+            return []
+
         topology = self._compute_frontend_topology()
         processes: list[ManagedProcess] = []
 

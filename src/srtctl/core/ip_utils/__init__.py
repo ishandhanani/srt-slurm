@@ -11,6 +11,7 @@ This module provides:
 
 import logging
 import subprocess
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -99,8 +100,26 @@ def get_node_ip(
     )
 
     if success and output:
-        logger.debug("Resolved IP for %s: %s", node, output)
-        return output
+        # Some clusters emit step banners/prolog output into stdout/stderr for srun
+        # (e.g., "GpuFreq=control_disabled"). Robustly extract a usable IPv4.
+        candidates = re.findall(r"(?:\d{1,3}\.){3}\d{1,3}", output)
+        if candidates:
+            # Prefer RFC1918 private addresses first.
+            private = [
+                ip
+                for ip in candidates
+                if ip.startswith("10.")
+                or ip.startswith("192.168.")
+                or re.match(r"^172\.(1[6-9]|2\d|3[0-1])\.", ip)
+            ]
+            ip = (private[0] if private else candidates[0]).strip()
+            logger.debug("Resolved IP for %s: %s", node, ip)
+            return ip
+
+        # Fallback: return raw output (may already be an IP/hostname)
+        cleaned = output.strip()
+        logger.debug("Resolved IP for %s (no IPv4 found): %s", node, cleaned)
+        return cleaned
     else:
         logger.error("Failed to get IP for node %s: %s", node, output)
         return None

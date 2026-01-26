@@ -240,7 +240,7 @@ class SGLangProtocol:
 
         # Choose Python module
         # When profiling is enabled, always use sglang.launch_server (not dynamo.sglang)
-        use_sglang = frontend_type == "sglang" or profiling_enabled
+        use_sglang = frontend_type in ("sglang", "none") or profiling_enabled
         python_module = "sglang.launch_server" if use_sglang else "dynamo.sglang"
 
         # Get served model name from config
@@ -289,8 +289,9 @@ class SGLangProtocol:
                 ]
             )
 
-        # Add config dump path (not when using sglang frontend)
-        if dump_config_path and frontend_type != "sglang":
+        # Add config dump path (only for dynamo.sglang).
+        # sglang.launch_server does not support --dump-config-to.
+        if dump_config_path and frontend_type not in ("sglang", "none"):
             cmd.extend(["--dump-config-to", str(dump_config_path)])
 
         # Add kv-events-config if enabled for this mode and we have an allocated port

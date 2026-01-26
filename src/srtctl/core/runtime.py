@@ -97,8 +97,8 @@ class RuntimeContext:
 
     # Computed paths (all absolute)
     log_dir: Path
-    model_path: Path  # For HF models (hf:prefix), this is the HF model ID as a Path
-    container_image: Path
+    model_path: Path
+    container_image: str | Path
 
     # Resource configuration
     gpus_per_node: int
@@ -119,6 +119,10 @@ class RuntimeContext:
 
     # Frontend port (for benchmark endpoint)
     frontend_port: int = 8000
+
+    # Base port for Dynamo system status servers (DYN_SYSTEM_PORT).
+    # Must be unique per-job on shared clusters to avoid "Address already in use" collisions.
+    sys_port_base: int = 8081
 
     @classmethod
     def from_config(
@@ -148,6 +152,25 @@ class RuntimeContext:
         # Resolve node IPs
         head_node_ip = get_hostname_ip(nodes.head)
         infra_node_ip = get_hostname_ip(nodes.infra)
+
+        # Endpoint port that benchmarks/health checks should target.
+        # - Normal mode: frontends listen on 8000 (or nginx public port)
+        # - Worker-only mode (frontend.type=none): hit the agg worker leader directly.
+        #   The worker leader HTTP port is allocated from 30000 (see NodePortAllocator).
+        frontend_port = 30000 if config.frontend.type == "none" else 8000
+
+        # Choose a job-specific system-port base to avoid collisions across jobs on shared nodes.
+        # We reserve a small contiguous range per job and let process allocation increment within it.
+        #
+        # IMPORTANT: Dynamo expects DYN_SYSTEM_PORT to fit in a signed 16-bit int (i16),
+        # so keep the base <= 32767. We also reserve 100 ports per job.
+        #
+        # Range: 10000..29900 (step 100). This gives 100 ports per job and stays < 32767.
+        try:
+            job_seed = int(job_id)
+        except Exception:
+            job_seed = abs(hash(job_id))
+        sys_port_base = 10000 + (job_seed % 200) * 100
 
         # Compute log directory using FormattablePath or default logic
         # Check for SRTCTL_OUTPUT_DIR from sbatch script first (ensures consistency)
@@ -193,8 +216,9 @@ class RuntimeContext:
             if not container_image.is_file():
                 raise ValueError(f"Container image path is not a file: {container_image}")
         else:
-            # Image name (e.g., nvcr.io/nvidia/pytorch:23.12) - keep as string, convert to Path for type compatibility
-            container_image = Path(container_image_str)
+            # Image name (e.g., nvcr.io/nvidia/pytorch:23.12 or docker://lmsysorg/sglang:v0.5.5)
+            # Keep as a plain string; Path(...) would mangle schemes like docker:// into docker:/
+            container_image = container_image_str
 
         # Build container mounts
         container_mounts: dict[Path, Path] = {
@@ -211,6 +235,17 @@ class RuntimeContext:
             configs_dir = Path(source_dir) / "configs"
             if configs_dir.exists():
                 container_mounts[configs_dir.resolve()] = Path("/configs")
+
+                # Workaround for some pyxis/enroot environments that source /root/.cargo/env on container start.
+                # Provide an empty file so container startup does not fail if it is missing.
+                cargo_env = configs_dir / "cargo_env"
+                try:
+                    cargo_env.parent.mkdir(parents=True, exist_ok=True)
+                    cargo_env.touch(exist_ok=True)
+                    container_mounts[cargo_env.resolve()] = Path("/root/.cargo/env")
+                except Exception:
+                    # Best-effort; if we cannot create/mount this file, proceed and let pyxis report the error.
+                    pass
 
         # Mount srtctl benchmark scripts
         from srtctl.benchmarks.base import SCRIPTS_DIR
@@ -249,6 +284,8 @@ class RuntimeContext:
             srun_options=dict(config.srun_options),
             environment=dict(config.environment),
             is_hf_model=is_hf_model,
+            frontend_port=frontend_port,
+            sys_port_base=sys_port_base,
         )
 
         # Expand FormattablePath mounts
@@ -272,6 +309,8 @@ class RuntimeContext:
             srun_options=dict(config.srun_options),
             environment=dict(config.environment),
             is_hf_model=is_hf_model,
+            frontend_port=frontend_port,
+            sys_port_base=sys_port_base,
         )
 
     def format_string(self, template: str, **extra_kwargs) -> str:
