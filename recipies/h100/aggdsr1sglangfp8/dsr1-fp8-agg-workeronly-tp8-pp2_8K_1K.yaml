@@ -12,9 +12,17 @@ resources:
   agg_nodes: 2
   agg_workers: 1
 
+sbatch_directives:
+  # Prevent automatic cancellation during long model-load / warmup periods with idle GPUs.
+  # (Cluster reaper expects this JSON under --comment)
+  comment: >-
+    '{"OccupiedIdleGPUsJobReaper":{"exemptIdleTimeMins":"60","reason":"data_loading","description":"DeepSeek-R1 FP8 model load + warmup can keep some GPUs idle initially"}}'
+
 frontend:
-  # worker-only mode (no router / no dynamo frontend)
-  type: none
+  # Stock SGLang:
+  # - agg_workers=1 => worker-only (direct-to-worker) handled automatically under the hood
+  # - agg_workers>1 or disagg => router
+  type: sglang
 
 backend:
   type: sglang

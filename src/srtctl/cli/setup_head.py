@@ -142,7 +142,9 @@ def start_nats(host_ip: str, binary_path: str = "/configs/nats-server") -> subpr
     logger.info("Starting NATS server...")
     # IMPORTANT:
     # The orchestrator and workers connect via `nats://<infra_node>:4222`.
-    # Bind to the node's private IP (cluster interface) rather than 0.0.0.0.
+    # If NATS only listens on localhost, `wait_for_port(...)` will fail.
+    # Bind explicitly to the node's cluster/private interface so it is reachable via hostname/IP
+    # without exposing NATS on all interfaces.
     cmd = [
         binary_path,
         "-js",

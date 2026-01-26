@@ -143,12 +143,12 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
         # On busy clusters, `pyxis` image import can easily exceed 60s, so keep this
         # timeout comfortably larger than the container startup overhead.
         logger.info("Waiting for NATS (port 4222) on %s...", infra_node)
-        if not wait_for_port(infra_node, 4222, timeout=300):
+        if not wait_for_port(self.runtime.infra_node_ip, 4222, timeout=300):
             raise RuntimeError("NATS failed to start")
         logger.info("NATS is ready")
 
         logger.info("Waiting for etcd (port 2379) on %s...", infra_node)
-        if not wait_for_port(infra_node, 2379, timeout=300):
+        if not wait_for_port(self.runtime.infra_node_ip, 2379, timeout=300):
             raise RuntimeError("etcd failed to start")
         logger.info("etcd is ready")
 
@@ -165,7 +165,7 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
         logger.info("=" * 60)
         logger.info("Connection Commands")
         logger.info("=" * 60)
-        if self.config.frontend.type == "none":
+        if self.runtime.effective_frontend_type == "direct":
             logger.info("Worker URL: http://%s:%d", self.runtime.nodes.head, self.runtime.frontend_port)
         else:
             logger.info("Frontend URL: http://%s:%d", self.runtime.nodes.head, self.runtime.frontend_port)
@@ -225,8 +225,7 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
         try:
             # Stage 1: Head infrastructure (NATS, etcd)
             reporter.report(JobStatus.STARTING, JobStage.HEAD_INFRASTRUCTURE, "Starting head infrastructure")
-            # Worker-only mode: no dynamo frontend/router, so we do not need NATS/etcd
-            if self.config.frontend.type != "none":
+            if self.runtime.effective_frontend_type != "direct":
                 head_proc = self.start_head_infrastructure(registry)
                 registry.add_process(head_proc)
 

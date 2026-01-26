@@ -117,6 +117,14 @@ class RuntimeContext:
     # Environment variables
     environment: dict[str, str] = field(default_factory=dict)
 
+    # Effective frontend type used by the orchestrator.
+    # This is inferred under the hood based on backend + serving mode.
+    # Examples:
+    # - "dynamo": dynamo frontend (/health)
+    # - "sglang": sglang router (/workers)
+    # - "direct": no router; benchmark/health hit the worker OAI server directly
+    effective_frontend_type: str = "dynamo"
+
     # Frontend port (for benchmark endpoint)
     frontend_port: int = 8000
 
@@ -153,11 +161,30 @@ class RuntimeContext:
         head_node_ip = get_hostname_ip(nodes.head)
         infra_node_ip = get_hostname_ip(nodes.infra)
 
+        # Infer frontend behavior under the hood.
+        # Stock SGLang variants (frontend.type: "sglang"):
+        # - Aggregated, agg_workers=1: run only sglang.launch_server (no router) -> hit worker directly
+        # - Aggregated, agg_workers>1: use sglang router
+        # - Disaggregated: use sglang router
+        #
+        # Dynamo runs (frontend.type: "dynamo"): keep existing behavior.
+        r = config.resources
+        backend_type = getattr(config.backend, "type", "sglang")
+        if backend_type == "sglang" and config.frontend.type == "sglang":
+            # Stock SGLang behavior
+            if (not r.is_disaggregated) and r.num_agg == 1:
+                effective_frontend_type = "direct"
+            else:
+                # Disagg OR multi-agg => router
+                effective_frontend_type = "sglang"
+        else:
+            # Dynamo (and any other backend/frontends): preserve user config
+            effective_frontend_type = config.frontend.type
+
         # Endpoint port that benchmarks/health checks should target.
-        # - Normal mode: frontends listen on 8000 (or nginx public port)
-        # - Worker-only mode (frontend.type=none): hit the agg worker leader directly.
-        #   The worker leader HTTP port is allocated from 30000 (see NodePortAllocator).
-        frontend_port = 30000 if config.frontend.type == "none" else 8000
+        # - Router/frontends listen on 8000 (or nginx public port)
+        # - Direct-to-worker mode: hit the agg worker leader HTTP port (allocated from 30000)
+        frontend_port = 30000 if effective_frontend_type == "direct" else 8000
 
         # Choose a job-specific system-port base to avoid collisions across jobs on shared nodes.
         # We reserve a small contiguous range per job and let process allocation increment within it.
@@ -284,6 +311,7 @@ class RuntimeContext:
             srun_options=dict(config.srun_options),
             environment=dict(config.environment),
             is_hf_model=is_hf_model,
+            effective_frontend_type=effective_frontend_type,
             frontend_port=frontend_port,
             sys_port_base=sys_port_base,
         )
@@ -309,6 +337,7 @@ class RuntimeContext:
             srun_options=dict(config.srun_options),
             environment=dict(config.environment),
             is_hf_model=is_hf_model,
+            effective_frontend_type=effective_frontend_type,
             frontend_port=frontend_port,
             sys_port_base=sys_port_base,
         )

@@ -84,7 +84,7 @@ class BenchmarkStageMixin:
             poll_interval=float(hc.interval_seconds),
             timeout=float(hc.max_attempts * hc.interval_seconds),
             report_every=60.0,
-            frontend_type=self.config.frontend.type,
+            frontend_type=self.runtime.effective_frontend_type,
             stop_event=stop_event,
         ):
             logger.error("Server did not become healthy")

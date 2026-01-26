@@ -366,13 +366,13 @@ def wait_for_model(
     Returns:
         True if model is ready with expected workers, False if timeout/aborted
     """
-    if frontend_type == "none":
+    if frontend_type in ("direct", "none"):
         # Direct-to-worker mode (no router/frontend).
         # Treat model as ready when /health is 200 and /v1/models returns at least one model.
         health_url = f"http://{host}:{port}/health"
         models_url = f"http://{host}:{port}/v1/models"
         logger.info(
-            "Polling %s every %.1fs for direct worker readiness (frontend=none)",
+            "Polling %s every %.1fs for direct worker readiness (frontend=direct)",
             health_url,
             poll_interval,
         )
