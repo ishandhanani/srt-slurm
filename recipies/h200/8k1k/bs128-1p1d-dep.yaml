@@ -2,7 +2,7 @@ name: "bs128-1p1d-dep-h200-fp8"
 
 model:
   path: "dsfp8"
-  container: "sglang:dev-cu13"
+  container: "lmsysorg/sglang:v0.5.8-cu130-runtime"
   precision: "fp8"
 
 resources:
