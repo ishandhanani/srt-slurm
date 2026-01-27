@@ -265,7 +265,7 @@ class RuntimeContext:
 
                 # Workaround for some pyxis/enroot environments that source /root/.cargo/env on container start.
                 # Provide an empty file so container startup does not fail if it is missing.
-                cargo_env = configs_dir / "cargo_env"
+                cargo_env = log_dir / "cargo_env"
                 try:
                     cargo_env.parent.mkdir(parents=True, exist_ok=True)
                     cargo_env.touch(exist_ok=True)

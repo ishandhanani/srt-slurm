@@ -62,9 +62,9 @@ benchmark:
   req_rate: "inf"
 
 # DSR1 can take a long time to load weights across 2 nodes.
-# Default health timeout (max_attempts * interval_seconds) was too short and caused premature job failure.
+# Health timeout controls how long srtctl waits for the worker to become ready (independent of SLURM time_limit).
 health_check:
-  max_attempts: 540        # 540 * 10s = 5400s (matches 1:30:00 time limit)
+\g<1>540        # 540 * 10s = 5400s (~90 minutes)
   interval_seconds: 10
 
 
