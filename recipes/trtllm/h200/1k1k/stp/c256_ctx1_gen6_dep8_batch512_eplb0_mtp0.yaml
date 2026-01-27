@@ -2,7 +2,7 @@ name: "c256_ctx1_gen6_dep8_batch512_eplb0_mtp0"
 
 model:
   path: "dsr1"
-  container: "nvcr.io#nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1.post1"
+  container: "/data/containers/nvidia+ai-dynamo+tensorrtllm-runtime+0.8.1.post1.sqsh"
   precision: "fp8"
 
 sbatch_directives:
