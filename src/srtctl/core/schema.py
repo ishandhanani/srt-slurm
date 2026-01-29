@@ -567,11 +567,15 @@ class ProfilingConfig:
     isl: int | None = None  # Input sequence length for profiling workload
     osl: int | None = None  # Output sequence length for profiling workload
     concurrency: int | None = None  # Batch size / concurrency
+    num_prompts: int = 128  # Number of prompts to generate during profiling
 
     # Phase-specific profiling step configs
     prefill: ProfilingPhaseConfig | None = None
     decode: ProfilingPhaseConfig | None = None
     aggregated: ProfilingPhaseConfig | None = None
+
+    # nsys-specific options
+    gpu_metrics: bool = False  # Enable --gpu-metrics-devices=all (requires elevated privileges)
 
     @property
     def enabled(self) -> bool:
@@ -622,6 +626,10 @@ class ProfilingConfig:
             env["PROFILE_OSL"] = str(self.osl)
         if self.concurrency is not None:
             env["PROFILE_CONCURRENCY"] = str(self.concurrency)
+        env["PROFILE_NUM_PROMPTS"] = str(self.num_prompts)
+        
+        # Pass profiler type so profile.sh knows whether to call /start_profile API
+        env["PROFILER_TYPE"] = self.type
 
         # Phase-specific start/stop steps
         phase_config = self._get_phase_config(mode)
@@ -635,13 +643,31 @@ class ProfilingConfig:
         if self.is_torch:
             env["SGLANG_TORCH_PROFILER_DIR"] = f"{profile_dir}/{mode}"
 
+        if self.is_nsys:
+            # TRT-LLM specific environment variables for nsys profiling
+            # These enable application-controlled profiling via cudaProfilerApi
+            if phase_config:
+                start = phase_config.start_step if phase_config.start_step is not None else 10
+                stop = phase_config.stop_step if phase_config.stop_step is not None else 50
+                # TLLM_PROFILE_START_STOP tells TRT-LLM when to call cudaProfilerStart/Stop
+                env["TLLM_PROFILE_START_STOP"] = f"{start}-{stop}"
+            # Enable garbage collection NVTX markers
+            env["TLLM_PROFILE_RECORD_GC"] = "1"
+            # Enable additional NVTX debug markers
+            env["TLLM_NVTX_DEBUG"] = "1"
+
         return env
 
-    def get_nsys_prefix(self, output_file: str) -> list[str]:
+    def get_nsys_prefix(self, output_dir: str) -> list[str]:
         """Get nsys profiling command prefix.
 
+        Uses cudaProfilerApi-based capture where the application controls when
+        profiling starts/stops via TLLM_PROFILE_START_STOP environment variable.
+        This approach works correctly with MPI-based workers because the profiling
+        is triggered from inside the worker processes themselves.
+
         Args:
-            output_file: Path for nsys output file (without extension)
+            output_dir: Directory for nsys output files (per-rank files will be created)
 
         Returns:
             Command prefix list for nsys profiling
@@ -649,21 +675,36 @@ class ProfilingConfig:
         if not self.is_nsys:
             return []
 
-        return [
+        # Output pattern uses process ID for unique files per worker
+        # %p expands to the process ID, ensuring unique files for each MPI rank
+        output_pattern = f"{output_dir}/profile_%p"
+
+        cmd = [
             "nsys",
             "profile",
-            "-t",
-            "cuda,nvtx",
-            "--cuda-graph-trace=node",
-            "-c",
-            "cudaProfilerApi",
-            "--capture-range-end",
-            "stop",
-            "--force-overwrite",
-            "true",
-            "-o",
-            output_file,
+            # Environment variable for MPI rank tracking
+            "-e", "NSYS_MPI_STORE_TEAMS_PER_RANK=1",
+            # Output file pattern
+            "-o", output_pattern,
+            # Force overwrite existing files
+            "-f", "true",
+            # Trace CUDA, NVTX, and Python GIL events
+            "-t", "cuda,nvtx,python-gil",
+            # Use cudaProfilerApi - application controls profiling via
+            # TLLM_PROFILE_START_STOP env var calling cudaProfilerStart/Stop
+            "-c", "cudaProfilerApi",
+            # Use node-level CUDA graph tracing for detailed kernel visibility
+            "--cuda-graph-trace", "node",
+            # Stop capture when application calls cudaProfilerStop()
+            "--capture-range-end=stop",
         ]
+
+        # GPU metrics requires elevated privileges (admin must set
+        # NVreg_RestrictProfilingToAdminUsers=0 or container needs SYS_ADMIN cap)
+        if self.gpu_metrics:
+            cmd.extend(["--gpu-metrics-devices=all"])
+
+        return cmd
 
     Schema: ClassVar[builtins.type[Schema]] = Schema
 
@@ -887,18 +928,10 @@ class SrtConfig:
                     "Aggregated mode requires profiling.aggregated to be set when profiling is enabled."
                 )
 
-        # Profiling requires single worker per role
-        if is_disaggregated:
-            if r.num_prefill != 1 or r.num_decode != 1:
-                raise ValidationError(
-                    f"Profiling mode requires exactly 1 prefill and 1 decode worker. "
-                    f"Got prefill_workers={r.num_prefill}, decode_workers={r.num_decode}"
-                )
-        else:
-            if r.num_agg != 1:
-                raise ValidationError(
-                    f"Profiling mode requires exactly 1 aggregated worker. Got agg_workers={r.num_agg}"
-                )
+        # Note: Multi-worker profiling is supported. Each worker gets a unique
+        # nsys output file: {node}_{mode}_w{index}_profile.nsys-rep
+        # Analysis is more complex with multiple files, but nsys-ui can load
+        # and align multiple .nsys-rep files. Disk space scales ~5GB per worker.
 
     @classmethod
     def from_yaml(cls, yaml_path: Path) -> "SrtConfig":

@@ -160,7 +160,10 @@ class TRTLLMProtocol:
         container_config_path = Path("/logs") / config_filename
         container_model_path = Path("/model")
 
-        cmd = [
+        # Start with nsys prefix if provided (for profiling)
+        cmd: list[str] = list(nsys_prefix) if nsys_prefix else []
+
+        cmd.extend([
             "trtllm-llmapi-launch",
             "python3",
             "-m",
@@ -175,6 +178,6 @@ class TRTLLMProtocol:
             str(container_config_path),
             "--request-plane",
             "nats",
-        ]
+        ])
 
         return cmd

@@ -38,11 +38,63 @@ class TestProfilingConfig:
         assert profiling.is_nsys is True
         assert profiling.is_torch is False
 
-        # Test nsys prefix generation
+        # Test nsys prefix generation with overhead reduction flags
         prefix = profiling.get_nsys_prefix("/output/test")
         assert "nsys" in prefix
         assert "profile" in prefix
-        assert "/output/test" in prefix
+        # Check fork tracing for MPI child processes
+        assert "--trace-fork-before-exec=true" in prefix
+        # Check overhead reduction flags
+        assert "--sample=none" in prefix
+        assert "--cpuctxsw=none" in prefix
+        assert "--cuda-memory-usage=false" in prefix
+        # Check CUDA event tracing is disabled (reduces overhead significantly)
+        assert "--cuda-event-trace=false" in prefix
+        # Check graph tracing is set to lighter mode
+        assert "--cuda-graph-trace=graph" in prefix
+        # Check time-based capture (delay and duration)
+        assert "-y" in prefix
+        assert "-d" in prefix
+        # Check output pattern with process ID placeholder
+        assert "%p" in " ".join(prefix)
+
+    def test_num_prompts_default(self):
+        """Test num_prompts field default value."""
+        from srtctl.core.schema import ProfilingConfig
+
+        profiling = ProfilingConfig(type="nsys", isl=1024, osl=512, concurrency=32)
+        assert profiling.num_prompts == 128
+
+    def test_num_prompts_custom(self):
+        """Test num_prompts field custom value."""
+        from srtctl.core.schema import ProfilingConfig
+
+        profiling = ProfilingConfig(
+            type="nsys",
+            isl=1024,
+            osl=512,
+            concurrency=32,
+            num_prompts=1024,
+        )
+        assert profiling.num_prompts == 1024
+
+    def test_env_vars_include_num_prompts_and_type(self):
+        """Test that env vars include PROFILE_NUM_PROMPTS and PROFILER_TYPE."""
+        from srtctl.core.schema import ProfilingConfig, ProfilingPhaseConfig
+
+        profiling = ProfilingConfig(
+            type="nsys",
+            isl=1024,
+            osl=512,
+            concurrency=32,
+            num_prompts=512,
+            prefill=ProfilingPhaseConfig(start_step=10, stop_step=100),
+            decode=ProfilingPhaseConfig(start_step=20, stop_step=200),
+        )
+
+        env = profiling.get_env_vars("prefill", "/logs/profiles")
+        assert env["PROFILE_NUM_PROMPTS"] == "512"
+        assert env["PROFILER_TYPE"] == "nsys"
 
     def test_torch_profiling(self):
         """Test torch profiling configuration."""
@@ -184,10 +236,8 @@ class TestProfilingValidation:
                 ),
             )
 
-    def test_profiling_requires_single_worker_disagg(self):
-        """Profiling in disaggregated mode requires exactly 1P + 1D."""
-        from marshmallow import ValidationError
-
+    def test_profiling_allows_multi_worker_disagg(self):
+        """Profiling now supports multiple workers in disaggregated mode."""
         from srtctl.core.schema import (
             ModelConfig,
             ProfilingConfig,
@@ -196,32 +246,30 @@ class TestProfilingValidation:
             SrtConfig,
         )
 
-        # Multiple prefill workers should fail
-        with pytest.raises(ValidationError, match="exactly 1 prefill and 1 decode"):
-            SrtConfig(
-                name="test",
-                model=ModelConfig(path="/model", container="/container", precision="fp8"),
-                resources=ResourceConfig(
-                    gpu_type="h100",
-                    prefill_nodes=1,
-                    decode_nodes=1,
-                    prefill_workers=2,  # More than 1!
-                    decode_workers=1,
-                ),
-                profiling=ProfilingConfig(
-                    type="torch",
-                    isl=1024,
-                    osl=128,
-                    concurrency=1,
-                    prefill=ProfilingPhaseConfig(start_step=0, stop_step=50),
-                    decode=ProfilingPhaseConfig(start_step=0, stop_step=50),
-                ),
-            )
+        # Multiple prefill workers should now succeed (constraint removed)
+        config = SrtConfig(
+            name="test",
+            model=ModelConfig(path="/model", container="/container", precision="fp8"),
+            resources=ResourceConfig(
+                gpu_type="h100",
+                prefill_nodes=2,
+                decode_nodes=1,
+                prefill_workers=2,  # More than 1 - now allowed!
+                decode_workers=1,
+            ),
+            profiling=ProfilingConfig(
+                type="torch",
+                isl=1024,
+                osl=128,
+                concurrency=1,
+                prefill=ProfilingPhaseConfig(start_step=0, stop_step=50),
+                decode=ProfilingPhaseConfig(start_step=0, stop_step=50),
+            ),
+        )
+        assert config.profiling.enabled
 
-    def test_profiling_requires_single_worker_agg(self):
-        """Profiling in aggregated mode requires exactly 1 agg worker."""
-        from marshmallow import ValidationError
-
+    def test_profiling_allows_multi_worker_agg(self):
+        """Profiling now supports multiple workers in aggregated mode."""
         from srtctl.core.schema import (
             ModelConfig,
             ProfilingConfig,
@@ -230,24 +278,24 @@ class TestProfilingValidation:
             SrtConfig,
         )
 
-        # Multiple agg workers should fail
-        with pytest.raises(ValidationError, match="exactly 1 aggregated worker"):
-            SrtConfig(
-                name="test",
-                model=ModelConfig(path="/model", container="/container", precision="fp8"),
-                resources=ResourceConfig(
-                    gpu_type="h100",
-                    agg_nodes=2,
-                    agg_workers=2,  # More than 1!
-                ),
-                profiling=ProfilingConfig(
-                    type="torch",
-                    isl=1024,
-                    osl=128,
-                    concurrency=1,
-                    aggregated=ProfilingPhaseConfig(start_step=0, stop_step=50),
-                ),
-            )
+        # Multiple agg workers should now succeed (constraint removed)
+        config = SrtConfig(
+            name="test",
+            model=ModelConfig(path="/model", container="/container", precision="fp8"),
+            resources=ResourceConfig(
+                gpu_type="h100",
+                agg_nodes=2,
+                agg_workers=2,  # More than 1 - now allowed!
+            ),
+            profiling=ProfilingConfig(
+                type="torch",
+                isl=1024,
+                osl=128,
+                concurrency=1,
+                aggregated=ProfilingPhaseConfig(start_step=0, stop_step=50),
+            ),
+        )
+        assert config.profiling.enabled
 
     def test_valid_profiling_config_disagg(self):
         """Valid profiling config with 1P + 1D passes validation."""

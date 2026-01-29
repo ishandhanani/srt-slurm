@@ -249,4 +249,22 @@ class BenchmarkStageMixin:
             # The profile.sh script only generates traffic when PROFILING_MODE=prefill
             env["PROFILING_MODE"] = "prefill"
 
+            # Profiler type so profile.sh knows whether to call /start_profile API
+            # (nsys uses time-based capture, torch uses API-based)
+            env["PROFILER_TYPE"] = p.type
+
+            # Backend type for benchmark_serving.py
+            # With Dynamo frontend, always use "dynamo" backend
+            # (trtllm/sglang are internal backend types, not benchmark_serving.py backends)
+            if self.config.frontend.type == "dynamo":
+                env["BACKEND_TYPE"] = "dynamo"
+            elif self.config.backend_type == "sglang":
+                env["BACKEND_TYPE"] = "sglang"
+            else:
+                # tensorrt-llm is the benchmark_serving.py name for TRT-LLM
+                env["BACKEND_TYPE"] = "tensorrt-llm"
+
+            # Configurable num_prompts
+            env["PROFILE_NUM_PROMPTS"] = str(p.num_prompts)
+
         return env
