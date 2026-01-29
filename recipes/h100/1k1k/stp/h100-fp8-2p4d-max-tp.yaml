@@ -1,0 +1,99 @@
+name: "h100-fp8-2p4d-max-tp"
+
+model:
+  path: "dsfp8"
+  container: "lmsysorg/sglang:v0.5.8-cu130-runtime"
+  precision: "fp8"
+
+resources:
+  gpu_type: "h100"
+  prefill_nodes: 2
+  prefill_workers: 1
+  decode_nodes: 6
+  decode_workers: 2
+  gpus_per_node: 8
+
+backend:
+
+  # Prefill-specific environment variables
+  prefill_environment:
+    SGLANG_DG_CACHE_DIR: "/configs/deepgemm_cache"
+    FLASHINFER_WORKSPACE_BASE: "/configs/"
+
+  # Decode-specific environment variables
+  decode_environment:
+    SGLANG_DG_CACHE_DIR: "/configs/deepgemm_cache"
+    FLASHINFER_WORKSPACE_BASE: "/configs/"
+
+  sglang_config:
+    prefill:
+      # Model configuration
+      served-model-name: "deepseek-ai/DeepSeek-R1"
+      model-path: "/model/"
+      skip-tokenizer-init: true
+      trust-remote-code: true
+
+      # Parallelism
+      tp-size: 8
+      dp-size: 1
+      ep-size: 1 
+      enable-dp-attention: true
+
+      # KV cache and attention
+      attention-backend: "flashinfer"
+
+      # Radix cache disabled
+      disable-radix-cache: true
+
+      # Other flags
+      max-running-requests: 512
+
+      # Prefill-specific mode
+      disaggregation-bootstrap-port: 30001
+      disaggregation-mode: "prefill"
+      disaggregation-transfer-backend: nixl
+
+      # Memory and token limits
+      mem-fraction-static: 0.75
+      max-prefill-tokens: 65536
+      chunked-prefill-size: 262144
+
+      # Request handling
+      load-balance-method: "round_robin"
+
+    decode:
+      # Model configuration
+      served-model-name: "deepseek-ai/DeepSeek-R1"
+      model-path: "/model/"
+      skip-tokenizer-init: true
+      trust-remote-code: true
+
+      # Parallelism
+      tp-size: 8
+      dp-size: 1
+      ep-size: 1
+      enable-dp-attention: true
+
+      # KV cache and attention
+      attention-backend: "flashinfer"
+
+      # Other flags
+      disable-radix-cache: true
+      stream-interval: 10
+
+      # Disagg
+      disaggregation-bootstrap-port: 30001
+      disaggregation-mode: "decode"
+      disaggregation-transfer-backend: nixl
+
+      # Memory and token limits
+      mem-fraction-static: 0.82
+      max-running-requests: 512
+      cuda-graph-max-bs: 512
+
+benchmark:
+  type: "sa-bench"
+  isl: 1024
+  osl: 1024
+  concurrencies: "128x256x512x1024x2048"
+  req_rate: "inf"
