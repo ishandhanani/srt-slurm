@@ -178,6 +178,7 @@ def submit_with_orchestrator(
     console.print(f"[bold cyan]🚀 Submitting:[/] {config.name}")
     logging.debug(f"Script: {script_path}")
 
+    keep_script = False
     try:
         result = subprocess.run(
             ["sbatch", script_path],
@@ -264,10 +265,12 @@ def submit_with_orchestrator(
 
     except subprocess.CalledProcessError as e:
         console.print(f"[bold red]❌ sbatch failed:[/] {e.stderr}")
+        keep_script = True
         raise
     finally:
-        with contextlib.suppress(OSError):
-            os.remove(script_path)
+        if not keep_script:
+            with contextlib.suppress(OSError):
+                os.remove(script_path)
 
 
 def submit_single(
