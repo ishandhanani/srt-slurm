@@ -260,6 +260,7 @@ def submit_with_orchestrator(
         console.print(f"[bold green]✅ Job {job_id} submitted![/]")
         console.print(f"[dim]📁 Logs:[/] {job_output_dir}/logs")
         console.print(f"[dim]📋 Monitor:[/] tail -f {job_output_dir}/logs/sweep_{job_id}.log")
+        console.print(f"[dim]📊 Queue:[/] squeue --job {job_id}")
 
     except subprocess.CalledProcessError as e:
         console.print(f"[bold red]❌ sbatch failed:[/] {e.stderr}")

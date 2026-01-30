@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from srtctl.core.processes import ProcessRegistry
     from srtctl.core.runtime import RuntimeContext
     from srtctl.core.schema import SrtConfig
-    from srtctl.core.topology import Endpoint
+    from srtctl.core.topology import Endpoint, Process
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ class BenchmarkStageMixin:
         self.config: SrtConfig
         self.runtime: RuntimeContext
         self.endpoints: list[Endpoint]
+        self.backend_processes: list[Process]
     """
 
     # Type hints for mixin dependencies
@@ -44,6 +45,11 @@ class BenchmarkStageMixin:
     @property
     def endpoints(self) -> list["Endpoint"]:
         """Endpoint allocation topology."""
+        ...
+
+    @property
+    def backend_processes(self) -> list["Process"]:
+        """Backend worker processes."""
         ...
 
     def run_benchmark(
@@ -156,7 +162,7 @@ class BenchmarkStageMixin:
         """Run the actual benchmark script."""
 
         cmd = runner.build_command(self.config, self.runtime)
-        env_to_set = self._get_benchmark_profiling_env(runner)
+        env_to_set = self._get_benchmark_env(runner)
 
         logger.info("Script: %s", runner.script_path)
         logger.info("Command: %s", shlex.join(cmd))
@@ -248,5 +254,33 @@ class BenchmarkStageMixin:
 
             # The profile.sh script only generates traffic when PROFILING_MODE=prefill
             env["PROFILING_MODE"] = "prefill"
+
+        return env
+
+    def _get_aiperf_server_metrics_env(self) -> dict[str, str]:
+        """Build server metrics URLs for AIPerf benchmarks.
+
+        Collects metrics endpoints from all backend processes that expose
+        a sys_port (vLLM workers with AIPerf metrics enabled).
+        """
+        urls: list[str] = []
+        for process in self.backend_processes:
+            if process.sys_port > 0:
+                host = get_hostname_ip(process.node, self.runtime.network_interface)
+                urls.append(f"http://{host}:{process.sys_port}/metrics")
+
+        if not urls:
+            return {}
+        return {"AIPERF_SERVER_METRICS_URLS": ",".join(sorted(set(urls)))}
+
+    def _get_benchmark_env(self, runner: "BenchmarkRunner") -> dict[str, str]:
+        """Get environment variables for the benchmark script."""
+        from srtctl.benchmarks.base import AIPerfBenchmarkRunner
+
+        env = self._get_benchmark_profiling_env(runner)
+
+        # Add AIPerf metrics URLs for AIPerf-driven benchmarks
+        if isinstance(runner, AIPerfBenchmarkRunner):
+            env.update(self._get_aiperf_server_metrics_env())
 
         return env

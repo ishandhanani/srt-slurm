@@ -79,6 +79,9 @@ class SABenchRunner(BenchmarkRunner):
             prefill_gpus = 0
             decode_gpus = 0
 
+        # Tokenizer path: HF model ID or container mount path
+        tokenizer_path = str(runtime.model_path) if runtime.is_hf_model else "/model"
+
         return [
             "bash",
             self.script_path,
@@ -87,7 +90,7 @@ class SABenchRunner(BenchmarkRunner):
             str(b.osl),
             str(concurrencies) if concurrencies else "",
             str(b.req_rate) if b.req_rate else "inf",
-            config.model.path,
+            tokenizer_path,
             config.served_model_name,
             str(is_disaggregated).lower(),
             str(total_gpus),

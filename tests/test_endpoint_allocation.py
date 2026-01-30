@@ -343,3 +343,33 @@ class TestEndpointsToProcesses:
         assert processes[0].kv_events_port != processes[1].kv_events_port
         assert processes[0].kv_events_port == 5550
         assert processes[1].kv_events_port == 5551
+
+    def test_nixl_port_allocation(self):
+        """Test NIXL ports are allocated globally unique starting at 6550."""
+        from srtctl.core.topology import Endpoint
+
+        endpoints = [
+            Endpoint(
+                mode="prefill",
+                index=0,
+                nodes=("node0",),
+                gpu_indices=frozenset(range(8)),
+                gpus_per_node=8,
+            ),
+            Endpoint(
+                mode="decode",
+                index=0,
+                nodes=("node1",),
+                gpu_indices=frozenset(range(8)),
+                gpus_per_node=8,
+            ),
+        ]
+
+        processes = endpoints_to_processes(endpoints)
+
+        # Each process should have a unique NIXL port
+        nixl_ports = [p.nixl_port for p in processes]
+        assert all(port is not None for port in nixl_ports), "All processes should have nixl_port"
+        assert len(nixl_ports) == len(set(nixl_ports))  # All unique
+        assert min(nixl_ports) == 6550  # Starts at base
+        assert nixl_ports == [6550, 6551]  # Sequential

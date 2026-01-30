@@ -12,9 +12,10 @@ Supported backends:
 from .base import BackendProtocol, BackendType, SrunConfig
 from .sglang import SGLangProtocol, SGLangServerConfig
 from .trtllm import TRTLLMProtocol, TRTLLMServerConfig
+from .vllm import VLLMProtocol, VLLMServerConfig
 
 # Union type for all backend configs
-BackendConfig = SGLangProtocol | TRTLLMProtocol
+BackendConfig = SGLangProtocol | TRTLLMProtocol | VLLMProtocol
 
 __all__ = [
     # Base types
@@ -28,4 +29,7 @@ __all__ = [
     # TRTLLM
     "TRTLLMProtocol",
     "TRTLLMServerConfig",
+    # vLLM
+    "VLLMProtocol",
+    "VLLMServerConfig",
 ]

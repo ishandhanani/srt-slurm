@@ -100,6 +100,18 @@ class TRTLLMProtocol:
             raise ValueError("Aggregated mode is not supported for TRTLLM")
         return {}
 
+    def get_process_environment(self, process: "Process") -> dict[str, str]:
+        """Get process-specific environment variables.
+
+        TRTLLM doesn't currently require process-specific env vars.
+        """
+        return {}
+
+    def get_served_model_name(self, default: str) -> str:
+        """Get served model name from TRTLLM config, or return default."""
+        # TRTLLM doesn't have served-model-name in config, just use default
+        return default
+
     def allocate_endpoints(
         self,
         num_prefill: int,

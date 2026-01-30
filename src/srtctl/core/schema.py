@@ -34,6 +34,7 @@ from srtctl.backends import (
     BackendConfig,
     SGLangProtocol,
     TRTLLMProtocol,
+    VLLMProtocol,
 )
 from srtctl.core.formatting import (
     FormattablePath,
@@ -252,7 +253,7 @@ class BackendConfigField(fields.Field):
             # Default to SGLang
             return SGLangProtocol()
 
-        if isinstance(value, SGLangProtocol | TRTLLMProtocol):
+        if isinstance(value, SGLangProtocol | TRTLLMProtocol | VLLMProtocol):
             return value
 
         if not isinstance(value, dict):
@@ -267,8 +268,11 @@ class BackendConfigField(fields.Field):
         elif backend_type == "trtllm":
             schema = TRTLLMProtocol.Schema()
             return schema.load(value)
+        elif backend_type == "vllm":
+            schema = VLLMProtocol.Schema()
+            return schema.load(value)
         else:
-            raise ValidationError(f"Unknown backend type: {backend_type!r}. Supported types: sglang, trtllm")
+            raise ValidationError(f"Unknown backend type: {backend_type!r}. Supported types: sglang, trtllm, vllm")
 
     def _serialize(self, value: Any | None, attr: str | None, obj: Any, **kwargs) -> Any:
         """Serialize backend config to dict."""
@@ -278,6 +282,8 @@ class BackendConfigField(fields.Field):
             return SGLangProtocol.Schema().dump(value)
         if isinstance(value, TRTLLMProtocol):
             return TRTLLMProtocol.Schema().dump(value)
+        if isinstance(value, VLLMProtocol):
+            return VLLMProtocol.Schema().dump(value)
         return value
 
 
@@ -910,18 +916,8 @@ class SrtConfig:
     @property
     def served_model_name(self) -> str:
         """Get the served model name from backend config or model path."""
-        # Try SGLang-specific extraction
-        if isinstance(self.backend, SGLangProtocol) and self.backend.sglang_config:
-            for cfg in [
-                self.backend.sglang_config.prefill,
-                self.backend.sglang_config.aggregated,
-            ]:
-                if cfg:
-                    name = cfg.get("served-model-name") or cfg.get("served_model_name")
-                    if name:
-                        return name
-        # Fallback to model path basename
-        return Path(self.model.path).name
+        default = Path(self.model.path).name
+        return self.backend.get_served_model_name(default)
 
     @property
     def backend_type(self) -> str:

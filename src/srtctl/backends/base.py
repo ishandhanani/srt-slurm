@@ -106,3 +106,22 @@ class BackendProtocol(Protocol):
     ) -> list[str]:
         """Build command to start a worker process."""
         ...
+
+    def get_process_environment(self, process: "Process") -> dict[str, str]:
+        """Get process-specific environment variables.
+
+        Unlike get_environment_for_mode() which returns static env vars per mode,
+        this method returns dynamic env vars that depend on the specific process
+        (e.g., unique ports allocated to each worker).
+
+        Args:
+            process: The process to get environment for.
+
+        Returns:
+            Dict of environment variable names to values.
+        """
+        ...
+
+    def get_served_model_name(self, default: str) -> str:
+        """Get served model name from backend config, or return default."""
+        ...

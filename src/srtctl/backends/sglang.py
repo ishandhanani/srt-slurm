@@ -117,10 +117,28 @@ class SGLangProtocol:
             return dict(self.aggregated_environment)
         return {}
 
+    def get_process_environment(self, process: "Process") -> dict[str, str]:
+        """Get process-specific environment variables.
+
+        SGLang handles kv-events via CLI args (--kv-events-config), so no
+        additional process-specific env vars are needed here.
+        """
+        return {}
+
     def is_grpc_mode(self, mode: WorkerMode) -> bool:
         """Check if gRPC mode is enabled for a worker mode."""
         config = self.get_config_for_mode(mode)
         return config.get("grpc-mode", False)
+
+    def get_served_model_name(self, default: str) -> str:
+        """Get served model name from SGLang config, or return default."""
+        if self.sglang_config:
+            for cfg in [self.sglang_config.prefill, self.sglang_config.aggregated, self.sglang_config.decode]:
+                if cfg:
+                    name = cfg.get("served-model-name") or cfg.get("served_model_name")
+                    if name:
+                        return name
+        return default
 
     def get_kv_events_config_for_mode(self, mode: WorkerMode) -> dict[str, str] | None:
         """Get kv-events config for a worker mode.
@@ -226,14 +244,7 @@ class SGLangProtocol:
         python_module = "sglang.launch_server" if use_sglang else "dynamo.sglang"
 
         # Get served model name from config
-        served_model_name = runtime.model_path.name
-        if self.sglang_config:
-            for cfg in [self.sglang_config.prefill, self.sglang_config.aggregated]:
-                if cfg:
-                    name = cfg.get("served-model-name") or cfg.get("served_model_name")
-                    if name:
-                        served_model_name = name
-                        break
+        served_model_name = self.get_served_model_name(runtime.model_path.name)
 
         # Start with nsys prefix if provided
         cmd: list[str] = list(nsys_prefix) if nsys_prefix else []

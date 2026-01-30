@@ -23,7 +23,6 @@ DECODE_GPUS=${11:-0}
 HOST=$(echo "$ENDPOINT" | sed 's|http://||' | cut -d: -f1)
 PORT=$(echo "$ENDPOINT" | sed 's|http://||' | cut -d: -f2 | cut -d/ -f1)
 
-MODEL_PATH="/model/"
 WORK_DIR="$(dirname "$0")"
 
 echo "SA-Bench Config: endpoint=${ENDPOINT}; isl=${ISL}; osl=${OSL}; concurrencies=${CONCURRENCIES}; req_rate=${REQ_RATE}; model=${MODEL_NAME}"

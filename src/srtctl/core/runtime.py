@@ -97,12 +97,16 @@ class RuntimeContext:
 
     # Computed paths (all absolute)
     log_dir: Path
-    model_path: Path
+    model_path: Path  # For HF models (hf:prefix), this is the HF model ID as a Path
     container_image: Path
 
     # Resource configuration
     gpus_per_node: int
     network_interface: str | None
+
+    # Fields with defaults must come after required fields
+    # HuggingFace model support - True if model.path was "hf:model/name"
+    is_hf_model: bool = False
 
     # Container mounts: host_path -> container_path
     container_mounts: dict[Path, Path] = field(default_factory=dict)
@@ -158,11 +162,21 @@ class RuntimeContext:
         log_dir.mkdir(parents=True, exist_ok=True)
 
         # Resolve model path (expand env vars)
-        model_path = Path(os.path.expandvars(config.model.path)).resolve()
-        if not model_path.exists():
-            raise FileNotFoundError(f"Model path does not exist: {model_path}")
-        if not model_path.is_dir():
-            raise ValueError(f"Model path is not a directory: {model_path}")
+        # Support HuggingFace model IDs with "hf:" prefix (e.g., "hf:facebook/opt-125m")
+        model_path_str = os.path.expandvars(config.model.path)
+        is_hf_model = model_path_str.startswith("hf:")
+
+        if is_hf_model:
+            # HuggingFace model ID - store as Path for compatibility, skip validation
+            hf_model_id = model_path_str[3:]  # Remove "hf:" prefix
+            model_path = Path(hf_model_id)
+        else:
+            # Local path - validate exists
+            model_path = Path(model_path_str).resolve()
+            if not model_path.exists():
+                raise FileNotFoundError(f"Model path does not exist: {model_path}")
+            if not model_path.is_dir():
+                raise ValueError(f"Model path is not a directory: {model_path}")
 
         # Resolve container image (expand env vars)
         # container_image can be either:
@@ -184,9 +198,11 @@ class RuntimeContext:
 
         # Build container mounts
         container_mounts: dict[Path, Path] = {
-            model_path: Path("/model"),
             log_dir: Path("/logs"),
         }
+        # Only mount local model paths - HF models are downloaded at runtime
+        if not is_hf_model:
+            container_mounts[model_path] = Path("/model")
 
         # Add configs directory (NATS, etcd binaries) from source root
         # SRTCTL_SOURCE_DIR is set by the sbatch script
@@ -232,6 +248,7 @@ class RuntimeContext:
             container_mounts={},
             srun_options=dict(config.srun_options),
             environment=dict(config.environment),
+            is_hf_model=is_hf_model,
         )
 
         # Expand FormattablePath mounts
@@ -254,6 +271,7 @@ class RuntimeContext:
             container_mounts=container_mounts,
             srun_options=dict(config.srun_options),
             environment=dict(config.environment),
+            is_hf_model=is_hf_model,
         )
 
     def format_string(self, template: str, **extra_kwargs) -> str:

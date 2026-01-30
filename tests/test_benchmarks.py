@@ -80,6 +80,40 @@ class TestSABenchRunner:
         assert errors == []
 
 
+class TestMooncakeRouterRunner:
+    """Test Mooncake Router benchmark runner."""
+
+    def test_build_command_includes_tokenizer_path(self):
+        """Build command passes tokenizer path to aiperf.
+
+        This fixes a bug where aiperf couldn't load the tokenizer because it was
+        using the served model name (e.g., "Qwen/Qwen3-32B") to find the tokenizer,
+        but that's not a valid HuggingFace ID or local path. The fix passes
+        --tokenizer /model explicitly since the model is mounted there.
+        """
+        from unittest.mock import MagicMock
+
+        from srtctl.benchmarks.mooncake_router import MooncakeRouterRunner
+
+        runner = MooncakeRouterRunner()
+
+        config = MagicMock()
+        config.benchmark = MagicMock()
+        config.benchmark.mooncake_workload = "conversation"
+        config.benchmark.ttft_threshold_ms = 2000
+        config.benchmark.itl_threshold_ms = 25
+        config.served_model_name = "Qwen/Qwen3-32B"
+
+        runtime = MagicMock()
+        runtime.frontend_port = 8000
+        runtime.is_hf_model = False  # Local model mounted at /model
+
+        cmd = runner.build_command(config, runtime)
+
+        # Command: bash, script, endpoint, model_name, workload, ttft, itl, tokenizer_path
+        assert cmd[7] == "/model"  # tokenizer path
+
+
 class TestScriptsExist:
     """Test that benchmark scripts exist."""
 

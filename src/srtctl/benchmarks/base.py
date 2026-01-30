@@ -60,6 +60,10 @@ class BenchmarkRunner(ABC):
         ...
 
 
+class AIPerfBenchmarkRunner(BenchmarkRunner):
+    """Marker base class for AIPerf-driven benchmarks."""
+
+
 # Registry of benchmark runners
 _BENCHMARK_RUNNERS: dict[str, type[BenchmarkRunner]] = {}
 

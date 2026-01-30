@@ -146,6 +146,9 @@ class WorkerStageMixin:
         if len(process.gpu_indices) < self.runtime.gpus_per_node:
             env_to_set["CUDA_VISIBLE_DEVICES"] = process.cuda_visible_devices
 
+        # Add backend-specific process environment variables (e.g., unique ports)
+        env_to_set.update(self.backend.get_process_environment(process))
+
         # Log env vars in the format: VAR=value VAR2=value2
         env_str = " ".join(f"{k}={v}" for k, v in sorted(env_to_set.items()))
         logger.info("Env: %s", env_str)

@@ -6,7 +6,7 @@
 # Tests KV-aware routing vs round-robin using Mooncake conversation trace
 # Based on dynamo exemplar for Qwen3-32B
 #
-# Usage: bench.sh ENDPOINT MODEL_NAME [WORKLOAD] [TTFT_THRESHOLD] [ITL_THRESHOLD]
+# Usage: bench.sh ENDPOINT MODEL_NAME [WORKLOAD] [TTFT_THRESHOLD] [ITL_THRESHOLD] [TOKENIZER_PATH]
 
 set -e
 
@@ -15,6 +15,16 @@ MODEL_NAME=${2:-"Qwen/Qwen3-32B"}
 WORKLOAD=${3:-"conversation"}
 TTFT_THRESHOLD=${4:-2000}
 ITL_THRESHOLD=${5:-25}
+TOKENIZER_PATH=${6:-"/model"}
+
+# Optional: extra Prometheus endpoints for AIPerf server metrics
+SERVER_METRICS_ARGS=()
+if [ -n "${AIPERF_SERVER_METRICS_URLS:-}" ]; then
+    IFS=',' read -r -a server_metrics_urls <<< "${AIPERF_SERVER_METRICS_URLS}"
+    if [ ${#server_metrics_urls[@]} -gt 0 ]; then
+        SERVER_METRICS_ARGS+=(--server-metrics "${server_metrics_urls[@]}")
+    fi
+fi
 
 # Setup directories
 BASE_DIR="/logs"
@@ -35,6 +45,7 @@ echo "Model: ${MODEL_NAME}"
 echo "Workload: ${WORKLOAD}"
 echo "TTFT Threshold: ${TTFT_THRESHOLD}ms"
 echo "ITL Threshold: ${ITL_THRESHOLD}ms"
+echo "Tokenizer Path: ${TOKENIZER_PATH}"
 echo "=============================================="
 
 # Install aiperf if not present
@@ -55,7 +66,7 @@ TRACE_URL="${TRACE_URLS[$WORKLOAD]}"
 
 if [ ! -f "${INPUT_FILE}" ]; then
     echo "Downloading ${WORKLOAD} trace..."
-    wget -qO "${INPUT_FILE}" "${TRACE_URL}"
+    curl -fsSL -o "${INPUT_FILE}" "${TRACE_URL}"
     echo "Downloaded to ${INPUT_FILE}"
 fi
 
@@ -63,6 +74,7 @@ fi
 echo "Running small benchmark for warmup..."
 aiperf profile \
     -m "${MODEL_NAME}" \
+    --tokenizer "${TOKENIZER_PATH}" \
     --url "${ENDPOINT}" \
     --streaming \
     --ui simple \
@@ -86,6 +98,7 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Starting benchmark"
 # Run aiperf profile exactly as dynamo does
 aiperf profile \
     -m "${MODEL_NAME}" \
+    --tokenizer "${TOKENIZER_PATH}" \
     --input-file "${INPUT_FILE}" \
     --custom-dataset-type mooncake_trace \
     --fixed-schedule \
@@ -94,6 +107,7 @@ aiperf profile \
     --random-seed 42 \
     --ui simple \
     --artifact-dir "${RUN_ARTIFACT_DIR}" \
+    "${SERVER_METRICS_ARGS[@]}" \
     --goodput "time_to_first_token:${TTFT_THRESHOLD} inter_token_latency:${ITL_THRESHOLD}"
 
 BENCH_EXIT_CODE=$?

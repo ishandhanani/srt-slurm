@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from srtctl.benchmarks.base import SCRIPTS_DIR, BenchmarkRunner, register_benchmark
+from srtctl.benchmarks.base import SCRIPTS_DIR, AIPerfBenchmarkRunner, register_benchmark
 
 if TYPE_CHECKING:
     from srtctl.core.runtime import RuntimeContext
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 @register_benchmark("mooncake-router")
-class MooncakeRouterRunner(BenchmarkRunner):
+class MooncakeRouterRunner(AIPerfBenchmarkRunner):
     """Mooncake Router benchmark for testing KV-aware routing using aiperf.
 
     Uses the Mooncake conversation trace dataset to benchmark prefix caching
@@ -97,6 +97,10 @@ class MooncakeRouterRunner(BenchmarkRunner):
         ttft_threshold = getattr(b, "ttft_threshold_ms", None) or 2000
         itl_threshold = getattr(b, "itl_threshold_ms", None) or 25
 
+        # Tokenizer path: HF model ID or container mount path
+        # For HF models, use the model ID directly so transformers downloads it
+        tokenizer_path = str(runtime.model_path) if runtime.is_hf_model else "/model"
+
         return [
             "bash",
             self.script_path,
@@ -105,4 +109,5 @@ class MooncakeRouterRunner(BenchmarkRunner):
             workload,
             str(ttft_threshold),
             str(itl_threshold),
+            tokenizer_path,
         ]
