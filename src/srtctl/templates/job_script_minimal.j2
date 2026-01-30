@@ -76,7 +76,19 @@ export SRTCTL_SOURCE_DIR="${SRTCTL_SOURCE}"
 
 echo ""
 echo "Installing srtctl dependencies via container..."
-srun --nodes=1 --ntasks=1 --nodelist="${HEAD_NODE}" \
+
+# Unset SLURM env vars that conflict with nested srun:
+# - SLURM_TRES_PER_TASK: conflicts with auto-computed SLURM_CPUS_PER_TASK in nested srun
+# - Task-related vars: prevent pyxis from spawning multiple parallel container imports (OOM)
+unset SLURM_TRES_PER_TASK SLURM_TASKS_PER_NODE SLURM_STEP_TASKS_PER_NODE \
+      SLURM_NTASKS SLURM_NTASKS_PER_NODE SLURM_STEP_NUM_TASKS SLURM_MEM_PER_NODE
+
+# Debug: show relevant SLURM env vars before srun
+echo "DEBUG: SLURM env vars after unset:"
+env | grep -E '^SLURM_' | grep -iE 'task|mem|cpu|ntask' | sort
+echo ""
+
+srun --nodes=1 --ntasks=1 --mem=0 --nodelist="${HEAD_NODE}" \
     --container-image="{{ container_image }}" \
     --container-mounts="${SRTCTL_SOURCE}:/srtctl-src,${SRTCTL_INSTALL_DIR}:/srtctl-install" \
     pip install --quiet --target=/srtctl-install /srtctl-src
