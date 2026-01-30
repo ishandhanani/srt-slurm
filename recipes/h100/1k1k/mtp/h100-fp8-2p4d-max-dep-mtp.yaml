@@ -36,9 +36,9 @@ backend:
       trust-remote-code: true
 
       # Parallelism
-      tp-size: 8
-      dp-size: 8
-      ep-size: 8 
+      tp-size: 16
+      dp-size: 16
+      ep-size: 16
       enable-dp-attention: true
 
       # KV cache and attention
@@ -48,17 +48,17 @@ backend:
       disable-radix-cache: true
 
       # Other flags
-      max-running-requests: 512
+      max-running-requests: 2
 
       # Prefill-specific mode
       disaggregation-bootstrap-port: 30001
       disaggregation-mode: "prefill"
       disaggregation-transfer-backend: nixl
 
-      # Memory and token limits
-      mem-fraction-static: 0.75
-      max-prefill-tokens: 65536
-      chunked-prefill-size: 262144
+      # Memory and token limits (balanced for MTP)
+      mem-fraction-static: 0.65
+      max-prefill-tokens: 2048
+      chunked-prefill-size: 2048
 
       # Request handling
       load-balance-method: "round_robin"
@@ -77,9 +77,9 @@ backend:
       trust-remote-code: true
 
       # Parallelism
-      tp-size: 8
-      dp-size: 8
-      ep-size: 8
+      tp-size: 16
+      dp-size: 16
+      ep-size: 16
       enable-dp-attention: true
 
       # KV cache and attention
@@ -87,7 +87,7 @@ backend:
 
       # Other flags
       disable-radix-cache: true
-      stream-interval: 10
+      stream-interval: 100
 
       # Disagg
       disaggregation-bootstrap-port: 30001
@@ -95,9 +95,9 @@ backend:
       disaggregation-transfer-backend: nixl
 
       # Memory and token limits
-      mem-fraction-static: 0.82
-      max-running-requests: 512
-      cuda-graph-max-bs: 512
+      mem-fraction-static: 0.9
+      max-running-requests: 16
+      cuda-graph-max-bs: 16
 
       # MTP
       speculative-algorithm: "EAGLE"
@@ -109,5 +109,5 @@ benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 1024
-  concurrencies: "128x256x512x1024"
+  concurrencies: "1x2x4x8x16"
   req_rate: "inf"

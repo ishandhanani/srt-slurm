@@ -10,7 +10,7 @@ resources:
   prefill_nodes: 2
   prefill_workers: 1
   decode_nodes: 2
-  decode_workers: 2
+  decode_workers: 1
   gpus_per_node: 8
 
 backend:
@@ -36,9 +36,10 @@ backend:
       trust-remote-code: true
 
       # Parallelism
-      tp-size: 8
-      dp-size: 8
-      ep-size: 8 
+      tp-size: 16
+      dp-size: 16
+      ep-size: 16
+      enable-dp-attention: true
 
       # KV cache and attention
       attention-backend: "flashinfer"
@@ -47,7 +48,7 @@ backend:
       disable-radix-cache: true
 
       # Other flags
-      max-running-requests: 512
+      max-running-requests: 1
 
       # Prefill-specific mode
       disaggregation-bootstrap-port: 30001
@@ -55,9 +56,9 @@ backend:
       disaggregation-transfer-backend: nixl
 
       # Memory and token limits
-      mem-fraction-static: 0.75
-      max-prefill-tokens: 163840
-      chunked-prefill-size: 163840
+      mem-fraction-static: 0.3
+      max-prefill-tokens: 8224
+      chunked-prefill-size: 8224
 
       # Request handling
       load-balance-method: "round_robin"
@@ -76,9 +77,9 @@ backend:
       trust-remote-code: true
 
       # Parallelism
-      tp-size: 8
-      dp-size: 8
-      ep-size: 8 
+      tp-size: 16
+      dp-size: 16
+      ep-size: 16
       enable-dp-attention: true
 
       # KV cache and attention
@@ -86,7 +87,7 @@ backend:
 
       # Other flags
       disable-radix-cache: true
-      stream-interval: 10
+      stream-interval: 100
 
       # Disagg
       disaggregation-bootstrap-port: 30001
@@ -94,9 +95,9 @@ backend:
       disaggregation-transfer-backend: nixl
 
       # Memory and token limits
-      mem-fraction-static: 0.88
-      max-running-requests: 256
-      cuda-graph-max-bs: 256
+      mem-fraction-static: 0.9
+      max-running-requests: 4
+      cuda-graph-max-bs: 4
 
       # MTP (Multi-Token Prediction)
       speculative-algorithm: "EAGLE"
@@ -108,5 +109,5 @@ benchmark:
   type: "sa-bench"
   isl: 8192
   osl: 1024
-  concurrencies: "64x128x256"
+  concurrencies: "1x2x4x8x16"
   req_rate: "inf"

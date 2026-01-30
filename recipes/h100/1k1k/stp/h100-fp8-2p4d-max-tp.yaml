@@ -9,7 +9,7 @@ resources:
   gpu_type: "h100"
   prefill_nodes: 2
   prefill_workers: 1
-  decode_nodes: 6
+  decode_nodes: 4
   decode_workers: 2
   gpus_per_node: 8
 
@@ -34,7 +34,7 @@ backend:
       trust-remote-code: true
 
       # Parallelism
-      tp-size: 8
+      tp-size: 16
       dp-size: 1
       ep-size: 1 
       enable-dp-attention: true
@@ -46,7 +46,7 @@ backend:
       disable-radix-cache: true
 
       # Other flags
-      max-running-requests: 512
+      max-running-requests: 2
 
       # Prefill-specific mode
       disaggregation-bootstrap-port: 30001
@@ -54,9 +54,9 @@ backend:
       disaggregation-transfer-backend: nixl
 
       # Memory and token limits
-      mem-fraction-static: 0.75
-      max-prefill-tokens: 65536
-      chunked-prefill-size: 262144
+      mem-fraction-static: 0.6
+      max-prefill-tokens: 2048
+      chunked-prefill-size: 2048
 
       # Request handling
       load-balance-method: "round_robin"
@@ -69,17 +69,17 @@ backend:
       trust-remote-code: true
 
       # Parallelism
-      tp-size: 8
+      tp-size: 16
       dp-size: 1
       ep-size: 1
-      enable-dp-attention: true
+      enable-dp-attention: false
 
       # KV cache and attention
       attention-backend: "flashinfer"
 
       # Other flags
       disable-radix-cache: true
-      stream-interval: 10
+      stream-interval: 100
 
       # Disagg
       disaggregation-bootstrap-port: 30001
@@ -87,13 +87,13 @@ backend:
       disaggregation-transfer-backend: nixl
 
       # Memory and token limits
-      mem-fraction-static: 0.82
-      max-running-requests: 512
-      cuda-graph-max-bs: 512
+      mem-fraction-static: 0.9
+      max-running-requests: 8
+      cuda-graph-max-bs: 8
 
 benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 1024
-  concurrencies: "128x256x512x1024x2048"
+  concurrencies: "1x2x4x8"
   req_rate: "inf"
