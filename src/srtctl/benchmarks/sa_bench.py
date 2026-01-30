@@ -94,3 +94,23 @@ class SABenchRunner(BenchmarkRunner):
             str(prefill_gpus),
             str(decode_gpus),
         ]
+
+
+@register_benchmark("sa-bench-lite")
+class SABenchLiteRunner(SABenchRunner):
+    """SA-Bench Lite: Half the requests for faster iteration.
+
+    Same interface as sa-bench but with reduced warmup and test prompts.
+    """
+
+    @property
+    def name(self) -> str:
+        return "SA-Bench-Lite"
+
+    @property
+    def script_path(self) -> str:
+        return "/srtctl-benchmarks/sa-bench-lite/bench.sh"
+
+    @property
+    def local_script_dir(self) -> str:
+        return str(SCRIPTS_DIR / "sa-bench-lite")

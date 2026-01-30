@@ -51,7 +51,7 @@ backend:
         max_batch_size: 4
         enable_padding: true
       disable_overlap_scheduler: true
-      enable_attention_dp: false
+      enable_attention_dp: true
       kv_cache_config:
         dtype: fp8
         enable_block_reuse: false

@@ -80,8 +80,11 @@ echo "Installing srtctl dependencies via container..."
 # Unset SLURM env vars that conflict with nested srun:
 # - SLURM_TRES_PER_TASK: conflicts with auto-computed SLURM_CPUS_PER_TASK in nested srun
 # - Task-related vars: prevent pyxis from spawning multiple parallel container imports (OOM)
+# - CPU bind vars: prevent inheriting restrictive CPU affinity that breaks NUMA scheduling
 unset SLURM_TRES_PER_TASK SLURM_TASKS_PER_NODE SLURM_STEP_TASKS_PER_NODE \
-      SLURM_NTASKS SLURM_NTASKS_PER_NODE SLURM_STEP_NUM_TASKS SLURM_MEM_PER_NODE
+      SLURM_NTASKS SLURM_NTASKS_PER_NODE SLURM_STEP_NUM_TASKS SLURM_MEM_PER_NODE \
+      SLURM_CPUS_PER_TASK SLURM_CPU_BIND SLURM_CPU_BIND_LIST SLURM_CPU_BIND_TYPE \
+      SLURM_CPU_BIND_VERBOSE
 
 # Debug: show relevant SLURM env vars before srun
 echo "DEBUG: SLURM env vars after unset:"
