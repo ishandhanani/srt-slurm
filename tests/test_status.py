@@ -7,12 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from srtctl.contract import JobCreatePayload, JobStage, JobStatus, JobUpdatePayload
 from srtctl.core.schema import ReportingConfig, ReportingStatusConfig
 from srtctl.core.status import (
-    JobCreatePayload,
-    JobStage,
-    JobStatus,
-    JobUpdatePayload,
     StatusReporter,
     create_job_record,
 )
@@ -168,29 +165,29 @@ class TestStatusReporterCompleted:
 
 
 # ============================================================================
-# Payload Dataclass Tests
+# Payload Model Tests
 # ============================================================================
 
 
 class TestJobCreatePayload:
-    """Test JobCreatePayload dataclass."""
+    """Test JobCreatePayload Pydantic model."""
 
-    def test_to_dict_includes_required_fields(self):
-        """to_dict includes all required fields."""
+    def test_model_dump_includes_required_fields(self):
+        """model_dump includes all required fields."""
         payload = JobCreatePayload(
             job_id="12345",
             job_name="test-job",
             submitted_at="2025-01-26T10:00:00Z",
         )
 
-        result = payload.to_dict()
+        result = payload.model_dump(exclude_none=True)
 
         assert result["job_id"] == "12345"
         assert result["job_name"] == "test-job"
         assert result["submitted_at"] == "2025-01-26T10:00:00Z"
 
-    def test_to_dict_excludes_none_values(self):
-        """to_dict excludes fields with None values."""
+    def test_model_dump_excludes_none_values(self):
+        """model_dump(exclude_none=True) excludes fields with None values."""
         payload = JobCreatePayload(
             job_id="12345",
             job_name="test-job",
@@ -200,14 +197,14 @@ class TestJobCreatePayload:
             metadata=None,
         )
 
-        result = payload.to_dict()
+        result = payload.model_dump(exclude_none=True)
 
         assert "cluster" not in result
         assert "recipe" not in result
         assert "metadata" not in result
 
-    def test_to_dict_includes_optional_fields_when_set(self):
-        """to_dict includes optional fields when they have values."""
+    def test_model_dump_includes_optional_fields_when_set(self):
+        """model_dump includes optional fields when they have values."""
         payload = JobCreatePayload(
             job_id="12345",
             job_name="test-job",
@@ -217,7 +214,7 @@ class TestJobCreatePayload:
             metadata={"key": "value"},
         )
 
-        result = payload.to_dict()
+        result = payload.model_dump(exclude_none=True)
 
         assert result["cluster"] == "gpu-cluster"
         assert result["recipe"] == "configs/test.yaml"
@@ -225,22 +222,22 @@ class TestJobCreatePayload:
 
 
 class TestJobUpdatePayload:
-    """Test JobUpdatePayload dataclass."""
+    """Test JobUpdatePayload Pydantic model."""
 
-    def test_to_dict_includes_required_fields(self):
-        """to_dict includes required fields."""
+    def test_model_dump_includes_required_fields(self):
+        """model_dump includes required fields."""
         payload = JobUpdatePayload(
             status="starting",
             updated_at="2025-01-26T10:00:00Z",
         )
 
-        result = payload.to_dict()
+        result = payload.model_dump(exclude_none=True)
 
         assert result["status"] == "starting"
         assert result["updated_at"] == "2025-01-26T10:00:00Z"
 
-    def test_to_dict_excludes_none_values(self):
-        """to_dict excludes fields with None values."""
+    def test_model_dump_excludes_none_values(self):
+        """model_dump(exclude_none=True) excludes fields with None values."""
         payload = JobUpdatePayload(
             status="starting",
             updated_at="2025-01-26T10:00:00Z",
@@ -248,20 +245,20 @@ class TestJobUpdatePayload:
             message=None,
         )
 
-        result = payload.to_dict()
+        result = payload.model_dump(exclude_none=True)
 
         assert "stage" not in result
         assert "message" not in result
 
-    def test_to_dict_includes_exit_code_when_set(self):
-        """to_dict includes exit_code when set."""
+    def test_model_dump_includes_exit_code_when_set(self):
+        """model_dump includes exit_code when set."""
         payload = JobUpdatePayload(
             status="completed",
             updated_at="2025-01-26T10:00:00Z",
             exit_code=0,
         )
 
-        result = payload.to_dict()
+        result = payload.model_dump(exclude_none=True)
 
         assert result["exit_code"] == 0
 

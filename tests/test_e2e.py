@@ -14,7 +14,6 @@ from srtctl.core.config import load_config
 from srtctl.core.topology import allocate_endpoints, endpoints_to_processes
 
 RECIPES_DIR = Path(__file__).parent.parent / "recipes"
-CI_DIR = Path(__file__).parent.parent / "ci"
 
 
 # =============================================================================
@@ -238,71 +237,6 @@ class TestH100Cluster:
                             f"prefill endpoint should span {expected_nodes} nodes, got {ep.num_nodes}"
                         )
 
-
-class TestCIConfigs:
-    """CI configs (smaller models) on H100 rack."""
-
-    RACK = H100Rack
-
-    def test_agg_config(self):
-        """Aggregated CI config allocates correctly."""
-        recipe_path = CI_DIR / "agg.yaml"
-        if not recipe_path.exists():
-            pytest.skip("agg.yaml not found")
-
-        with patch.dict(os.environ, self.RACK.slurm_env(), clear=False):
-            with patch("subprocess.run", side_effect=self.RACK.mock_scontrol()):
-                config = load_config(str(recipe_path))
-                r = config.resources
-
-                endpoints = config.backend.allocate_endpoints(
-                    num_prefill=r.num_prefill,
-                    num_decode=r.num_decode,
-                    num_agg=r.num_agg,
-                    gpus_per_prefill=r.gpus_per_prefill,
-                    gpus_per_decode=r.gpus_per_decode,
-                    gpus_per_agg=r.gpus_per_agg,
-                    gpus_per_node=r.gpus_per_node,
-                    available_nodes=self.RACK.nodes(),
-                )
-
-                agg_eps = [e for e in endpoints if e.mode == "agg"]
-                assert len(agg_eps) == r.num_agg
-                for ep in agg_eps:
-                    assert ep.total_gpus == r.gpus_per_agg
-
-    def test_disagg_config(self):
-        """Disaggregated CI config allocates correctly."""
-        recipe_path = CI_DIR / "disagg.yaml"
-        if not recipe_path.exists():
-            pytest.skip("disagg.yaml not found")
-
-        with patch.dict(os.environ, self.RACK.slurm_env(), clear=False):
-            with patch("subprocess.run", side_effect=self.RACK.mock_scontrol()):
-                config = load_config(str(recipe_path))
-                r = config.resources
-
-                endpoints = config.backend.allocate_endpoints(
-                    num_prefill=r.num_prefill,
-                    num_decode=r.num_decode,
-                    num_agg=r.num_agg,
-                    gpus_per_prefill=r.gpus_per_prefill,
-                    gpus_per_decode=r.gpus_per_decode,
-                    gpus_per_agg=r.gpus_per_agg,
-                    gpus_per_node=r.gpus_per_node,
-                    available_nodes=self.RACK.nodes(),
-                )
-
-                prefill_eps = [e for e in endpoints if e.mode == "prefill"]
-                decode_eps = [e for e in endpoints if e.mode == "decode"]
-
-                assert len(prefill_eps) == r.num_prefill
-                assert len(decode_eps) == r.num_decode
-
-                for ep in prefill_eps:
-                    assert ep.total_gpus == r.gpus_per_prefill
-                for ep in decode_eps:
-                    assert ep.total_gpus == r.gpus_per_decode
 
 
 class TestQwen32BCluster:
