@@ -6,7 +6,7 @@ Fire-and-forget status reporter for external job tracking.
 
 This module provides optional status reporting to an external API endpoint.
 If the endpoint is not configured or unreachable, operations silently continue.
-The API contract is defined in docs/status-api-spec.md.
+The API contract is defined in srtctl.contract.
 
 Configuration (in srtslurm.yaml or recipe YAML):
     reporting:
@@ -15,85 +15,19 @@ Configuration (in srtslurm.yaml or recipe YAML):
 """
 
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import Enum
 from typing import TYPE_CHECKING
 
 import requests
+
+from srtctl.contract import JobCreatePayload, JobStage, JobStatus, JobUpdatePayload
 
 if TYPE_CHECKING:
     from srtctl.core.runtime import RuntimeContext
     from srtctl.core.schema import ReportingConfig, SrtConfig
 
 logger = logging.getLogger(__name__)
-
-
-# ============================================================================
-# API Payload Dataclasses (matches docs/status-api-spec.md)
-# ============================================================================
-
-
-@dataclass
-class JobCreatePayload:
-    """Payload for POST /api/jobs."""
-
-    job_id: str
-    job_name: str
-    submitted_at: str
-    cluster: str | None = None
-    recipe: str | None = None
-    metadata: dict | None = None
-
-    def to_dict(self) -> dict:
-        """Convert to dict, excluding None values."""
-        return {k: v for k, v in asdict(self).items() if v is not None}
-
-
-@dataclass
-class JobUpdatePayload:
-    """Payload for PUT /api/jobs/{job_id}."""
-
-    status: str
-    updated_at: str
-    stage: str | None = None
-    message: str | None = None
-    started_at: str | None = None
-    completed_at: str | None = None
-    exit_code: int | None = None
-    metadata: dict | None = None
-
-    def to_dict(self) -> dict:
-        """Convert to dict, excluding None values."""
-        return {k: v for k, v in asdict(self).items() if v is not None}
-
-
-class JobStage(str, Enum):
-    """Job execution stages matching do_sweep.py flow."""
-
-    STARTING = "starting"
-    HEAD_INFRASTRUCTURE = "head_infrastructure"
-    WORKERS = "workers"
-    FRONTEND = "frontend"
-    BENCHMARK = "benchmark"
-    CLEANUP = "cleanup"
-
-
-class JobStatus(str, Enum):
-    """Job status values.
-
-    These represent the current stage of execution, not readiness.
-    We report when ENTERING a stage, not when it's complete.
-    """
-
-    SUBMITTED = "submitted"  # Job submitted to SLURM
-    STARTING = "starting"  # Job started, setting up head infrastructure
-    WORKERS = "workers"  # Starting worker processes
-    FRONTEND = "frontend"  # Starting frontend/router
-    BENCHMARK = "benchmark"  # Running benchmark
-    COMPLETED = "completed"  # Finished successfully
-    FAILED = "failed"  # Failed with error
-    TIMEOUT = "timeout"  # Timed out
 
 
 @dataclass(frozen=True)
@@ -167,7 +101,7 @@ class StatusReporter:
             )
 
             url = f"{self.api_endpoint}/api/jobs/{self.job_id}"
-            response = requests.put(url, json=payload.to_dict(), timeout=self.timeout)
+            response = requests.put(url, json=payload.model_dump(exclude_none=True), timeout=self.timeout)
 
             if response.status_code == 200:
                 logger.debug("Status reported: %s", status.value)
@@ -214,17 +148,17 @@ class StatusReporter:
                 "head_node": runtime.nodes.head,
             }
 
-            payload = {
-                "status": JobStatus.STARTING.value,
-                "stage": JobStage.STARTING.value,
-                "message": f"Job started on {runtime.nodes.head}",
-                "started_at": self._now_iso(),
-                "updated_at": self._now_iso(),
-                "metadata": metadata,
-            }
+            payload = JobUpdatePayload(
+                status=JobStatus.STARTING.value,
+                stage=JobStage.STARTING.value,
+                message=f"Job started on {runtime.nodes.head}",
+                started_at=self._now_iso(),
+                updated_at=self._now_iso(),
+                metadata=metadata,
+            )
 
             url = f"{self.api_endpoint}/api/jobs/{self.job_id}"
-            response = requests.put(url, json=payload, timeout=self.timeout)
+            response = requests.put(url, json=payload.model_dump(exclude_none=True), timeout=self.timeout)
             return response.status_code == 200
 
         except requests.exceptions.RequestException as e:
@@ -247,17 +181,17 @@ class StatusReporter:
             status = JobStatus.COMPLETED if exit_code == 0 else JobStatus.FAILED
             message = "Benchmark completed successfully" if exit_code == 0 else f"Job failed with exit code {exit_code}"
 
-            payload = {
-                "status": status.value,
-                "stage": JobStage.CLEANUP.value,
-                "message": message,
-                "completed_at": self._now_iso(),
-                "updated_at": self._now_iso(),
-                "exit_code": exit_code,
-            }
+            payload = JobUpdatePayload(
+                status=status.value,
+                stage=JobStage.CLEANUP.value,
+                message=message,
+                completed_at=self._now_iso(),
+                updated_at=self._now_iso(),
+                exit_code=exit_code,
+            )
 
             url = f"{self.api_endpoint}/api/jobs/{self.job_id}"
-            response = requests.put(url, json=payload, timeout=self.timeout)
+            response = requests.put(url, json=payload.model_dump(exclude_none=True), timeout=self.timeout)
             return response.status_code == 200
 
         except requests.exceptions.RequestException as e:
@@ -294,20 +228,17 @@ def create_job_record(
     api_endpoint = reporting.status.endpoint.rstrip("/")
 
     try:
-        payload: dict = {
-            "job_id": job_id,
-            "job_name": job_name,
-            "submitted_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        }
-        if cluster:
-            payload["cluster"] = cluster
-        if recipe:
-            payload["recipe"] = recipe
-        if metadata:
-            payload["metadata"] = metadata
+        payload = JobCreatePayload(
+            job_id=job_id,
+            job_name=job_name,
+            submitted_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            cluster=cluster,
+            recipe=recipe,
+            metadata=metadata,
+        )
 
         url = f"{api_endpoint}/api/jobs"
-        response = requests.post(url, json=payload, timeout=5.0)
+        response = requests.post(url, json=payload.model_dump(exclude_none=True), timeout=5.0)
 
         if response.status_code == 201:
             logger.debug("Job record created: %s", job_id)

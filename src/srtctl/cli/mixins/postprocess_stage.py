@@ -315,21 +315,22 @@ echo "files total"
 
         endpoint = status_dict["endpoint"]
 
-        metadata: dict[str, Any] = {}
+        payload: dict[str, Any] = {}
         if benchmark_results:
-            metadata["benchmark_results"] = benchmark_results
+            payload["benchmark_results"] = benchmark_results
         if s3_url:
-            metadata["logs_url"] = s3_url
+            payload["logs_url"] = s3_url
 
-        if not metadata:
+        if not payload:
             return
 
         # Use "failed" status when exit code is non-zero
         status = "failed" if exit_code != 0 else "completed"
+        payload["status"] = status
 
         try:
             url = f"{endpoint}/api/jobs/{self.runtime.job_id}"
-            response = requests.put(url, json={"status": status, "metadata": metadata}, timeout=5)
+            response = requests.put(url, json=payload, timeout=5)
             if response.ok:
                 logger.info("Reported metrics to dashboard: %s", url)
             else:

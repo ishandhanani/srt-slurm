@@ -13,6 +13,7 @@ dependencies = [
     "jinja2>=3.1.0",
     "marshmallow>=3.20.0",
     "marshmallow-dataclass>=8.6.0",
+    "pydantic>=2.5.0",
     "requests>=2.31.0",
     "rich>=13.0.0",
     "questionary>=2.0.0",
@@ -36,6 +37,8 @@ dev = [
     "pytest-cov>=4.0",
     "ruff>=0.8.0",
     "ty",  # Astral's fast type checker (replaces mypy)
+    "fastapi>=0.109.0",
+    "httpx>=0.27.0",  # Required by FastAPI TestClient
 ]
 
 # =============================================================================
@@ -70,6 +73,7 @@ known-first-party = ["srtctl"]
 # =============================================================================
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"

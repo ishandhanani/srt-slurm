@@ -26,3 +26,7 @@
 - [Monitoring](monitoring.md)
 - [Analyzing Results](analyzing.md)
 - [SLURM FAQ](slurm-faq.md)
+
+## Reference
+
+- [Status API Spec](status-api-spec.md)
