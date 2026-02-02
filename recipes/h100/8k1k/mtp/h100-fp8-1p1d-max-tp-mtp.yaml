@@ -1,4 +1,4 @@
-name: "h100-fp8-1p2d-max-tp"
+name: "h100-fp8-1p1d-max-tp-mtp"
 
 model:
   path: "dsfp8"
@@ -9,8 +9,8 @@ resources:
   gpu_type: "h100"
   prefill_nodes: 2
   prefill_workers: 1
-  decode_nodes: 4
-  decode_workers: 2
+  decode_nodes: 2
+  decode_workers: 1
   gpus_per_node: 8
 
 backend:
@@ -19,11 +19,13 @@ backend:
   prefill_environment:
     SGLANG_DG_CACHE_DIR: "/configs/deepgemm_cache-{node_id}"
     FLASHINFER_WORKSPACE_BASE: "/configs/"
+    SGLANG_ENABLE_SPEC_V2: "1"
 
   # Decode-specific environment variables
   decode_environment:
     SGLANG_DG_CACHE_DIR: "/configs/deepgemm_cache-{node_id}"
     FLASHINFER_WORKSPACE_BASE: "/configs/"
+    SGLANG_ENABLE_SPEC_V2: "1"
 
   sglang_config:
     prefill:
@@ -36,7 +38,7 @@ backend:
       # Parallelism
       tp-size: 16
       dp-size: 1
-      ep-size: 1 
+      ep-size: 1
       enable-dp-attention: false
 
       # KV cache and attention
@@ -45,7 +47,7 @@ backend:
       # Radix cache disabled
       disable-radix-cache: true
 
-      # Other flags
+      # Prefill capacity
       max-running-requests: 2
 
       # Prefill-specific mode
@@ -61,8 +63,11 @@ backend:
       # Request handling
       load-balance-method: "round_robin"
 
-      # Watchdog timeout (allow time for DeepGEMM JIT compilation)
-      watchdog-timeout: 900
+      # MTP (Multi-Token Prediction)
+      speculative-algorithm: "EAGLE"
+      speculative-num-steps: 2
+      speculative-eagle-topk: 1
+      speculative-num-draft-tokens: 3
 
     decode:
       # Model configuration
@@ -91,15 +96,18 @@ backend:
 
       # Memory and token limits
       mem-fraction-static: 0.9
-      max-running-requests: 8
-      cuda-graph-max-bs: 8
+      max-running-requests: 128
+      cuda-graph-max-bs: 128
 
-      # Watchdog timeout (allow time for DeepGEMM JIT compilation)
-      watchdog-timeout: 900
+      # MTP (Multi-Token Prediction)
+      speculative-algorithm: "EAGLE"
+      speculative-num-steps: 2
+      speculative-eagle-topk: 1
+      speculative-num-draft-tokens: 3
 
 benchmark:
   type: "sa-bench"
-  isl: 1024
+  isl: 8192
   osl: 1024
-  concurrencies: "1x2x4x8"
+  concurrencies: "1x2x4x8x16x32x64x128"
   req_rate: "inf"

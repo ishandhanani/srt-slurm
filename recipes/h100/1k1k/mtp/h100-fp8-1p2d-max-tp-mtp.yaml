@@ -1,4 +1,4 @@
-name: "h100-fp8-1p2d-max-dep-mtp"
+name: "h100-fp8-1p2d-max-tp-mtp"
 
 model:
   path: "dsfp8"
@@ -17,13 +17,13 @@ backend:
 
   # Prefill-specific environment variables
   prefill_environment:
-    SGLANG_DG_CACHE_DIR: "/configs/deepgemm_cache"
+    SGLANG_DG_CACHE_DIR: "/configs/deepgemm_cache-{node_id}"
     FLASHINFER_WORKSPACE_BASE: "/configs/"
     SGLANG_ENABLE_SPEC_V2: "1"
 
   # Decode-specific environment variables
   decode_environment:
-    SGLANG_DG_CACHE_DIR: "/configs/deepgemm_cache"
+    SGLANG_DG_CACHE_DIR: "/configs/deepgemm_cache-{node_id}"
     FLASHINFER_WORKSPACE_BASE: "/configs/"
     SGLANG_ENABLE_SPEC_V2: "1"
 
@@ -37,9 +37,9 @@ backend:
 
       # Parallelism
       tp-size: 16
-      dp-size: 16
-      ep-size: 16
-      enable-dp-attention: true
+      dp-size: 1
+      ep-size: 1
+      enable-dp-attention: false
 
       # KV cache and attention
       attention-backend: "flashinfer"
@@ -55,8 +55,8 @@ backend:
       disaggregation-mode: "prefill"
       disaggregation-transfer-backend: nixl
 
-      # Memory and token limits (balanced for MTP)
-      mem-fraction-static: 0.65
+      # Memory and token limits
+      mem-fraction-static: 0.6
       max-prefill-tokens: 2048
       chunked-prefill-size: 2048
 
@@ -78,16 +78,16 @@ backend:
 
       # Parallelism
       tp-size: 16
-      dp-size: 16
-      ep-size: 16
-      enable-dp-attention: true
+      dp-size: 1
+      ep-size: 1
+      enable-dp-attention: false
 
       # KV cache and attention
       attention-backend: "flashinfer"
 
       # Other flags
       disable-radix-cache: true
-      stream-interval: 100
+      stream-interval: 1
 
       # Disagg
       disaggregation-bootstrap-port: 30001
@@ -96,8 +96,8 @@ backend:
 
       # Memory and token limits
       mem-fraction-static: 0.9
-      max-running-requests: 16
-      cuda-graph-max-bs: 16
+      max-running-requests: 128
+      cuda-graph-max-bs: 128
 
       # MTP
       speculative-algorithm: "EAGLE"
@@ -109,5 +109,5 @@ benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 1024
-  concurrencies: "1x2x4x8x16"
+  concurrencies: "1x2x4x8x16x32x64x128"
   req_rate: "inf"
