@@ -1,4 +1,4 @@
-name: "h100-fp8-2p2d-max-dep-mtp"
+name: "h100-fp8-1p1d-max-dep-mtp"
 
 model:
   path: "dsfp8"
@@ -56,7 +56,7 @@ backend:
       disaggregation-transfer-backend: nixl
 
       # Memory and token limits
-      mem-fraction-static: 0.3
+      mem-fraction-static: 0.6
       max-prefill-tokens: 8224
       chunked-prefill-size: 8224
 

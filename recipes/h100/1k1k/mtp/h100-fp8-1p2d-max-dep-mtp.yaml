@@ -1,4 +1,4 @@
-name: "h100-fp8-2p4d-max-dep-mtp"
+name: "h100-fp8-1p2d-max-dep-mtp"
 
 model:
   path: "dsfp8"
