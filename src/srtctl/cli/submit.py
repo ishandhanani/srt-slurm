@@ -226,6 +226,7 @@ def submit_with_orchestrator(
                 "decode_nodes": config.resources.decode_nodes,
                 "prefill_workers": config.resources.num_prefill,
                 "decode_workers": config.resources.num_decode,
+                "agg_nodes": config.resources.agg_nodes,
                 "agg_workers": config.resources.num_agg,
             },
             # Backend and frontend

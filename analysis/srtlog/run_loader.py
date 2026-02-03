@@ -531,9 +531,10 @@ class RunLoader:
         rows = []
 
         for run in runs:
-            run_id = (
-                f"{run.job_id}_{run.metadata.prefill_workers}P_{run.metadata.decode_workers}D_{run.metadata.run_date}"
-            )
+            if run.metadata.is_aggregated:
+                run_id = f"{run.job_id}_{run.metadata.agg_workers}A_{run.metadata.run_date}"
+            else:
+                run_id = f"{run.job_id}_{run.metadata.prefill_workers}P_{run.metadata.decode_workers}D_{run.metadata.run_date}"
             total_gpus = run.total_gpus
 
             # Create a row for each concurrency level
