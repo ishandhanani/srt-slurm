@@ -61,9 +61,6 @@ backend:
       # Request handling
       load-balance-method: "round_robin"
 
-      # Watchdog timeout (allow time for DeepGEMM JIT compilation)
-      watchdog-timeout: 900
-
     decode:
       # Model configuration
       served-model-name: "deepseek-ai/DeepSeek-R1"
@@ -91,15 +88,12 @@ backend:
 
       # Memory and token limits
       mem-fraction-static: 0.9
-      max-running-requests: 64
-      cuda-graph-max-bs: 64
-
-      # Watchdog timeout (allow time for DeepGEMM JIT compilation)
-      watchdog-timeout: 900
+      max-running-requests: 16
+      cuda-graph-max-bs: 16
 
 benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 8192
-  concurrencies: "1x2x4x8x16x32x64"
+  concurrencies: "1x2x4x8x16"
   req_rate: "inf"
