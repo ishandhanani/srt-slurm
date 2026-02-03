@@ -1,7 +1,7 @@
-name: "gb300-8k1k-fp8-low-latency"
+name: "gb300-1k8k-fp8-low-latency"
 
 model:
-  path: "dsfp8"
+  path: "dsr1-fp8"
   container: "lmsysorg/sglang:v0.5.8-cu130-runtime"
   precision: "fp8"
 
@@ -11,13 +11,13 @@ frontend:
 resources:
   gpu_type: "gb300"
   prefill_nodes: 1
-  decode_nodes: 1 
+  decode_nodes: 8
   prefill_workers: 1
-  decode_workers: 1
+  decode_workers: 8
   gpus_per_node: 4
 
 slurm:
-  time_limit: "02:00:00"
+  time_limit: "04:00:00"
 
 backend:
   prefill_environment:
@@ -70,13 +70,13 @@ backend:
       disable-radix-cache: true
       stream-interval: 10
       watchdog-timeout: 1000000
-      context-length: 9300
+      context-length: 9300 
       disaggregation-mode: "prefill"
       disaggregation-transfer-backend: nixl
       mem-fraction-static: 0.95
-      max-total-tokens: 32768 
-      chunked-prefill-size: 32768 
-      max-prefill-tokens: 32768 
+      max-total-tokens: 8192 
+      chunked-prefill-size: 8192
+      max-prefill-tokens: 8192 
       cuda-graph-max-bs: 128
       max-running-requests: 128 
       load-balance-method: "round_robin"
@@ -99,7 +99,7 @@ backend:
       disable-radix-cache: true
       stream-interval: 10
       watchdog-timeout: 1000000
-      context-length: 9300
+      context-length: 9300 
       disaggregation-mode: "decode"
       disaggregation-transfer-backend: nixl
       mem-fraction-static: 0.85
@@ -117,7 +117,8 @@ backend:
 
 benchmark:
   type: "sa-bench"
-  isl: 8192 
-  osl: 1024
-  concurrencies: [4,8]
+  isl: 1024
+  osl: 8192 
+  concurrencies: [4,8,16,32]
   req_rate: "inf"
+

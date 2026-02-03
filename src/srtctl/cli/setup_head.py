@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+import shutil
 
 # Network configurations
 ETCD_CLIENT_PORT = 2379
@@ -130,8 +131,15 @@ def start_nats(binary_path: str = "/configs/nats-server") -> subprocess.Popen:
     if not os.path.exists(binary_path):
         raise FileNotFoundError(f"NATS binary not found: {binary_path}")
 
+    # Use /tmp for JetStream storage - avoids "Temporary storage directory" warning
+    # and ensures we're using fast local storage'
+    if os.path.exists("/tmp/nats"):
+        shutil.rmtree("/tmp/nats")
+    nats_store_dir = "/tmp/nats"
+    os.makedirs(nats_store_dir, exist_ok=True)
+
     logger.info("Starting NATS server...")
-    cmd = [binary_path, "-js"]
+    cmd = [binary_path, "-js", "-sd", nats_store_dir]
 
     proc = subprocess.Popen(
         cmd,
@@ -161,18 +169,22 @@ def start_etcd(
 
     logger.info("Starting etcd server...")
 
+    # Use /tmp for etcd data directory - this is typically on fast local storage
+    # (often tmpfs on HPC systems). Without this, etcd uses "default.etcd" in CWD
+    # which may be on slow network storage, causing Raft consensus timeouts.
+    if os.path.exists("/tmp/etcd"):
+        shutil.rmtree("/tmp/etcd")
+    etcd_data_dir = "/tmp/etcd"
+    os.makedirs(etcd_data_dir, exist_ok=True)
+
     cmd = [
         binary_path,
+        "--data-dir",
+        etcd_data_dir,
         "--listen-client-urls",
         f"{ETCD_LISTEN_ADDR}:{ETCD_CLIENT_PORT}",
         "--advertise-client-urls",
         f"http://{host_ip}:{ETCD_CLIENT_PORT}",  # Must be reachable IP, not 0.0.0.0
-        "--listen-peer-urls",
-        f"{ETCD_LISTEN_ADDR}:{ETCD_PEER_PORT}",
-        "--initial-advertise-peer-urls",
-        f"http://{host_ip}:{ETCD_PEER_PORT}",  # Must be reachable IP
-        "--initial-cluster",
-        f"default=http://{host_ip}:{ETCD_PEER_PORT}",
     ]
 
     # Set up output handling

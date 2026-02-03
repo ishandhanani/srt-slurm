@@ -1,9 +1,12 @@
 name: "bs16-1p3d-h200-fp8"
 
 model:
-  path: "dsfp8"
+  path: "dsr1"
   container: "lmsysorg/sglang:v0.5.8-cu130-runtime"
   precision: "fp8"
+
+frontend:
+  nginx_container: nginx
 
 resources:
   gpu_type: "h200"
@@ -15,13 +18,6 @@ resources:
 
 backend:
 
-  # Prefill-specific environment variables
-  prefill_environment:
-    SGLANG_DG_CACHE_DIR: "/configs/dg-10212025"
-
-  # Decode-specific environment variables
-  decode_environment:
-    SGLANG_DG_CACHE_DIR: "/configs/dg-10212025"
 
   sglang_config:
     prefill:

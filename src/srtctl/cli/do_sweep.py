@@ -110,6 +110,9 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
 
         mounts = dict(self.runtime.container_mounts)
         mounts[setup_script] = setup_script_container
+        # Mount host /tmp to container /host-tmp for etcd/nats data on local storage
+        # This ensures etcd WAL writes go to fast local disk, not network storage
+        mounts[Path("/tmp")] = Path("/host-tmp")
 
         proc = start_srun_process(
             command=cmd,
