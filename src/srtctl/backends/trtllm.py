@@ -57,6 +57,7 @@ class TRTLLMProtocol:
 
     prefill_environment: dict[str, str] = field(default_factory=dict)
     decode_environment: dict[str, str] = field(default_factory=dict)
+    aggregated_environment: dict[str, str] = field(default_factory=dict)
 
     trtllm_config: TRTLLMServerConfig | None = None
 
@@ -86,7 +87,7 @@ class TRTLLMProtocol:
         elif mode == "decode":
             return dict(self.trtllm_config.decode or {})
         elif mode == "agg":
-            raise ValueError("Aggregated mode is not supported for TRTLLM")
+            return dict(self.trtllm_config.aggregated or {})
         return {}
 
     def get_environment_for_mode(self, mode: WorkerMode) -> dict[str, str]:
@@ -97,8 +98,20 @@ class TRTLLMProtocol:
         elif mode == "decode":
             return {**self.decode_environment, "TRTLLM_EPLB_SHM_NAME": eplb_prefix}
         elif mode == "agg":
-            raise ValueError("Aggregated mode is not supported for TRTLLM")
+            return {**self.aggregated_environment, "TRTLLM_EPLB_SHM_NAME": eplb_prefix}
         return {}
+
+    def get_process_environment(self, process: "Process") -> dict[str, str]:
+        """Get process-specific environment variables.
+
+        TRTLLM doesn't currently require process-specific env vars.
+        """
+        return {}
+
+    def get_served_model_name(self, default: str) -> str:
+        """Get served model name from TRTLLM config, or return default."""
+        # TRTLLM doesn't have served-model-name in config, just use default
+        return default
 
     def allocate_endpoints(
         self,
@@ -169,12 +182,17 @@ class TRTLLMProtocol:
             str(container_model_path),
             "--served-model-name",
             runtime.model_path.name,
-            "--disaggregation-mode",
-            mode,
+        ]
+
+        # Only add disaggregation mode for prefill/decode, not for agg
+        if mode != "agg":
+            cmd.extend(["--disaggregation-mode", mode])
+
+        cmd.extend([
             "--extra-engine-args",
             str(container_config_path),
             "--request-plane",
             "nats",
-        ]
+        ])
 
         return cmd
