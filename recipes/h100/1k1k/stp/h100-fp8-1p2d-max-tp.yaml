@@ -91,8 +91,8 @@ backend:
 
       # Memory and token limits
       mem-fraction-static: 0.9
-      max-running-requests: 8
-      cuda-graph-max-bs: 8
+      max-running-requests: 128
+      cuda-graph-max-bs: 128
 
       # Watchdog timeout (allow time for DeepGEMM JIT compilation)
       watchdog-timeout: 900
@@ -101,5 +101,5 @@ benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 1024
-  concurrencies: "1x2x4x8"
+  concurrencies: "1x2x4x8x16x32x64x128"
   req_rate: "inf"
