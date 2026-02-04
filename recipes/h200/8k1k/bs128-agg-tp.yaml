@@ -2,7 +2,7 @@ name: "agg-tp-h200-fp8"
 
 model:
   path: "dsr1"
-  container: "lmsysorg/sglang:v0.5.8-cu130-runtime"
+  container: "lmsysorg/sglang:v0.5.8-cu130"
   precision: "fp8"
 
 frontend:
@@ -15,6 +15,9 @@ resources:
   gpus_per_node: 8
 
 backend:
+
+  aggregated_environment:
+    SGLANG_JIT_DEEPGEMM_FAST_WARMUP: "1"
 
   sglang_config:
     aggregated:
@@ -36,6 +39,7 @@ backend:
 
       # Other flags
       stream-interval: 10
+      watchdog-timeout: 1000000
       max-running-requests: 256  # sum of all dp
 
       # Memory and token limits

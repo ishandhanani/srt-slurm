@@ -2,7 +2,7 @@ name: "bs8-1p6d-h200-fp8"
 
 model:
   path: "dsr1"
-  container: "lmsysorg/sglang:v0.5.8-cu130-runtime"
+  container: "lmsysorg/sglang:v0.5.8-cu130"
   precision: "fp8"
 
 frontend:
@@ -17,6 +17,12 @@ resources:
   gpus_per_node: 8
 
 backend:
+
+  prefill_environment:
+    SGLANG_JIT_DEEPGEMM_FAST_WARMUP: "1"
+
+  decode_environment:
+    SGLANG_JIT_DEEPGEMM_FAST_WARMUP: "1"
 
   sglang_config:
     prefill:
@@ -39,6 +45,7 @@ backend:
 
       # Other flags
       # stream-interval: 50
+      watchdog-timeout: 1000000
       max-running-requests: 16
       
 
@@ -74,6 +81,7 @@ backend:
       # Other flags
       disable-radix-cache: true
       stream-interval: 10
+      watchdog-timeout: 1000000
 
       # Disagg
       disaggregation-bootstrap-port: 30001
