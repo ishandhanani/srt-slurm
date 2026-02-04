@@ -56,6 +56,7 @@ class SGLangProtocol:
     Example YAML:
         backend:
           type: sglang
+          deepgemm_precompile: true  # Run sglang.deep_gemm_precompile instead of serving
           prefill_environment:
             CUDA_LAUNCH_BLOCKING: "1"
           sglang_config:
@@ -81,6 +82,10 @@ class SGLangProtocol:
     # Per-mode: {"prefill": true, "decode": {"publisher": "zmq", "topic": "custom"}}
     # Or global: true (enables for prefill+decode with defaults)
     kv_events_config: bool | dict[str, Any] | None = None
+
+    # Run sglang.deep_gemm_precompile instead of the normal serving module
+    # Useful for FP4/FP8 on Blackwell to precompile DeepGEMM kernels
+    deepgemm_precompile: bool = False
 
     Schema: ClassVar[builtins.type[Schema]] = Schema
 
@@ -239,9 +244,12 @@ class SGLangProtocol:
         dist_init_port = 29500
 
         # Choose Python module
-        # When profiling is enabled, always use sglang.launch_server (not dynamo.sglang)
-        use_sglang = frontend_type == "sglang" or profiling_enabled
-        python_module = "sglang.launch_server" if use_sglang else "dynamo.sglang"
+        if self.deepgemm_precompile:
+            python_module = "sglang.deep_gemm_precompile"
+        elif frontend_type == "sglang" or profiling_enabled:
+            python_module = "sglang.launch_server"
+        else:
+            python_module = "dynamo.sglang"
 
         # Get served model name from config
         served_model_name = self.get_served_model_name(runtime.model_path.name)
@@ -265,9 +273,9 @@ class SGLangProtocol:
             ]
         )
 
-        # Only pass --port when using sglang.launch_server (not dynamo.sglang)
+        # Only pass --port when NOT using dynamo.sglang
         # dynamo.sglang uses DYN_SYSTEM_PORT env var instead
-        if use_sglang:
+        if python_module != "dynamo.sglang":
             cmd.extend(["--port", str(process.http_port)])
 
         # Add disaggregation mode for prefill/decode workers (both dynamo and sglang frontend)

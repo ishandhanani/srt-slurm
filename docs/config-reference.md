@@ -34,49 +34,49 @@ Complete reference for job configuration YAML files.
 ## Overview
 
 ```yaml
-name: "my-benchmark"           # Required: job name
+name: "my-benchmark" # Required: job name
 
-model:                         # Required: model settings
+model: # Required: model settings
   path: "deepseek-r1"
   container: "latest"
   precision: "fp8"
 
-resources:                     # Required: GPU allocation
+resources: # Required: GPU allocation
   gpu_type: "gb200"
   prefill_nodes: 1
   decode_nodes: 2
 
-slurm:                         # Optional: SLURM overrides
+slurm: # Optional: SLURM overrides
   time_limit: "02:00:00"
 
-frontend:                      # Optional: router/frontend config
+frontend: # Optional: router/frontend config
   type: dynamo
 
-backend:                       # Optional: worker config
+backend: # Optional: worker config
   type: sglang
   sglang_config:
     prefill: {}
     decode: {}
 
-benchmark:                     # Optional: benchmark config
+benchmark: # Optional: benchmark config
   type: "sa-bench"
   isl: 1024
   osl: 1024
 
-dynamo:                        # Optional: dynamo version
+dynamo: # Optional: dynamo version
   version: "0.8.0"
 
-profiling:                     # Optional: profiling config
+profiling: # Optional: profiling config
   type: "none"
 
-output:                        # Optional: output paths
+output: # Optional: output paths
   log_dir: "./outputs/{job_id}/logs"
 
-health_check:                  # Optional: health check settings
+health_check: # Optional: health check settings
   max_attempts: 180
   interval_seconds: 10
 
-setup_script: "my-setup.sh"    # Optional: custom setup script
+setup_script: "my-setup.sh" # Optional: custom setup script
 ```
 
 ---
@@ -103,18 +103,18 @@ This allows you to run `srtctl apply -f config.yaml` from anywhere without needi
 
 The `srtslurm.yaml` file can contain the following fields:
 
-| Field                           | Type   | Description                                           |
-| ------------------------------- | ------ | ----------------------------------------------------- |
-| `default_account`               | string | Default SLURM account                                 |
-| `default_partition`             | string | Default SLURM partition                               |
-| `default_time_limit`            | string | Default job time limit                                |
-| `gpus_per_node`                 | int    | Default GPUs per node                                 |
-| `network_interface`             | string | Network interface for NCCL                            |
-| `srtctl_root`                   | string | Root directory for srtctl                             |
-| `output_dir`                    | string | Custom output directory (overrides srtctl_root/outputs) |
-| `model_paths`                   | dict   | Model path aliases                                    |
-| `containers`                    | dict   | Container image aliases                               |
-| `default_mounts`                | dict   | Cluster-wide container mounts                         |
+| Field                | Type   | Description                                             |
+| -------------------- | ------ | ------------------------------------------------------- |
+| `default_account`    | string | Default SLURM account                                   |
+| `default_partition`  | string | Default SLURM partition                                 |
+| `default_time_limit` | string | Default job time limit                                  |
+| `gpus_per_node`      | int    | Default GPUs per node                                   |
+| `network_interface`  | string | Network interface for NCCL                              |
+| `srtctl_root`        | string | Root directory for srtctl                               |
+| `output_dir`         | string | Custom output directory (overrides srtctl_root/outputs) |
+| `model_paths`        | dict   | Model path aliases                                      |
+| `containers`         | dict   | Container image aliases                                 |
+| `default_mounts`     | dict   | Cluster-wide container mounts                           |
 
 **output_dir**: When set, job logs are written to `output_dir/{job_id}/logs` instead of `srtctl_root/outputs/{job_id}/logs`. Useful for CI/CD and ephemeral environments.
 
@@ -138,9 +138,9 @@ Model and container configuration.
 
 ```yaml
 model:
-  path: "deepseek-r1"       # Alias from srtslurm.yaml or full path
-  container: "latest"       # Container alias from srtslurm.yaml
-  precision: "fp8"          # fp8, fp4, bf16, etc.
+  path: "deepseek-r1" # Alias from srtslurm.yaml or full path
+  container: "latest" # Container alias from srtslurm.yaml
+  precision: "fp8" # fp8, fp4, bf16, etc.
 ```
 
 | Field       | Type   | Required | Description                                              |
@@ -160,13 +160,13 @@ GPU allocation and worker topology.
 ```yaml
 resources:
   gpu_type: "gb200"
-  gpus_per_node: 4          # GPUs per node (default: from srtslurm.yaml)
+  gpus_per_node: 4 # GPUs per node (default: from srtslurm.yaml)
 
-  prefill_nodes: 2          # Nodes for prefill workers
-  prefill_workers: 4        # Number of prefill workers
+  prefill_nodes: 2 # Nodes for prefill workers
+  prefill_workers: 4 # Number of prefill workers
 
-  decode_nodes: 4           # Nodes for decode workers
-  decode_workers: 8         # Number of decode workers
+  decode_nodes: 4 # Nodes for decode workers
+  decode_workers: 8 # Number of decode workers
 ```
 
 ### Aggregated Mode (single worker type)
@@ -175,23 +175,23 @@ resources:
 resources:
   gpu_type: "h100"
   gpus_per_node: 8
-  agg_nodes: 2              # Nodes for aggregated workers
-  agg_workers: 4            # Number of aggregated workers
+  agg_nodes: 2 # Nodes for aggregated workers
+  agg_workers: 4 # Number of aggregated workers
 ```
 
-| Field             | Type   | Default            | Description                           |
-| ----------------- | ------ | ------------------ | ------------------------------------- |
-| `gpu_type`        | string | -                  | GPU type: "gb200", "gb300", or "h100" |
-| `gpus_per_node`   | int    | 4                  | GPUs per node                         |
-| `prefill_nodes`   | int    | null               | Nodes dedicated to prefill            |
-| `decode_nodes`    | int    | null               | Nodes dedicated to decode             |
-| `prefill_workers` | int    | null               | Number of prefill workers             |
-| `decode_workers`  | int    | null               | Number of decode workers              |
-| `agg_nodes`       | int    | null               | Nodes for aggregated mode             |
-| `agg_workers`     | int    | null               | Number of aggregated workers          |
-| `gpus_per_prefill`| int    | computed           | Explicit GPUs per prefill worker      |
-| `gpus_per_decode` | int    | computed           | Explicit GPUs per decode worker       |
-| `gpus_per_agg`    | int    | computed           | Explicit GPUs per aggregated worker   |
+| Field              | Type   | Default  | Description                           |
+| ------------------ | ------ | -------- | ------------------------------------- |
+| `gpu_type`         | string | -        | GPU type: "gb200", "gb300", or "h100" |
+| `gpus_per_node`    | int    | 4        | GPUs per node                         |
+| `prefill_nodes`    | int    | null     | Nodes dedicated to prefill            |
+| `decode_nodes`     | int    | null     | Nodes dedicated to decode             |
+| `prefill_workers`  | int    | null     | Number of prefill workers             |
+| `decode_workers`   | int    | null     | Number of decode workers              |
+| `agg_nodes`        | int    | null     | Nodes for aggregated mode             |
+| `agg_workers`      | int    | null     | Number of aggregated workers          |
+| `gpus_per_prefill` | int    | computed | Explicit GPUs per prefill worker      |
+| `gpus_per_decode`  | int    | computed | Explicit GPUs per decode worker       |
+| `gpus_per_agg`     | int    | computed | Explicit GPUs per aggregated worker   |
 
 **Notes**:
 
@@ -218,9 +218,9 @@ SLURM job settings.
 
 ```yaml
 slurm:
-  time_limit: "04:00:00"    # Job time limit
-  account: "my-account"     # SLURM account (overrides srtslurm.yaml)
-  partition: "batch"        # SLURM partition (overrides srtslurm.yaml)
+  time_limit: "04:00:00" # Job time limit
+  account: "my-account" # SLURM account (overrides srtslurm.yaml)
+  partition: "batch" # SLURM partition (overrides srtslurm.yaml)
 ```
 
 | Field        | Type   | Default            | Description               |
@@ -241,28 +241,28 @@ frontend:
   type: dynamo
 
   # Scaling
-  enable_multiple_frontends: true     # Enable nginx + multiple routers
-  num_additional_frontends: 9         # Additional routers (total = 1 + this)
+  enable_multiple_frontends: true # Enable nginx + multiple routers
+  num_additional_frontends: 9 # Additional routers (total = 1 + this)
 
   # CLI args passed to the frontend/router
   args:
-    router-mode: "kv"                 # dynamo: router-mode
-    policy: "cache_aware"             # sglang: policy
-    no-kv-events: true                # boolean flags
+    router-mode: "kv" # dynamo: router-mode
+    policy: "cache_aware" # sglang: policy
+    no-kv-events: true # boolean flags
 
   # Environment variables for frontend processes
   env:
     MY_VAR: "value"
 ```
 
-| Field                       | Type | Default       | Description                         |
-| --------------------------- | ---- | ------------- | ----------------------------------- |
-| `type`                      | str  | dynamo        | Frontend type: "dynamo" or "sglang" |
-| `enable_multiple_frontends` | bool | true          | Scale with nginx + multiple routers |
-| `num_additional_frontends`  | int  | 9             | Additional routers beyond master    |
-| `nginx_container`           | str  | nginx:1.27.4  | Custom nginx container image        |
-| `args`                      | dict | null          | CLI args for the frontend           |
-| `env`                       | dict | null          | Env vars for frontend processes     |
+| Field                       | Type | Default      | Description                         |
+| --------------------------- | ---- | ------------ | ----------------------------------- |
+| `type`                      | str  | dynamo       | Frontend type: "dynamo" or "sglang" |
+| `enable_multiple_frontends` | bool | true         | Scale with nginx + multiple routers |
+| `num_additional_frontends`  | int  | 9            | Additional routers beyond master    |
+| `nginx_container`           | str  | nginx:1.27.4 | Custom nginx container image        |
+| `args`                      | dict | null         | CLI args for the frontend           |
+| `env`                       | dict | null         | Env vars for frontend processes     |
 
 See [SGLang Router](sglang-router.md) for detailed architecture.
 
@@ -274,7 +274,7 @@ Worker configuration and SGLang settings.
 
 ```yaml
 backend:
-  type: sglang                        # Backend type (currently only sglang)
+  type: sglang # Backend type (currently only sglang)
 
   # Per-mode environment variables
   prefill_environment:
@@ -301,38 +301,39 @@ backend:
 
   # KV events (for kv-aware routing)
   kv_events_config:
-    prefill: true                     # Enable for prefill workers
-    decode: true                      # Enable for decode workers
+    prefill: true # Enable for prefill workers
+    decode: true # Enable for decode workers
 ```
 
-| Field                     | Type        | Default | Description                             |
-| ------------------------- | ----------- | ------- | --------------------------------------- |
-| `type`                    | string      | sglang  | Backend type: "sglang" or "trtllm"      |
-| `gpu_type`                | string      | null    | GPU type override                       |
-| `prefill_environment`     | dict        | {}      | Environment variables for prefill       |
-| `decode_environment`      | dict        | {}      | Environment variables for decode        |
-| `aggregated_environment`  | dict        | {}      | Environment variables for aggregated    |
-| `sglang_config`           | object      | null    | SGLang CLI configuration per mode       |
-| `kv_events_config`        | bool/dict   | null    | KV events configuration                 |
+| Field                    | Type      | Default | Description                          |
+| ------------------------ | --------- | ------- | ------------------------------------ |
+| `type`                   | string    | sglang  | Backend type: "sglang" or "trtllm"   |
+| `gpu_type`               | string    | null    | GPU type override                    |
+| `prefill_environment`    | dict      | {}      | Environment variables for prefill    |
+| `decode_environment`     | dict      | {}      | Environment variables for decode     |
+| `aggregated_environment` | dict      | {}      | Environment variables for aggregated |
+| `sglang_config`          | object    | null    | SGLang CLI configuration per mode    |
+| `kv_events_config`       | bool/dict | null    | KV events configuration              |
+| `deepgemm_precompile`    | bool      | false   | Run DeepGEMM kernel precompilation   |
 
 ### sglang_config
 
 Per-mode SGLang server configuration. Any SGLang CLI flag can be specified (use kebab-case or snake_case):
 
-| Common Flags                      | Type    | Description                           |
-| --------------------------------- | ------- | ------------------------------------- |
-| `tensor-parallel-size`            | int     | Tensor parallelism degree             |
-| `data-parallel-size`              | int     | Data parallelism degree               |
-| `expert-parallel-size`            | int     | Expert parallelism (MoE models)       |
-| `mem-fraction-static`             | float   | GPU memory fraction (0.0-1.0)         |
-| `kv-cache-dtype`                  | string  | KV cache precision (fp8_e4m3, etc.)   |
-| `context-length`                  | int     | Max context length                    |
-| `chunked-prefill-size`            | int     | Chunked prefill batch size            |
-| `enable-dp-attention`             | bool    | Enable DP attention                   |
-| `disaggregation-mode`             | string  | "prefill" or "decode"                 |
-| `disaggregation-transfer-backend` | string  | Transfer backend ("nixl" or other)    |
-| `served-model-name`               | string  | Model name for API                    |
-| `grpc-mode`                       | bool    | Enable gRPC mode                      |
+| Common Flags                      | Type   | Description                         |
+| --------------------------------- | ------ | ----------------------------------- |
+| `tensor-parallel-size`            | int    | Tensor parallelism degree           |
+| `data-parallel-size`              | int    | Data parallelism degree             |
+| `expert-parallel-size`            | int    | Expert parallelism (MoE models)     |
+| `mem-fraction-static`             | float  | GPU memory fraction (0.0-1.0)       |
+| `kv-cache-dtype`                  | string | KV cache precision (fp8_e4m3, etc.) |
+| `context-length`                  | int    | Max context length                  |
+| `chunked-prefill-size`            | int    | Chunked prefill batch size          |
+| `enable-dp-attention`             | bool   | Enable DP attention                 |
+| `disaggregation-mode`             | string | "prefill" or "decode"               |
+| `disaggregation-transfer-backend` | string | Transfer backend ("nixl" or other)  |
+| `served-model-name`               | string | Model name for API                  |
+| `grpc-mode`                       | bool   | Enable gRPC mode                    |
 
 ### kv_events_config
 
@@ -369,6 +370,18 @@ Each worker leader gets a globally unique port starting at 5550:
 | decode_0  | 5552 |
 | decode_1  | 5553 |
 
+### deepgemm_precompile
+
+Run `sglang.deep_gemm_precompile` instead of the normal serving module. Useful for FP4/FP8 on Blackwell (GB200/GB300) to precompile DeepGEMM kernels before running benchmarks.
+
+```yaml
+backend:
+  type: sglang
+  deepgemm_precompile: true
+```
+
+When enabled, workers run `python3 -m sglang.deep_gemm_precompile` instead of `dynamo.sglang` or `sglang.launch_server`.
+
 ### TRTLLM Backend
 
 When using `type: trtllm`, the backend uses TRTLLM with MPI-style launching:
@@ -392,14 +405,15 @@ backend:
       mem-fraction-static: 0.9
 ```
 
-| Field                 | Type   | Default | Description                             |
-| --------------------- | ------ | ------- | --------------------------------------- |
-| `type`                | string | -       | Must be "trtllm"                        |
-| `prefill_environment` | dict   | {}      | Environment variables for prefill       |
-| `decode_environment`  | dict   | {}      | Environment variables for decode        |
-| `trtllm_config`       | object | null    | TRTLLM CLI configuration per mode       |
+| Field                 | Type   | Default | Description                       |
+| --------------------- | ------ | ------- | --------------------------------- |
+| `type`                | string | -       | Must be "trtllm"                  |
+| `prefill_environment` | dict   | {}      | Environment variables for prefill |
+| `decode_environment`  | dict   | {}      | Environment variables for decode  |
+| `trtllm_config`       | object | null    | TRTLLM CLI configuration per mode |
 
 **Key differences from SGLang backend**:
+
 - No aggregated mode support (prefill/decode only)
 - Uses MPI-style launching (one srun per endpoint with all nodes)
 - Uses `trtllm-llmapi-launch` for distributed launching
@@ -413,16 +427,16 @@ Benchmark configuration. The `type` field determines which benchmark runner is u
 
 ### Available Benchmark Types
 
-| Type              | Description                                    |
-| ----------------- | ---------------------------------------------- |
-| `manual`          | No benchmark (default), manual testing mode    |
-| `sa-bench`        | Throughput/latency serving benchmark           |
-| `mmlu`            | MMLU accuracy evaluation                       |
-| `gpqa`            | GPQA (Graduate-level science QA) evaluation    |
-| `longbenchv2`     | Long-context evaluation benchmark              |
-| `router`          | Router performance with prefix caching         |
-| `mooncake-router` | KV-aware routing with Mooncake trace           |
-| `profiling`       | Profiling benchmark (auto-selected)            |
+| Type              | Description                                 |
+| ----------------- | ------------------------------------------- |
+| `manual`          | No benchmark (default), manual testing mode |
+| `sa-bench`        | Throughput/latency serving benchmark        |
+| `mmlu`            | MMLU accuracy evaluation                    |
+| `gpqa`            | GPQA (Graduate-level science QA) evaluation |
+| `longbenchv2`     | Long-context evaluation benchmark           |
+| `router`          | Router performance with prefix caching      |
+| `mooncake-router` | KV-aware routing with Mooncake trace        |
+| `profiling`       | Profiling benchmark (auto-selected)         |
 
 ### manual
 
@@ -440,18 +454,18 @@ Throughput and latency benchmark at various concurrency levels.
 ```yaml
 benchmark:
   type: "sa-bench"
-  isl: 1024                          # Required: Input sequence length
-  osl: 1024                          # Required: Output sequence length
-  concurrencies: [256, 512]          # Required: Concurrency levels to test
-  req_rate: "inf"                    # Optional: Request rate (default: "inf")
+  isl: 1024 # Required: Input sequence length
+  osl: 1024 # Required: Output sequence length
+  concurrencies: [256, 512] # Required: Concurrency levels to test
+  req_rate: "inf" # Optional: Request rate (default: "inf")
 ```
 
-| Field           | Type        | Required | Default | Description                                |
-| --------------- | ----------- | -------- | ------- | ------------------------------------------ |
-| `isl`           | int         | Yes      | -       | Input sequence length                      |
-| `osl`           | int         | Yes      | -       | Output sequence length                     |
-| `concurrencies` | list/string | Yes      | -       | Concurrency levels (list or "NxM" format)  |
-| `req_rate`      | string/int  | No       | "inf"   | Request rate                               |
+| Field           | Type        | Required | Default | Description                               |
+| --------------- | ----------- | -------- | ------- | ----------------------------------------- |
+| `isl`           | int         | Yes      | -       | Input sequence length                     |
+| `osl`           | int         | Yes      | -       | Output sequence length                    |
+| `concurrencies` | list/string | Yes      | -       | Concurrency levels (list or "NxM" format) |
+| `req_rate`      | string/int  | No       | "inf"   | Request rate                              |
 
 **Concurrencies format**: Can be a list `[128, 256, 512]` or x-separated string `"128x256x512"`.
 
@@ -462,18 +476,18 @@ MMLU accuracy evaluation using sglang.test.run_eval.
 ```yaml
 benchmark:
   type: "mmlu"
-  num_examples: 200                  # Optional: Number of examples
-  max_tokens: 2048                   # Optional: Max tokens per response
-  repeat: 8                          # Optional: Number of repeats
-  num_threads: 512                   # Optional: Concurrent threads
+  num_examples: 200 # Optional: Number of examples
+  max_tokens: 2048 # Optional: Max tokens per response
+  repeat: 8 # Optional: Number of repeats
+  num_threads: 512 # Optional: Concurrent threads
 ```
 
-| Field          | Type | Required | Default | Description                  |
-| -------------- | ---- | -------- | ------- | ---------------------------- |
-| `num_examples` | int  | No       | 200     | Number of examples to run    |
-| `max_tokens`   | int  | No       | 2048    | Max tokens per response      |
-| `repeat`       | int  | No       | 8       | Number of repeats            |
-| `num_threads`  | int  | No       | 512     | Concurrent threads           |
+| Field          | Type | Required | Default | Description               |
+| -------------- | ---- | -------- | ------- | ------------------------- |
+| `num_examples` | int  | No       | 200     | Number of examples to run |
+| `max_tokens`   | int  | No       | 2048    | Max tokens per response   |
+| `repeat`       | int  | No       | 8       | Number of repeats         |
+| `num_threads`  | int  | No       | 512     | Concurrent threads        |
 
 ### gpqa
 
@@ -482,18 +496,18 @@ Graduate-level science QA evaluation using sglang.test.run_eval.
 ```yaml
 benchmark:
   type: "gpqa"
-  num_examples: 198                  # Optional: Number of examples
-  max_tokens: 32768                  # Optional: Max tokens per response
-  repeat: 8                          # Optional: Number of repeats
-  num_threads: 128                   # Optional: Concurrent threads
+  num_examples: 198 # Optional: Number of examples
+  max_tokens: 32768 # Optional: Max tokens per response
+  repeat: 8 # Optional: Number of repeats
+  num_threads: 128 # Optional: Concurrent threads
 ```
 
-| Field          | Type | Required | Default | Description                  |
-| -------------- | ---- | -------- | ------- | ---------------------------- |
-| `num_examples` | int  | No       | 198     | Number of examples to run    |
-| `max_tokens`   | int  | No       | 32768   | Max tokens per response      |
-| `repeat`       | int  | No       | 8       | Number of repeats            |
-| `num_threads`  | int  | No       | 128     | Concurrent threads           |
+| Field          | Type | Required | Default | Description               |
+| -------------- | ---- | -------- | ------- | ------------------------- |
+| `num_examples` | int  | No       | 198     | Number of examples to run |
+| `max_tokens`   | int  | No       | 32768   | Max tokens per response   |
+| `repeat`       | int  | No       | 8       | Number of repeats         |
+| `num_threads`  | int  | No       | 128     | Concurrent threads        |
 
 ### longbenchv2
 
@@ -502,22 +516,22 @@ Long-context evaluation benchmark.
 ```yaml
 benchmark:
   type: "longbenchv2"
-  max_context_length: 128000         # Optional: Max context length
-  num_threads: 16                    # Optional: Concurrent threads
-  max_tokens: 16384                  # Optional: Max tokens
-  num_examples: null                 # Optional: Number of examples (all if null)
-  categories:                        # Optional: Task categories
+  max_context_length: 128000 # Optional: Max context length
+  num_threads: 16 # Optional: Concurrent threads
+  max_tokens: 16384 # Optional: Max tokens
+  num_examples: null # Optional: Number of examples (all if null)
+  categories: # Optional: Task categories
     - "multi_doc_qa"
     - "single_doc_qa"
 ```
 
-| Field                | Type      | Required | Default | Description                    |
-| -------------------- | --------- | -------- | ------- | ------------------------------ |
-| `max_context_length` | int       | No       | 128000  | Max context length             |
-| `num_threads`        | int       | No       | 16      | Concurrent threads             |
-| `max_tokens`         | int       | No       | 16384   | Max tokens                     |
-| `num_examples`       | int       | No       | all     | Number of examples             |
-| `categories`         | list[str] | No       | all     | Task categories to run         |
+| Field                | Type      | Required | Default | Description            |
+| -------------------- | --------- | -------- | ------- | ---------------------- |
+| `max_context_length` | int       | No       | 128000  | Max context length     |
+| `num_threads`        | int       | No       | 16      | Concurrent threads     |
+| `max_tokens`         | int       | No       | 16384   | Max tokens             |
+| `num_examples`       | int       | No       | all     | Number of examples     |
+| `categories`         | list[str] | No       | all     | Task categories to run |
 
 ### router
 
@@ -526,20 +540,20 @@ Router performance benchmark with prefix caching. **Requires `frontend.type: sgl
 ```yaml
 benchmark:
   type: "router"
-  isl: 14000                         # Optional: Input sequence length
-  osl: 200                           # Optional: Output sequence length
-  num_requests: 200                  # Optional: Number of requests
-  concurrency: 20                    # Optional: Concurrency level
-  prefix_ratios: [0.1, 0.3, 0.5, 0.7, 0.9]  # Optional: Prefix ratios to test
+  isl: 14000 # Optional: Input sequence length
+  osl: 200 # Optional: Output sequence length
+  num_requests: 200 # Optional: Number of requests
+  concurrency: 20 # Optional: Concurrency level
+  prefix_ratios: [0.1, 0.3, 0.5, 0.7, 0.9] # Optional: Prefix ratios to test
 ```
 
-| Field           | Type        | Required | Default                   | Description                |
-| --------------- | ----------- | -------- | ------------------------- | -------------------------- |
-| `isl`           | int         | No       | 14000                     | Input sequence length      |
-| `osl`           | int         | No       | 200                       | Output sequence length     |
-| `num_requests`  | int         | No       | 200                       | Number of requests         |
-| `concurrency`   | int         | No       | 20                        | Concurrency level          |
-| `prefix_ratios` | list/string | No       | "0.1 0.3 0.5 0.7 0.9"     | Prefix ratios to test      |
+| Field           | Type        | Required | Default               | Description            |
+| --------------- | ----------- | -------- | --------------------- | ---------------------- |
+| `isl`           | int         | No       | 14000                 | Input sequence length  |
+| `osl`           | int         | No       | 200                   | Output sequence length |
+| `num_requests`  | int         | No       | 200                   | Number of requests     |
+| `concurrency`   | int         | No       | 20                    | Concurrency level      |
+| `prefix_ratios` | list/string | No       | "0.1 0.3 0.5 0.7 0.9" | Prefix ratios to test  |
 
 ### mooncake-router
 
@@ -548,20 +562,21 @@ KV-aware routing benchmark using Mooncake conversation trace.
 ```yaml
 benchmark:
   type: "mooncake-router"
-  mooncake_workload: "conversation"  # Optional: Trace type
-  ttft_threshold_ms: 2000            # Optional: Goodput TTFT threshold
-  itl_threshold_ms: 25               # Optional: Goodput ITL threshold
+  mooncake_workload: "conversation" # Optional: Trace type
+  ttft_threshold_ms: 2000 # Optional: Goodput TTFT threshold
+  itl_threshold_ms: 25 # Optional: Goodput ITL threshold
 ```
 
-| Field               | Type   | Required | Default        | Description                               |
-| ------------------- | ------ | -------- | -------------- | ----------------------------------------- |
-| `mooncake_workload` | string | No       | "conversation" | Trace type (see options below)            |
-| `ttft_threshold_ms` | int    | No       | 2000           | Goodput TTFT threshold in ms              |
-| `itl_threshold_ms`  | int    | No       | 25             | Goodput ITL threshold in ms               |
+| Field               | Type   | Required | Default        | Description                    |
+| ------------------- | ------ | -------- | -------------- | ------------------------------ |
+| `mooncake_workload` | string | No       | "conversation" | Trace type (see options below) |
+| `ttft_threshold_ms` | int    | No       | 2000           | Goodput TTFT threshold in ms   |
+| `itl_threshold_ms`  | int    | No       | 25             | Goodput ITL threshold in ms    |
 
 **Workload options**: `"mooncake"`, `"conversation"`, `"synthetic"`, `"toolagent"`
 
 Dataset characteristics (conversation trace):
+
 - 12,031 requests over ~59 minutes (3.4 req/s)
 - Avg input: 12,035 tokens, Avg output: 343 tokens
 - 36.64% cache efficiency potential
@@ -584,11 +599,11 @@ Dynamo installation configuration.
 
 ```yaml
 dynamo:
-  version: "0.8.0"            # Install from PyPI
+  version: "0.8.0" # Install from PyPI
   # OR
-  hash: "abc123"              # Install from git commit
+  hash: "abc123" # Install from git commit
   # OR
-  top_of_tree: true           # Install from main branch
+  top_of_tree: true # Install from main branch
 ```
 
 | Field         | Type   | Default | Description                                            |
@@ -614,15 +629,15 @@ Profiling configuration for nsys or torch profiler.
 
 ```yaml
 profiling:
-  type: "nsys"                       # "none", "nsys", or "torch"
-  isl: 1024                          # Input sequence length for profiling
-  osl: 128                           # Output sequence length for profiling
-  concurrency: 32                    # Batch size / concurrency
+  type: "nsys" # "none", "nsys", or "torch"
+  isl: 1024 # Input sequence length for profiling
+  osl: 128 # Output sequence length for profiling
+  concurrency: 32 # Batch size / concurrency
 
   # Phase-specific profiling step configs
   prefill:
-    start_step: 10                   # Step to start profiling
-    stop_step: 20                    # Step to stop profiling
+    start_step: 10 # Step to start profiling
+    stop_step: 20 # Step to stop profiling
   decode:
     start_step: 10
     stop_step: 20
@@ -632,24 +647,24 @@ profiling:
     stop_step: 20
 ```
 
-| Field         | Type   | Required | Default | Description                              |
-| ------------- | ------ | -------- | ------- | ---------------------------------------- |
-| `type`        | string | No       | "none"  | Profiling type: "none", "nsys", "torch"  |
-| `isl`         | int    | When enabled | null | Input sequence length for profiling      |
-| `osl`         | int    | When enabled | null | Output sequence length for profiling     |
-| `concurrency` | int    | When enabled | null | Batch size / concurrency                 |
-| `prefill`     | object | Disaggregated | null | Prefill phase config                   |
-| `decode`      | object | Disaggregated | null | Decode phase config                    |
-| `aggregated`  | object | Aggregated | null | Aggregated phase config                  |
+| Field         | Type   | Required      | Default | Description                             |
+| ------------- | ------ | ------------- | ------- | --------------------------------------- |
+| `type`        | string | No            | "none"  | Profiling type: "none", "nsys", "torch" |
+| `isl`         | int    | When enabled  | null    | Input sequence length for profiling     |
+| `osl`         | int    | When enabled  | null    | Output sequence length for profiling    |
+| `concurrency` | int    | When enabled  | null    | Batch size / concurrency                |
+| `prefill`     | object | Disaggregated | null    | Prefill phase config                    |
+| `decode`      | object | Disaggregated | null    | Decode phase config                     |
+| `aggregated`  | object | Aggregated    | null    | Aggregated phase config                 |
 
 ### ProfilingPhaseConfig
 
 Each phase config has:
 
-| Field        | Type | Required | Default | Description                    |
-| ------------ | ---- | -------- | ------- | ------------------------------ |
-| `start_step` | int  | No       | null    | Step to start profiling        |
-| `stop_step`  | int  | No       | null    | Step to stop profiling         |
+| Field        | Type | Required | Default | Description             |
+| ------------ | ---- | -------- | ------- | ----------------------- |
+| `start_step` | int  | No       | null    | Step to start profiling |
+| `stop_step`  | int  | No       | null    | Step to stop profiling  |
 
 ### Profiling Modes
 
@@ -715,9 +730,9 @@ output:
   log_dir: "./outputs/{job_id}/logs"
 ```
 
-| Field     | Type            | Default                      | Description              |
-| --------- | --------------- | ---------------------------- | ------------------------ |
-| `log_dir` | FormattablePath | "./outputs/{job_id}/logs"    | Directory for log files  |
+| Field     | Type            | Default                   | Description             |
+| --------- | --------------- | ------------------------- | ----------------------- |
+| `log_dir` | FormattablePath | "./outputs/{job_id}/logs" | Directory for log files |
 
 The `log_dir` supports FormattablePath templating. See [FormattablePath Template System](#formattablepath-template-system).
 
@@ -755,9 +770,9 @@ infra:
   etcd_nats_dedicated_node: true
 ```
 
-| Field                    | Type | Default | Description                                        |
-| ------------------------ | ---- | ------- | -------------------------------------------------- |
-| `etcd_nats_dedicated_node` | bool | false   | Reserve first node for infrastructure services     |
+| Field                      | Type | Default | Description                                    |
+| -------------------------- | ---- | ------- | ---------------------------------------------- |
+| `etcd_nats_dedicated_node` | bool | false   | Reserve first node for infrastructure services |
 
 **Notes**:
 
@@ -773,7 +788,7 @@ Parameter sweep configuration for running multiple benchmark variations.
 
 ```yaml
 sweep:
-  mode: "zip"                        # "zip" or "grid"
+  mode: "zip" # "zip" or "grid"
   parameters:
     isl: [512, 1024, 2048]
     osl: [128, 256, 512]
@@ -805,8 +820,8 @@ Reference sweep parameters in your config using `{placeholder}` syntax:
 ```yaml
 benchmark:
   type: "sa-bench"
-  isl: "{isl}"                       # Replaced by sweep value
-  osl: "{osl}"                       # Replaced by sweep value
+  isl: "{isl}" # Replaced by sweep value
+  osl: "{osl}" # Replaced by sweep value
   concurrencies: [128, 256]
 
 sweep:
@@ -838,15 +853,15 @@ container_mounts:
 
 ### Available Placeholders
 
-| Placeholder         | Type   | Description                          | Example                        |
-| ------------------- | ------ | ------------------------------------ | ------------------------------ |
-| `{job_id}`          | string | SLURM job ID                         | "12345"                        |
-| `{run_name}`        | string | Job name + job ID                    | "my-benchmark_12345"           |
-| `{head_node_ip}`    | string | IP address of head node              | "10.0.0.1"                     |
-| `{log_dir}`         | string | Resolved log directory path          | "/home/user/outputs/12345/logs"|
-| `{model_path}`      | string | Resolved model path                  | "/models/deepseek-r1"          |
-| `{container_image}` | string | Resolved container image path        | "/containers/sglang.sqsh"      |
-| `{gpus_per_node}`   | int    | GPUs per node                        | 8                              |
+| Placeholder         | Type   | Description                   | Example                         |
+| ------------------- | ------ | ----------------------------- | ------------------------------- |
+| `{job_id}`          | string | SLURM job ID                  | "12345"                         |
+| `{run_name}`        | string | Job name + job ID             | "my-benchmark_12345"            |
+| `{head_node_ip}`    | string | IP address of head node       | "10.0.0.1"                      |
+| `{log_dir}`         | string | Resolved log directory path   | "/home/user/outputs/12345/logs" |
+| `{model_path}`      | string | Resolved model path           | "/models/deepseek-r1"           |
+| `{container_image}` | string | Resolved container image path | "/containers/sglang.sqsh"       |
+| `{gpus_per_node}`   | int    | GPUs per node                 | 8                               |
 
 ### Environment Variable Expansion
 
@@ -859,6 +874,7 @@ output:
 ```
 
 Common environment variables:
+
 - `$HOME` - User home directory
 - `$USER` - Username
 - `$SLURM_JOB_ID` - SLURM job ID (also available as `{job_id}`)
@@ -867,13 +883,13 @@ Common environment variables:
 
 Some contexts support additional placeholders:
 
-| Placeholder       | Context           | Description                     |
-| ----------------- | ----------------- | ------------------------------- |
-| `{nginx_url}`     | Frontend config   | Nginx URL for load balancing    |
-| `{frontend_url}`  | Frontend config   | Frontend/router URL             |
-| `{index}`         | Worker config     | Worker index                    |
-| `{host}`          | Worker config     | Worker host                     |
-| `{port}`          | Worker config     | Worker port                     |
+| Placeholder      | Context         | Description                  |
+| ---------------- | --------------- | ---------------------------- |
+| `{nginx_url}`    | Frontend config | Nginx URL for load balancing |
+| `{frontend_url}` | Frontend config | Frontend/router URL          |
+| `{index}`        | Worker config   | Worker index                 |
+| `{host}`         | Worker config   | Worker host                  |
+| `{port}`         | Worker config   | Worker port                  |
 
 ### Examples
 
@@ -906,9 +922,9 @@ container_mounts:
   "/shared/cache": "/cache"
 ```
 
-| Key (Host Path)     | Value (Container Path) | Description                       |
-| ------------------- | ---------------------- | --------------------------------- |
-| FormattablePath     | FormattablePath        | Host path -> Container mount path |
+| Key (Host Path) | Value (Container Path) | Description                       |
+| --------------- | ---------------------- | --------------------------------- |
+| FormattablePath | FormattablePath        | Host path -> Container mount path |
 
 Both keys and values support FormattablePath templating with placeholders and environment variables.
 
@@ -916,12 +932,12 @@ Both keys and values support FormattablePath templating with placeholders and en
 
 The following mounts are always added automatically:
 
-| Host Path              | Container Path       | Description                  |
-| ---------------------- | -------------------- | ---------------------------- |
-| Model path             | `/model`             | Resolved model directory     |
-| Log directory          | `/logs`              | Log output directory         |
-| `configs/` directory   | `/configs`           | NATS, etcd binaries          |
-| Benchmark scripts      | `/srtctl-benchmarks` | Bundled benchmark scripts    |
+| Host Path            | Container Path       | Description               |
+| -------------------- | -------------------- | ------------------------- |
+| Model path           | `/model`             | Resolved model directory  |
+| Log directory        | `/logs`              | Log output directory      |
+| `configs/` directory | `/configs`           | NATS, etcd binaries       |
+| Benchmark scripts    | `/srtctl-benchmarks` | Bundled benchmark scripts |
 
 ### Cluster-Level Mounts
 
@@ -960,17 +976,17 @@ environment:
   NCCL_DEBUG: "INFO"
 ```
 
-| Key    | Value  | Description                      |
-| ------ | ------ | -------------------------------- |
-| string | string | Environment variable name=value  |
+| Key    | Value  | Description                     |
+| ------ | ------ | ------------------------------- |
+| string | string | Environment variable name=value |
 
 ### Per-Worker Template Variables
 
 Environment variable values support per-worker templating with these placeholders:
 
-| Placeholder | Description                                    | Example      |
-| ----------- | ---------------------------------------------- | ------------ |
-| `{node}`    | Hostname of the node where the worker runs     | `"gpu-01"`   |
+| Placeholder | Description                                        | Example       |
+| ----------- | -------------------------------------------------- | ------------- |
+| `{node}`    | Hostname of the node where the worker runs         | `"gpu-01"`    |
 | `{node_id}` | Numeric index of the node in worker list (0-based) | `0`, `1`, `2` |
 
 **Note**: For per-worker-mode environment variables, use `backend.prefill_environment`, `backend.decode_environment`, or `backend.aggregated_environment`.
@@ -988,10 +1004,10 @@ extra_mount:
   - "$HOME/cache:/cache"
 ```
 
-| Format                        | Description                          |
-| ----------------------------- | ------------------------------------ |
-| `host_path:container_path`    | Read-write mount                     |
-| `host_path:container_path:ro` | Read-only mount                      |
+| Format                        | Description      |
+| ----------------------------- | ---------------- |
+| `host_path:container_path`    | Read-write mount |
+| `host_path:container_path:ro` | Read-only mount  |
 
 **Note**: Unlike `container_mounts`, `extra_mount` uses simple string format, not FormattablePath. Environment variables are still expanded.
 
@@ -1008,21 +1024,21 @@ sbatch_directives:
   comment: "Benchmark run for paper"
   reservation: "my-reservation"
   constraint: "volta"
-  exclusive: ""                       # Flag without value
+  exclusive: "" # Flag without value
   gres: "gpu:8"
 ```
 
-| Directive     | Example Value           | Description                           |
-| ------------- | ----------------------- | ------------------------------------- |
-| `mail-user`   | "user@example.com"      | Email for notifications               |
-| `mail-type`   | "END,FAIL"              | When to send email (BEGIN,END,FAIL)   |
-| `comment`     | "My job description"    | Job comment for tracking              |
-| `reservation` | "my-reservation"        | Use a specific reservation            |
-| `constraint`  | "volta"                 | Node feature constraint               |
-| `exclusive`   | ""                      | Exclusive node access (flag)          |
-| `gres`        | "gpu:8"                 | Generic resource specification        |
-| `dependency`  | "afterok:12345"         | Job dependency                        |
-| `qos`         | "high"                  | Quality of service                    |
+| Directive     | Example Value        | Description                         |
+| ------------- | -------------------- | ----------------------------------- |
+| `mail-user`   | "user@example.com"   | Email for notifications             |
+| `mail-type`   | "END,FAIL"           | When to send email (BEGIN,END,FAIL) |
+| `comment`     | "My job description" | Job comment for tracking            |
+| `reservation` | "my-reservation"     | Use a specific reservation          |
+| `constraint`  | "volta"              | Node feature constraint             |
+| `exclusive`   | ""                   | Exclusive node access (flag)        |
+| `gres`        | "gpu:8"              | Generic resource specification      |
+| `dependency`  | "afterok:12345"      | Job dependency                      |
+| `qos`         | "high"               | Quality of service                  |
 
 **Format**: Each directive becomes `#SBATCH --{key}={value}` or `#SBATCH --{key}` if value is empty.
 
@@ -1036,18 +1052,18 @@ Additional srun options for worker processes.
 srun_options:
   cpu-bind: "none"
   mpi: "pmix"
-  overlap: ""                         # Flag without value
+  overlap: "" # Flag without value
   ntasks-per-node: "1"
 ```
 
-| Option            | Example Value | Description                              |
-| ----------------- | ------------- | ---------------------------------------- |
-| `cpu-bind`        | "none"        | CPU binding mode (none, cores, sockets)  |
-| `mpi`             | "pmix"        | MPI implementation                       |
-| `overlap`         | ""            | Allow step overlap (flag)                |
-| `ntasks-per-node` | "1"           | Tasks per node                           |
-| `gpus-per-task`   | "1"           | GPUs per task                            |
-| `mem`             | "0"           | Memory per node                          |
+| Option            | Example Value | Description                             |
+| ----------------- | ------------- | --------------------------------------- |
+| `cpu-bind`        | "none"        | CPU binding mode (none, cores, sockets) |
+| `mpi`             | "pmix"        | MPI implementation                      |
+| `overlap`         | ""            | Allow step overlap (flag)               |
+| `ntasks-per-node` | "1"           | Tasks per node                          |
+| `gpus-per-task`   | "1"           | GPUs per task                           |
+| `mem`             | "0"           | Memory per node                         |
 
 **Format**: Each option becomes `--{key}={value}` or `--{key}` if value is empty.
 
@@ -1061,9 +1077,9 @@ Run a custom script before dynamo install and worker startup.
 setup_script: "install-custom-deps.sh"
 ```
 
-| Field          | Type   | Default | Description                              |
-| -------------- | ------ | ------- | ---------------------------------------- |
-| `setup_script` | string | null    | Script filename (must be in `configs/`)  |
+| Field          | Type   | Default | Description                             |
+| -------------- | ------ | ------- | --------------------------------------- |
+| `setup_script` | string | null    | Script filename (must be in `configs/`) |
 
 **Notes**:
 
@@ -1088,9 +1104,9 @@ Enable dumping worker configuration to JSON for debugging.
 enable_config_dump: true
 ```
 
-| Field               | Type | Default | Description                          |
-| ------------------- | ---- | ------- | ------------------------------------ |
-| `enable_config_dump`| bool | true    | Dump config JSON for debugging       |
+| Field                | Type | Default | Description                    |
+| -------------------- | ---- | ------- | ------------------------------ |
+| `enable_config_dump` | bool | true    | Dump config JSON for debugging |
 
 When enabled, worker startup commands include `--dump-config-to` which writes the resolved configuration to a JSON file.
 
