@@ -88,12 +88,12 @@ backend:
 
       # Memory and token limits
       mem-fraction-static: 0.9
-      max-running-requests: 16
-      cuda-graph-max-bs: 16
+      max-running-requests: 8
+      cuda-graph-max-bs: 8
 
 benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 8192
-  concurrencies: "1x2x4x8x16"
+  concurrencies: "1x2x4x8"
   req_rate: "inf"
