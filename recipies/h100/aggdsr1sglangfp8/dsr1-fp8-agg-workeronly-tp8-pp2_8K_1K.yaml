@@ -2,7 +2,7 @@ name: "h100-dsr1-fp8-agg-workeronly-tp8-pp2_8K_1K"
 
 model:
   path: "dsr1-0528"
-  container: "sglang-0.5.5"
+  container: "docker://lmsysorg/sglang:v0.5.8-cu130-runtime"
   precision: "fp8"
 
 resources:
@@ -58,13 +58,13 @@ benchmark:
   type: "sa-bench"
   isl: 8192
   osl: 1024
-  concurrencies: "64"
+  concurrencies: "1x2x64"
   req_rate: "inf"
 
 # DSR1 can take a long time to load weights across 2 nodes.
 # Health timeout controls how long srtctl waits for the worker to become ready (independent of SLURM time_limit).
 health_check:
-\g<1>540        # 540 * 10s = 5400s (~90 minutes)
+  max_attempts: 720        # 720 * 10s = 7200s (matches 2:00:00 time limit)
   interval_seconds: 10
 
 

@@ -2,7 +2,7 @@ name: "h100-dsr1-fp8-agg-workeronly-tp8-pp2_1K_1K"
 
 model:
   path: "dsr1-0528"
-  container: "sglang-0.5.5"
+  container: "docker://lmsysorg/sglang:v0.5.8-cu130-runtime"
   precision: "fp8"
 
 resources:
@@ -11,6 +11,8 @@ resources:
   # TP*PP = 8*2 = 16 GPUs total → 2 nodes @ 8 GPUs each
   agg_nodes: 2
   agg_workers: 1
+slurm:
+  time_limit: "02:00:00"
 
 sbatch_directives:
   # Prevent automatic cancellation during long model-load / warmup periods with idle GPUs.
@@ -58,13 +60,13 @@ benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 1024
-  concurrencies: "64"
+  concurrencies: "1x2x4x8x16x32x64x128x256x512"
   req_rate: "inf"
 
 # DSR1 can take a long time to load weights across 2 nodes.
 # Health timeout controls how long srtctl waits for the worker to become ready (independent of SLURM time_limit).
 health_check:
-\g<1>540        # 540 * 10s = 5400s (~90 minutes)
+  max_attempts: 720        # 720 * 10s = 7200s (matches 2:00:00 time limit)
   interval_seconds: 10
 
 
