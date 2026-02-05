@@ -66,7 +66,7 @@ class NodePortAllocator:
         if node not in self._http_ports:
             self._http_ports[node] = self.base_http_port
         port = self._http_ports[node]
-        self._http_ports[node] += 1
+        self._http_ports[node] += 1000
         return port
 
     def next_bootstrap_port(self, node: str) -> int:

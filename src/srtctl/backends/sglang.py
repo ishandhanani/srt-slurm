@@ -265,10 +265,8 @@ class SGLangProtocol:
             ]
         )
 
-        # Only pass --port when using sglang.launch_server (not dynamo.sglang)
-        # dynamo.sglang uses DYN_SYSTEM_PORT env var instead
-        if use_sglang:
-            cmd.extend(["--port", str(process.http_port)])
+        # Always pass --port when using sglang.launch_server or dynamo.sglang
+        cmd.extend(["--port", str(process.http_port)])
 
         # Add disaggregation mode for prefill/decode workers (both dynamo and sglang frontend)
         if mode != "agg":
