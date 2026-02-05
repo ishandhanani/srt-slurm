@@ -42,12 +42,8 @@ jobs:
       - name: Set up Python
         run: uv python install 3.10
 
-      - name: Install dependencies
-        run: uv sync --dev
-
       - name: Run ty
-        run: uv run ty check src/srtctl/
-        continue-on-error: true # ty is still experimental
+        run: uvx ty check src/
 
   test:
     runs-on: ubuntu-latest

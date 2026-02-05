@@ -43,13 +43,13 @@ class BenchmarkStageMixin:
     runtime: "RuntimeContext"
 
     @property
-    def endpoints(self) -> list["Endpoint"]:
-        """Endpoint allocation topology."""
+    def endpoints(self) -> list["Endpoint"]:  # type: ignore[empty-body]
+        """Endpoint allocation topology (provided by main class)."""
         ...
 
     @property
-    def backend_processes(self) -> list["Process"]:
-        """Backend worker processes."""
+    def backend_processes(self) -> list["Process"]:  # type: ignore[empty-body]
+        """Backend worker processes (provided by main class)."""
         ...
 
     def run_benchmark(
@@ -164,6 +164,15 @@ class BenchmarkStageMixin:
         cmd = runner.build_command(self.config, self.runtime)
         env_to_set = self._get_benchmark_env(runner)
 
+        # Determine which container to use:
+        # 1. Custom container from benchmark config (if specified)
+        # 2. Default to the runtime container image
+        if self.config.benchmark.container_image is not None:
+            container_image = self.config.benchmark.container_image.get_path(self.runtime, ensure_exists=False)
+            logger.info("Using custom benchmark container: %s", container_image)
+        else:
+            container_image = self.runtime.container_image
+
         logger.info("Script: %s", runner.script_path)
         logger.info("Command: %s", shlex.join(cmd))
         logger.info("Log: %s", log_file)
@@ -172,7 +181,7 @@ class BenchmarkStageMixin:
             command=cmd,
             nodelist=[self.runtime.nodes.head],
             output=str(log_file),
-            container_image=str(self.runtime.container_image),
+            container_image=str(container_image),
             container_mounts=self.runtime.container_mounts,
             env_to_set=env_to_set,
         )

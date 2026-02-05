@@ -1,7 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for health check parsing (Dynamo and SGLang router)."""
+"""Tests for health check parsing (Dynamo, SGLang router, and Custom frontend)."""
+
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -9,6 +11,7 @@ from srtctl.core.health import (
     WorkerHealthResult,
     check_dynamo_health,
     check_sglang_router_health,
+    wait_for_model,
 )
 
 
@@ -432,4 +435,136 @@ class TestWorkerHealthResult:
 
         assert result.prefill_ready == 2
         assert result.decode_ready == 4
+
+
+# ============================================================================
+# Custom Frontend Health Check Tests
+# ============================================================================
+
+
+class TestCustomFrontendHealth:
+    """Test health check behavior for custom frontend type.
+
+    Custom frontends only need HTTP 200 from /health endpoint,
+    no worker count validation is performed.
+    """
+
+    def test_custom_frontend_returns_true_on_http_200(self):
+        """Custom frontend returns success on HTTP 200 without validating response body."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "healthy"}  # Simple response, no worker counts
+
+        with patch("srtctl.core.health.requests.get", return_value=mock_response):
+            result = wait_for_model(
+                host="localhost",
+                port=8000,
+                n_prefill=0,  # Ignored for custom
+                n_decode=1,  # Ignored for custom
+                frontend_type="custom",
+                timeout=1.0,
+            )
+
+        assert result is True
+
+    def test_custom_frontend_ignores_worker_counts(self):
+        """Custom frontend doesn't validate worker counts in response."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        # Response has no worker information at all
+        mock_response.json.return_value = {"status": "ok"}
+
+        with patch("srtctl.core.health.requests.get", return_value=mock_response):
+            # Even with high expected counts, should return True on HTTP 200
+            result = wait_for_model(
+                host="localhost",
+                port=8000,
+                n_prefill=100,  # Ignored
+                n_decode=100,  # Ignored
+                frontend_type="custom",
+                timeout=1.0,
+            )
+
+        assert result is True
+
+    def test_custom_frontend_fails_on_connection_error(self):
+        """Custom frontend fails if cannot connect."""
+        import requests
+
+        with patch("srtctl.core.health.requests.get", side_effect=requests.exceptions.ConnectionError):
+            result = wait_for_model(
+                host="localhost",
+                port=8000,
+                n_prefill=0,
+                n_decode=1,
+                frontend_type="custom",
+                timeout=0.5,
+                poll_interval=0.1,
+            )
+
+        assert result is False
+
+    def test_custom_frontend_fails_on_non_200_status(self):
+        """Custom frontend fails if HTTP status is not 200."""
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+
+        with patch("srtctl.core.health.requests.get", return_value=mock_response):
+            result = wait_for_model(
+                host="localhost",
+                port=8000,
+                n_prefill=0,
+                n_decode=1,
+                frontend_type="custom",
+                timeout=0.5,
+                poll_interval=0.1,
+            )
+
+        assert result is False
+
+    def test_dynamo_frontend_still_validates_workers(self):
+        """Dynamo frontend (default) still validates worker counts."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        # Response with NO workers
+        mock_response.json.return_value = {"instances": []}
+
+        with patch("srtctl.core.health.requests.get", return_value=mock_response):
+            result = wait_for_model(
+                host="localhost",
+                port=8000,
+                n_prefill=1,
+                n_decode=1,
+                frontend_type="dynamo",  # Default
+                timeout=0.5,
+                poll_interval=0.1,
+            )
+
+        # Should fail because no workers found
+        assert result is False
+
+    def test_sglang_frontend_still_validates_workers(self):
+        """SGLang frontend still validates worker counts."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        # Response with NO workers
+        mock_response.json.return_value = {
+            "workers": [],
+            "total": 0,
+            "stats": {"prefill_count": 0, "decode_count": 0, "regular_count": 0},
+        }
+
+        with patch("srtctl.core.health.requests.get", return_value=mock_response):
+            result = wait_for_model(
+                host="localhost",
+                port=8000,
+                n_prefill=1,
+                n_decode=1,
+                frontend_type="sglang",
+                timeout=0.5,
+                poll_interval=0.1,
+            )
+
+        # Should fail because no workers found
+        assert result is False
 

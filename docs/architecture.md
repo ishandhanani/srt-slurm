@@ -17,6 +17,7 @@
 8. [Extension Points](#extension-points)
 9. [Module Dependencies](#module-dependencies)
 10. [Directory Structure](#directory-structure)
+11. [Sidecars and Custom Frontends](#sidecars-and-custom-frontends)
 
 ---
 
@@ -176,6 +177,7 @@ src/srtctl/cli/
 |-- interactive.py   # TUI for job management
 |-- mixins/
     |-- worker_stage.py    # Backend worker startup
+    |-- sidecar_stage.py   # Sidecar process startup
     |-- frontend_stage.py  # Frontend/nginx startup
     |-- benchmark_stage.py # Benchmark execution
 ```
@@ -208,7 +210,7 @@ The main orchestration class that runs inside the SLURM job:
 
 ```python
 @dataclass
-class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixin):
+class SweepOrchestrator(WorkerStageMixin, SidecarStageMixin, FrontendStageMixin, BenchmarkStageMixin):
     config: SrtConfig
     runtime: RuntimeContext
 
@@ -216,8 +218,9 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
         """Run the complete benchmark sweep."""
         # Stage 1: Start head infrastructure (NATS, etcd)
         # Stage 2: Start backend workers
-        # Stage 3: Start frontends
-        # Stage 4: Run benchmark
+        # Stage 3: Start sidecars (optional)
+        # Stage 4: Start frontends
+        # Stage 5: Run benchmark
         # Cleanup
 ```
 
@@ -1080,6 +1083,7 @@ src/srtctl/
 |   |-- mixins/              # Orchestrator stage mixins
 |       |-- __init__.py
 |       |-- worker_stage.py      # Backend worker startup
+|       |-- sidecar_stage.py     # Sidecar process startup
 |       |-- frontend_stage.py    # Frontend/nginx startup
 |       |-- benchmark_stage.py   # Benchmark execution
 |
@@ -1106,6 +1110,260 @@ src/srtctl/
 
 ---
 
+## Sidecars and Custom Frontends
+
+srtctl supports advanced deployment patterns through **sidecars** and **custom frontends**. These enable custom routing algorithms, metrics collection, and integration with complex systems like the NeMo Agent Toolkit.
+
+### Execution Flow
+
+```
++------------------------------------------------------------------+
+|                      ORCHESTRATION STAGES                          |
++------------------------------------------------------------------+
+|                                                                    |
+|  Stage 1: HEAD INFRASTRUCTURE                                      |
+|  +------------------------------------------------------------+   |
+|  | setup_head.py starts:                                       |   |
+|  |   -> NATS server (:4222)                                    |   |
+|  |   -> etcd server (:2379)                                    |   |
+|  +------------------------------------------------------------+   |
+|                            |                                       |
+|                            v                                       |
+|  Stage 2: WORKERS                                                  |
+|  +------------------------------------------------------------+   |
+|  | WorkerStageMixin starts all workers:                        |   |
+|  |   -> prefill_0..N (disaggregated mode)                      |   |
+|  |   -> decode_0..N (disaggregated mode)                       |   |
+|  |   -> agg_0..N (aggregated mode)                             |   |
+|  | Workers register with etcd/NATS for discovery               |   |
+|  +------------------------------------------------------------+   |
+|                            |                                       |
+|                            v                                       |
+|  Stage 3: SIDECARS (optional)                                      |
+|  +------------------------------------------------------------+   |
+|  | SidecarStageMixin starts auxiliary processes on head node:  |   |
+|  |   -> custom router (e.g., Thompson Sampling)                |   |
+|  |   -> custom processor (workload-aware)                      |   |
+|  |   -> metrics collector                                      |   |
+|  | Sidecars register with etcd for frontend discovery          |   |
+|  +------------------------------------------------------------+   |
+|                            |                                       |
+|                            v                                       |
+|  Stage 4: FRONTEND                                                 |
+|  +------------------------------------------------------------+   |
+|  | FrontendStageMixin starts:                                  |   |
+|  |   -> type: dynamo  -> DynamoFrontend (standard)             |   |
+|  |   -> type: sglang  -> SGLangFrontend (router)               |   |
+|  |   -> type: custom  -> User-provided command                 |   |
+|  |   -> nginx (optional, for multiple frontends)               |   |
+|  +------------------------------------------------------------+   |
+|                            |                                       |
+|                            v                                       |
+|  Stage 5: BENCHMARK                                                |
+|  +------------------------------------------------------------+   |
+|  | BenchmarkStageMixin:                                        |   |
+|  |   -> Health check (wait for all workers ready)              |   |
+|  |   -> Run benchmark (sa-bench, mmlu, custom, etc.)           |   |
+|  +------------------------------------------------------------+   |
+|                                                                    |
++------------------------------------------------------------------+
+```
+
+### Sidecar Architecture
+
+Sidecars are auxiliary long-running processes that run on the head node. They start after workers (so workers are registered in etcd) and before the frontend (so the frontend can discover them).
+
+```
+HEAD NODE
++------------------------------------------------------------------+
+|                                                                    |
+|  +------------------+  +------------------+  +------------------+  |
+|  | setup_head.py    |  | sidecar: router  |  | sidecar: proc    |  |
+|  | NATS + etcd      |  | Thompson router  |  | Workload proc    |  |
+|  +------------------+  +------------------+  +------------------+  |
+|          |                    |                    |               |
+|          +--------------------+--------------------+               |
+|                               |                                    |
+|                        etcd discovery                              |
+|                               |                                    |
+|                               v                                    |
+|  +------------------------------------------------------------+   |
+|  | frontend: custom                                            |   |
+|  | User-provided frontend.py                                   |   |
+|  | HTTP :8000 (public)                                         |   |
+|  +------------------------------------------------------------+   |
+|                                                                    |
++------------------------------------------------------------------+
+          |
+          | HTTP requests
+          v
+WORKER NODES
++------------------------------------------------------------------+
+|  worker_0 (agg)  |  worker_1 (agg)  |  ...                        |
+|  Registered via etcd/NATS for dynamic discovery                   |
++------------------------------------------------------------------+
+```
+
+### Configuration Example
+
+```yaml
+# Custom Dynamo deployment with Thompson Sampling router
+
+model:
+  path: "/models/Llama-3.3-70B-Instruct"
+  container: "nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1"
+
+resources:
+  gpu_type: "h100"
+  agg_nodes: 1
+  agg_workers: 1
+
+# Sidecar processes (run after workers, before frontend)
+sidecars:
+  router:
+    command: "python3 /workspace/router.py --affinity-base 0.30"
+    env:
+      ROUTER_METRICS_CSV: "/logs/router_metrics.csv"
+  processor:
+    command: "python3 /workspace/processor.py --enable-router"
+
+# Custom frontend (instead of standard dynamo frontend)
+frontend:
+  type: custom
+  command: "python3 /workspace/frontend.py --http-port 8000"
+  env:
+    FRONTEND_MODEL_MAPPING: '{"llama": "/model"}'
+
+backend:
+  type: sglang
+  sglang_config:
+    aggregated:
+      tp: 4
+      served-model-name: "llama-3.3-70b"
+
+benchmark:
+  type: custom
+  container_image: "nemo-nat"
+  command: "nat eval --config_file /workspace/eval_config.yml"
+
+container_mounts:
+  "/path/to/custom_components": "/workspace"
+```
+
+### Sidecar Environment Variables
+
+All sidecars automatically receive these environment variables:
+
+| Variable         | Value                              | Description                     |
+| ---------------- | ---------------------------------- | ------------------------------- |
+| `ETCD_ENDPOINTS` | `http://{infra_node}:2379`         | etcd endpoint for discovery     |
+| `NATS_SERVER`    | `nats://{infra_node}:4222`         | NATS server for messaging       |
+
+Plus any custom `env` variables from the sidecar config.
+
+### Custom Frontend Environment Variables
+
+Custom frontends automatically receive:
+
+| Variable           | Value                          | Description                     |
+| ------------------ | ------------------------------ | ------------------------------- |
+| `ETCD_ENDPOINTS`   | `http://{infra_node}:2379`     | etcd endpoint for discovery     |
+| `NATS_SERVER`      | `nats://{infra_node}:4222`     | NATS server for messaging       |
+| `DYN_REQUEST_PLANE`| `nats`                         | Dynamo request plane type       |
+
+### Use Cases
+
+**1. Thompson Sampling Router**
+
+Replace the standard Dynamo router with a custom KV-aware router that uses Thompson Sampling for load balancing:
+
+```yaml
+sidecars:
+  router:
+    command: "python3 /workspace/router.py --router-type kv --affinity-base 0.30"
+  processor:
+    command: "python3 /workspace/processor.py --enable-router"
+
+frontend:
+  type: custom
+  command: "python3 /workspace/frontend.py"
+```
+
+**2. Metrics Collection**
+
+Add a metrics collector sidecar without changing the frontend:
+
+```yaml
+sidecars:
+  metrics:
+    command: "python3 /workspace/metrics_collector.py --output /logs/metrics.csv"
+
+frontend:
+  type: dynamo  # Standard frontend still used
+```
+
+**3. NeMo Agent Toolkit Integration**
+
+Run NAT evaluations against a Dynamo backend with custom components:
+
+```yaml
+sidecars:
+  router:
+    command: "python3 /workspace/custom_dynamo/router.py"
+  processor:
+    command: "python3 /workspace/custom_dynamo/processor.py"
+
+frontend:
+  type: custom
+  command: "python3 /workspace/custom_dynamo/frontend.py"
+
+benchmark:
+  type: custom
+  container_image: "nemo-nat"
+  command: |
+    nat eval --config_file /workspace/eval_config.yml
+```
+
+### Process Lifecycle
+
+```
+Timeline:
+    |
+    | Job starts
+    v
++---+--- HEAD INFRA (NATS, etcd) starts
+    |
+    | 5-10 seconds
+    v
++---+--- WORKERS start, register with etcd
+    |
+    | Workers register endpoints
+    v
++---+--- SIDECARS start (if configured)
+    |     - Sidecars can now discover workers via etcd
+    |     - Sidecars register themselves with etcd
+    |
+    | Sidecars ready
+    v
++---+--- FRONTEND starts
+    |     - Frontend discovers workers + sidecars via etcd
+    |     - For type: custom, runs user command
+    |
+    | Health check loop
+    v
++---+--- BENCHMARK runs
+    |     - Waits for all workers ready
+    |     - Executes benchmark script
+    |
+    | Benchmark completes
+    v
++---+--- CLEANUP
+          - All processes terminated
+          - Logs collected
+```
+
+---
+
 ## Summary
 
 srtctl is a well-architected orchestration framework with:
@@ -1113,6 +1371,7 @@ srtctl is a well-architected orchestration framework with:
 - **Clean separation of concerns**: Config, runtime, backend, frontend, benchmark layers
 - **Strong typing**: Frozen dataclasses with marshmallow validation
 - **Extensibility**: Protocol-based backends/frontends, decorator-based benchmark registration
+- **Advanced deployment patterns**: Sidecars and custom frontends for complex integrations
 - **Robust process management**: Registry, monitoring, graceful cleanup
 - **SLURM integration**: Proper container mounts, srun launching, nodelist parsing
 - **Modern Python**: 3.10+ syntax, comprehensive type hints, clear module structure

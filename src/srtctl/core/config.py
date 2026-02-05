@@ -114,11 +114,11 @@ def resolve_config_with_defaults(user_config: dict[str, Any], cluster_config: di
         slurm["time_limit"] = cluster_config["default_time_limit"]
         logger.debug(f"Applied default time_limit: {slurm['time_limit']}")
 
-    # Resolve model path alias
+    # Resolve model path alias (support both 'models' and 'model_paths' keys)
     model = config.get("model", {})
     model_path = model.get("path", "")
 
-    model_paths = cluster_config.get("model_paths")
+    model_paths = cluster_config.get("models") or cluster_config.get("model_paths")
     if model_paths and model_path in model_paths:
         resolved_path = model_paths[model_path]
         model["path"] = resolved_path
@@ -129,7 +129,14 @@ def resolve_config_with_defaults(user_config: dict[str, Any], cluster_config: di
 
     containers = cluster_config.get("containers")
     if containers and container in containers:
-        resolved_container = containers[container]
+        container_entry = containers[container]
+        # Handle both old format (string) and new format (dict with 'path')
+        if isinstance(container_entry, str):
+            resolved_container = container_entry
+        elif isinstance(container_entry, dict) and "path" in container_entry:
+            resolved_container = container_entry["path"]
+        else:
+            resolved_container = container_entry
         model["container"] = resolved_container
         logger.debug(f"Resolved container alias '{container}' -> '{resolved_container}'")
 
@@ -143,7 +150,14 @@ def resolve_config_with_defaults(user_config: dict[str, Any], cluster_config: di
     nginx_container = frontend.get("nginx_container", "")
 
     if containers and nginx_container in containers:
-        resolved_nginx = containers[nginx_container]
+        nginx_entry = containers[nginx_container]
+        # Handle both old format (string) and new format (dict with 'path')
+        if isinstance(nginx_entry, str):
+            resolved_nginx = nginx_entry
+        elif isinstance(nginx_entry, dict) and "path" in nginx_entry:
+            resolved_nginx = nginx_entry["path"]
+        else:
+            resolved_nginx = nginx_entry
         frontend["nginx_container"] = resolved_nginx
         config["frontend"] = frontend
         logger.debug(f"Resolved nginx_container alias '{nginx_container}' -> '{resolved_nginx}'")
@@ -166,6 +180,53 @@ def get_srtslurm_setting(key: str, default: Any = None) -> Any:
     if cluster_config and key in cluster_config:
         return cluster_config[key]
     return default
+
+
+def resolve_container_path(name: str) -> str | None:
+    """
+    Resolve a container name to its path from srtslurm.yaml.
+
+    Handles both old format (string) and new format (dict with 'path').
+
+    Args:
+        name: Container name/alias
+
+    Returns:
+        Resolved path string, or None if not found
+    """
+    containers = get_srtslurm_setting("containers")
+    if not containers or name not in containers:
+        return None
+
+    entry = containers[name]
+    if isinstance(entry, str):
+        return entry
+    elif isinstance(entry, dict) and "path" in entry:
+        return entry["path"]
+    return None
+
+
+def get_container_entries() -> dict[str, dict[str, Any]]:
+    """
+    Get all container entries from srtslurm.yaml, normalized to dict format.
+
+    Returns dict of {name: {"path": ..., "source": ...}} for all containers.
+    Containers without source will have source=None.
+
+    Returns:
+        Dict of container entries, empty dict if no containers defined
+    """
+    containers = get_srtslurm_setting("containers")
+    if not containers:
+        return {}
+
+    result: dict[str, dict[str, Any]] = {}
+    for name, entry in containers.items():
+        if isinstance(entry, str):
+            result[name] = {"path": entry, "source": None}
+        elif isinstance(entry, dict):
+            result[name] = {"path": entry.get("path", ""), "source": entry.get("source")}
+    return result
 
 
 def load_config(path: Path | str) -> SrtConfig:

@@ -29,13 +29,14 @@ import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.syntax import Syntax
 from rich.table import Table
 
 # Import from srtctl modules
 from srtctl.core.config import get_srtslurm_setting, load_config
+from srtctl.core.runtime import RuntimeContext
 from srtctl.core.schema import SrtConfig
 from srtctl.core.status import create_job_record
+from srtctl.core.topology import allocate_endpoints, endpoints_to_processes
 
 console = Console()
 
@@ -46,6 +47,136 @@ def setup_logging(level: int = logging.INFO) -> None:
         format="%(asctime)s | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+
+def display_enhanced_dry_run(config: SrtConfig, config_path: Path) -> None:
+    """Display enhanced dry-run output showing runtime execution plan.
+
+    Shows endpoint allocation, process commands, environment variables,
+    and container mounts without submitting to SLURM.
+
+    Args:
+        config: Validated SrtConfig
+        config_path: Path to the config file
+    """
+    # Create mock RuntimeContext for dry-run
+    runtime = RuntimeContext.from_config_dry_run(config)
+
+    # Get worker nodes (excluding head if it's dedicated to infra)
+    worker_nodes = runtime.nodes.worker
+
+    # Allocate endpoints using the backend
+    resources = config.resources
+    endpoints = allocate_endpoints(
+        num_prefill=resources.num_prefill,
+        num_decode=resources.num_decode,
+        num_agg=resources.num_agg,
+        gpus_per_prefill=resources.gpus_per_prefill,
+        gpus_per_decode=resources.gpus_per_decode,
+        gpus_per_agg=resources.gpus_per_agg,
+        gpus_per_node=resources.gpus_per_node,
+        available_nodes=worker_nodes,
+    )
+
+    # Convert endpoints to processes
+    processes = endpoints_to_processes(endpoints)
+
+    # Display header
+    console.print()
+    console.print(
+        Panel(
+            "[bold]🔍 DRY-RUN[/] [dim](enhanced mode)[/]",
+            title=config.name,
+            border_style="yellow",
+        )
+    )
+    console.print()
+
+    # Runtime Context section
+    console.print("[bold cyan]Runtime Context[/]")
+    console.print(f"  Job ID: {runtime.job_id}")
+    console.print(f"  Run Name: {runtime.run_name}")
+    console.print(f"  Config: {config_path}")
+    console.print(f"  Head Node: {runtime.nodes.head}")
+    console.print(f"  Infra Node: {runtime.nodes.infra}")
+    console.print(f"  Worker Nodes: {', '.join(runtime.nodes.worker)}")
+    console.print(f"  Container: {runtime.container_image}")
+    console.print(f"  Model: {runtime.model_path}")
+    console.print(f"  GPUs per Node: {runtime.gpus_per_node}")
+    console.print()
+
+    # Endpoint Allocation section
+    console.print("[bold cyan]Endpoint Allocation[/]")
+    endpoint_table = Table(show_header=True, header_style="bold")
+    endpoint_table.add_column("Endpoint", style="green")
+    endpoint_table.add_column("Mode", style="yellow")
+    endpoint_table.add_column("Nodes", style="blue")
+    endpoint_table.add_column("GPUs", style="magenta")
+    endpoint_table.add_column("Total GPUs")
+
+    for ep in endpoints:
+        gpu_str = ",".join(str(g) for g in sorted(ep.gpu_indices))
+        endpoint_table.add_row(
+            f"{ep.mode}_{ep.index}",
+            ep.mode,
+            ", ".join(ep.nodes),
+            f"[{gpu_str}]",
+            str(ep.total_gpus),
+        )
+    console.print(endpoint_table)
+    console.print()
+
+    # Process Commands section
+    console.print("[bold cyan]Process Commands[/]")
+    for process in processes:
+        if not process.is_leader:
+            continue  # Only show leader processes for brevity
+
+        console.print(f"\n  [bold green][{process.endpoint_mode}_{process.endpoint_index}][/]")
+        console.print(f"    Node: {process.node}")
+        console.print(f"    GPUs: {process.cuda_visible_devices}")
+        console.print(f"    HTTP Port: {process.http_port}")
+        console.print(f"    System Port: {process.sys_port}")
+        if process.bootstrap_port:
+            console.print(f"    Bootstrap Port: {process.bootstrap_port}")
+
+        # Build and display the worker command
+        try:
+            cmd = config.backend.build_worker_command(
+                process=process,
+                endpoint_processes=[
+                    p
+                    for p in processes
+                    if p.endpoint_mode == process.endpoint_mode and p.endpoint_index == process.endpoint_index
+                ],
+                runtime=runtime,
+                frontend_type=config.frontend.type,
+                profiling_enabled=config.profiling.enabled,
+            )
+            cmd_str = " ".join(cmd)
+            console.print(f"    [dim]Command:[/] {cmd_str}")
+        except Exception as e:
+            console.print(f"    [dim]Command:[/] [red]Error building command: {e}[/]")
+
+    console.print()
+
+    # Container Mounts section
+    if runtime.container_mounts:
+        console.print("[bold cyan]Container Mounts[/]")
+        mount_table = Table(show_header=True, header_style="bold")
+        mount_table.add_column("Host Path", style="blue")
+        mount_table.add_column("Container Path", style="green")
+        for host_path, container_path in runtime.container_mounts.items():
+            mount_table.add_row(str(host_path), str(container_path))
+        console.print(mount_table)
+        console.print()
+
+    # Environment Variables section
+    if config.environment:
+        console.print("[bold cyan]Global Environment Variables[/]")
+        for key, value in config.environment.items():
+            console.print(f"  {key}={value}")
+        console.print()
 
 
 def generate_minimal_sbatch_script(
@@ -156,17 +287,8 @@ def submit_with_orchestrator(
     )
 
     if dry_run:
-        console.print()
-        console.print(
-            Panel(
-                "[bold]🔍 DRY-RUN[/] [dim](orchestrator mode)[/]",
-                title=config.name,
-                border_style="yellow",
-            )
-        )
-        console.print()
-        syntax = Syntax(script_content, "bash", theme="monokai", line_numbers=True)
-        console.print(Panel(syntax, title="Generated sbatch Script", border_style="cyan"))
+        # Use enhanced dry-run display (sbatch script omitted for cleaner output)
+        display_enhanced_dry_run(config, config_path)
         return
 
     # Write script to temp file
@@ -525,7 +647,10 @@ def main():
   srtctl apply -f config.yaml                    # Submit job
   srtctl apply -f ./configs/                     # Submit all YAMLs in directory
   srtctl apply -f config.yaml --sweep            # Submit sweep
-  srtctl dry-run -f config.yaml                  # Dry run
+  srtctl dry-run -f config.yaml                  # Dry run with execution plan
+  srtctl container-pull                          # Download containers (submits batch job)
+  srtctl container-pull --force                  # Force re-download all containers
+  srtctl container-pull --local                  # Run directly on login node
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -546,8 +671,32 @@ def main():
     dry_run_parser = subparsers.add_parser("dry-run", help="Validate without submitting")
     add_common_args(dry_run_parser)
 
+    # Container pull command
+    container_pull_parser = subparsers.add_parser(
+        "container-pull",
+        help="Download containers defined in srtslurm.yaml",
+    )
+    container_pull_parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Force re-download even if container exists",
+    )
+    container_pull_parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Run directly on login node instead of submitting batch job",
+    )
+
     args = parser.parse_args()
 
+    # Handle container-pull command separately (doesn't need config file)
+    if args.command == "container-pull":
+        from srtctl.cli.container_pull import container_pull
+
+        sys.exit(container_pull(force=args.force, local=args.local))
+
+    # All other commands need a config file
     if not args.config.exists():
         console.print(f"[bold red]Config not found:[/] {args.config}")
         sys.exit(1)

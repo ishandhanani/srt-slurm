@@ -39,6 +39,8 @@ from srtctl.backends import (
 from srtctl.core.formatting import (
     FormattablePath,
     FormattablePathField,
+    FormattableString,
+    FormattableStringField,
 )
 
 if TYPE_CHECKING:
@@ -173,6 +175,84 @@ class S3Config:
     Schema: ClassVar[type[Schema]] = Schema
 
 
+@dataclass(frozen=True)
+class ContainerEntry:
+    """Container entry with optional source for pulling.
+
+    Supports two formats in srtslurm.yaml:
+      - Old format (string): "sglang: /path/to/sglang.sqsh"
+      - New format (dict): "sglang: {path: /path/to/sglang.sqsh, source: docker://...}"
+
+    The source field enables `srtctl container-pull` to download containers.
+    """
+
+    path: str  # Local path to the .sqsh file
+    source: str | None = None  # Docker URL for pulling (e.g., "docker://nvcr.io/nvidia/sglang:0.4.1")
+
+    Schema: ClassVar[type[Schema]] = Schema
+
+
+class ContainersField(fields.Field):
+    """Marshmallow field for containers that accepts both string and dict formats.
+
+    Handles both:
+      - Old format: {"sglang": "/path/to/sglang.sqsh"}
+      - New format: {"sglang": {"path": "/path/to/sglang.sqsh", "source": "docker://..."}}
+
+    Always deserializes to dict[str, ContainerEntry] internally.
+    """
+
+    def _deserialize(
+        self,
+        value: Any,
+        attr: str | None,
+        data: Mapping[str, Any] | None,
+        **kwargs,
+    ) -> dict[str, ContainerEntry] | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValidationError(f"Expected dict for containers, got {type(value).__name__}")
+
+        result: dict[str, ContainerEntry] = {}
+        for name, entry in value.items():
+            if isinstance(entry, str):
+                # Old format: just a path string
+                result[name] = ContainerEntry(path=entry, source=None)
+            elif isinstance(entry, dict):
+                # New format: dict with path and optional source
+                if "path" not in entry:
+                    raise ValidationError(f"Container '{name}' dict format requires 'path' field")
+                result[name] = ContainerEntry(
+                    path=entry["path"],
+                    source=entry.get("source"),
+                )
+            else:
+                raise ValidationError(
+                    f"Container '{name}' must be a string path or dict with 'path' field, got {type(entry).__name__}"
+                )
+        return result
+
+    def _serialize(
+        self,
+        value: dict[str, ContainerEntry] | None,
+        attr: str | None,
+        obj: Any,
+        **kwargs,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        result: dict[str, Any] = {}
+        for name, entry in value.items():
+            if entry.source is None:
+                # Serialize as simple string if no source
+                result[name] = entry.path
+            else:
+                # Serialize as dict if has source
+                result[name] = {"path": entry.path, "source": entry.source}
+        return result
+
+
 @dataclass
 class ClusterConfig:
     """Cluster configuration from srtslurm.yaml."""
@@ -189,7 +269,10 @@ class ClusterConfig:
     srtctl_root: str | None = None
     output_dir: str | None = None  # Custom output directory for job logs
     model_paths: dict[str, str] | None = None
-    containers: dict[str, str] | None = None
+    models: dict[str, str] | None = None  # Alias for model_paths
+    # Containers mapping: name -> path (string) or {path, source} (dict)
+    # Both formats supported for backwards compatibility
+    containers: Annotated[dict[str, ContainerEntry], ContainersField()] | None = None
     cloud: dict[str, str] | None = None
     # Cluster-level container mounts (host_path -> container_path)
     # Applied to all jobs on this cluster, useful for cluster-specific paths
@@ -197,6 +280,10 @@ class ClusterConfig:
     reporting: ReportingConfig | None = None
 
     Schema: ClassVar[type[Schema]] = Schema
+
+    def get_model_paths(self) -> dict[str, str]:
+        """Get model paths, supporting both 'models' and 'model_paths' fields."""
+        return self.models or self.model_paths or {}
 
 
 # ============================================================================
@@ -225,6 +312,7 @@ class BenchmarkType(str, Enum):
     MMLU = "mmlu"
     GPQA = "gpqa"
     LONGBENCHV2 = "longbenchv2"
+    CUSTOM = "custom"
 
 
 class ProfilingType(str, Enum):
@@ -510,7 +598,19 @@ class SlurmConfig:
 
 @dataclass(frozen=True)
 class BenchmarkConfig:
-    """Benchmark configuration."""
+    """Benchmark configuration.
+
+    For custom benchmarks (type: "custom"), you can specify:
+      - container_image: Custom container to run the benchmark in
+      - command: Command template with placeholders like {nginx_url}, {log_dir}, etc.
+
+    Example:
+        benchmark:
+          type: "custom"
+          container_image: "/containers/aiperf.sqsh"
+          command: |
+            uvx aiperf profile --url {nginx_url} --concurrency 128 --artifact-dir {log_dir}/results
+    """
 
     type: str = "manual"
     isl: int | None = None
@@ -533,6 +633,12 @@ class BenchmarkConfig:
     mooncake_workload: str | None = None  # "mooncake", "conversation", "synthetic", "toolagent"
     ttft_threshold_ms: int | None = None  # Goodput TTFT threshold in ms (default: 2000)
     itl_threshold_ms: int | None = None  # Goodput ITL threshold in ms (default: 25)
+
+    # Custom benchmark fields (type: "custom")
+    # container_image: Custom container to run the benchmark (optional, defaults to worker container)
+    container_image: Annotated[FormattablePath, FormattablePathField(allow_none=True)] | None = None
+    # command: Command template with placeholders ({nginx_url}, {log_dir}, {job_id}, {run_name}, {model_path})
+    command: Annotated[FormattableString, FormattableStringField(allow_none=True)] | None = None
 
     def get_concurrency_list(self) -> list[int]:
         if self.concurrencies is None:
@@ -743,11 +849,39 @@ class DynamoConfig:
 
 
 @dataclass(frozen=True)
+class SidecarConfig:
+    """Sidecar process configuration.
+
+    Sidecars are auxiliary long-running processes that start after infrastructure
+    (ETCD/NATS) and before the frontend. They run on the head node.
+
+    Use cases:
+        - Custom Dynamo router (Thompson sampling)
+        - Custom Dynamo processor
+        - Metrics collectors
+        - Any service that workers/frontend need to discover via ETCD
+
+    Attributes:
+        command: Full command string to execute
+        container: Container image (defaults to model.container if not specified)
+        env: Environment variables for the sidecar process
+    """
+
+    command: str
+    container: str | None = None
+    env: dict[str, str] = field(default_factory=dict)
+
+    Schema: ClassVar[builtins.type[Schema]] = Schema
+
+
+@dataclass(frozen=True)
 class FrontendConfig:
     """Frontend/router configuration.
 
     Attributes:
-        type: Frontend type - "dynamo" (default) or "sglang"
+        type: Frontend type - "dynamo", "sglang", or "custom"
+        command: Command to run when type="custom" (required for custom type)
+        container: Custom container image for frontend (defaults to model.container)
         enable_multiple_frontends: Scale with nginx + multiple routers
         num_additional_frontends: Additional routers beyond master (default: 9)
         nginx_container: Custom nginx container image (default: nginx:1.27.4)
@@ -756,6 +890,8 @@ class FrontendConfig:
     """
 
     type: str = "dynamo"
+    command: str | None = None
+    container: str | None = None
     enable_multiple_frontends: bool = True
     num_additional_frontends: int = 9
     nginx_container: str = "nginx:1.27.4"
@@ -830,6 +966,9 @@ class SrtConfig:
     health_check: HealthCheckConfig = field(default_factory=HealthCheckConfig)
     infra: InfraConfig = field(default_factory=InfraConfig)
 
+    # Sidecar processes (run after infra, before frontend)
+    sidecars: dict[str, SidecarConfig] = field(default_factory=dict)
+
     environment: dict[str, str] = field(default_factory=dict)
     container_mounts: dict[
         Annotated[FormattablePath, FormattablePathField()],
@@ -852,6 +991,7 @@ class SrtConfig:
     def __post_init__(self):
         """Validate configuration after initialization."""
         self._validate_profiling()
+        self._validate_frontend()
 
     def _validate_profiling(self):
         """Validate profiling configuration matches serving mode."""
@@ -905,6 +1045,11 @@ class SrtConfig:
                 raise ValidationError(
                     f"Profiling mode requires exactly 1 aggregated worker. Got agg_workers={r.num_agg}"
                 )
+
+    def _validate_frontend(self):
+        """Validate frontend configuration."""
+        if self.frontend.type == "custom" and not self.frontend.command:
+            raise ValidationError("frontend.command is required when frontend.type is 'custom'")
 
     @classmethod
     def from_yaml(cls, yaml_path: Path) -> "SrtConfig":

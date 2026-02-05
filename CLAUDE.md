@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Development guide for working on this codebase.
+Development guide for working on this codebase. ALWAYS START BY READING ALL OF docs/
 
 ## Quick Reference
 
@@ -13,6 +13,9 @@ make lint
 
 # Just tests
 make test
+
+# Type check
+uvx ty check src/
 
 # Run single test file
 uv run pytest tests/test_e2e.py -v
@@ -95,7 +98,7 @@ Optional fire-and-forget HTTP status reporting to external APIs. Configure in `s
 
 ```yaml
 # Cluster-level config (srtslurm.yaml)
-cluster: "bruh"  # Cluster name for dashboard display
+cluster: "bruh" # Cluster name for dashboard display
 reporting:
   status:
     endpoint: "test-endpoint.com"
@@ -113,6 +116,7 @@ reporter.report_completed(exit_code)  # Final status
 ```
 
 **Status lifecycle:**
+
 ```
 submitted → starting → head_ready → workers_starting → workers_ready
          → frontend_starting → frontend_ready → benchmark → completed | failed
@@ -135,6 +139,7 @@ create_job_record(
 ```
 
 **Key behaviors:**
+
 - All HTTP requests have 5-second timeout
 - Failures are logged at DEBUG and silently ignored
 - Job execution is never blocked by status reporting
@@ -204,6 +209,7 @@ with patch.dict(os.environ, H100Rack.slurm_env()):
 4. Add polymorphic deserialization in `BackendConfigField` in `schema.py`
 
 **Current backends:**
+
 - **SGLang**: Per-process srun launching, supports prefill/decode/aggregated modes
 - **TRTLLM**: MPI-style launching (one srun per endpoint with all nodes), prefill/decode only
 
@@ -221,4 +227,3 @@ with patch.dict(os.environ, H100Rack.slurm_env()):
 ```bash
 srtctl dry-run -f config.yaml
 ```
-

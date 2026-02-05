@@ -6,6 +6,7 @@ Stage mixins for SweepOrchestrator.
 
 Each mixin handles one stage of the sweep orchestration:
 - WorkerStageMixin: Backend worker process startup
+- SidecarStageMixin: Auxiliary sidecar process startup
 - FrontendStageMixin: Frontend/nginx orchestration
 - BenchmarkStageMixin: Benchmark execution
 - PostProcessStageMixin: Post-benchmark AI analysis
@@ -14,10 +15,12 @@ Each mixin handles one stage of the sweep orchestration:
 from srtctl.cli.mixins.benchmark_stage import BenchmarkStageMixin
 from srtctl.cli.mixins.frontend_stage import FrontendStageMixin
 from srtctl.cli.mixins.postprocess_stage import PostProcessStageMixin
+from srtctl.cli.mixins.sidecar_stage import SidecarStageMixin
 from srtctl.cli.mixins.worker_stage import WorkerStageMixin
 
 __all__ = [
     "WorkerStageMixin",
+    "SidecarStageMixin",
     "FrontendStageMixin",
     "BenchmarkStageMixin",
     "PostProcessStageMixin",

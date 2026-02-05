@@ -1,0 +1,139 @@
+# NAT Eval Config for srtslurm
+# Modified from NeMo-Agent-Toolkit minimal test config
+# Changes: port 8000, model qwen32b, output to /logs
+
+functions:
+  react_benchmark_agent:
+    _type: react_benchmark_agent
+    prefix: "Agent:"
+    decision_only: true
+    canned_response_template: "Successfully executed {tool_name}. Operation completed."
+
+function_groups:
+  banking_tools:
+    _type: banking_tools_group
+    tools_json_path: ./examples/dynamo_integration/data/raw/banking/tools.json
+    decision_only: true
+    include: [
+      get_account_balance,
+      get_transaction_history,
+      transfer_funds,
+      get_loan_information,
+      get_credit_card_information,
+      get_mortgage_details,
+      get_savings_account_products,
+      schedule_appointment,
+      check_loan_application_status,
+      find_nearby_locations,
+      get_investment_products,
+      report_lost_stolen_card,
+      update_contact_information,
+      setup_automatic_bill_pay,
+      initiate_transaction_dispute,
+      get_exchange_rates,
+      calculate_loan_payment,
+      manage_account_alerts,
+      check_wire_transfer_status,
+      get_cd_products
+    ]
+
+llms:
+  dynamo_llm:
+    _type: dynamo
+    model_name: qwen32b
+    base_url: http://0.0.0.0:8000/v1
+    api_key: dummy
+    temperature: 0.0
+    max_tokens: 2048
+    stop: ["Observation:", "\nThought:"]
+    prefix_template: "react-benchmark-{uuid}"
+    prefix_total_requests: 10
+    prefix_osl: MEDIUM
+    prefix_iat: MEDIUM
+  
+  eval_llm:
+    _type: dynamo
+    model_name: qwen32b
+    base_url: http://0.0.0.0:8000/v1
+    api_key: dummy
+    temperature: 0.0
+    max_tokens: 1024
+
+workflow:
+  _type: react_agent
+  llm_name: dynamo_llm
+  tool_names: [
+    banking_tools
+  ]
+  verbose: true
+  parse_agent_response_max_retries: 3
+  max_tool_calls: 20
+  pass_tool_call_errors_to_agent: true
+  recursion_limit: 50
+  system_prompt: |
+    You are a tool-calling agent evaluated on TOOL SELECTION capability. Your goal is to select the correct tools, in the correct order, to handle real-world use-cases.
+    
+    IMPORTANT: This is a tool selection exercise, NOT real execution.
+    - Focus on selecting the RIGHT TOOL for each step
+    - Use placeholder or dummy values for required parameters (e.g., "12345", "user@example.com", "2024-01-01")
+    - Tool responses are simulated - ignore them and focus on selecting the next appropriate tool
+    - What matters is YOUR INTENT and TOOL CHOICE, not the data quality
+    
+    Available tools:
+
+    {tools}
+
+    Use this exact format for EACH response:
+
+    Thought: I need to analyze what the user needs and select the SINGLE NEXT tool to call
+    Action: the ONE tool to call right now, must be one of [{tool_names}]
+    Action Input: valid JSON with required parameters (use placeholder values)
+
+    CRITICAL RULES:
+    1. Output ONLY ONE Thought, Action, and Action Input per response
+    2. STOP IMMEDIATELY after writing Action Input
+    3. DO NOT write the Observation - the system will provide it
+    4. DO NOT write multiple Thought/Action/Action Input cycles in one response
+    5. After receiving the Observation, you will get another turn to select the next tool
+    
+    When you have called all necessary tools:
+    Thought: I now know the final answer
+    Final Answer: [brief summary of what was accomplished]
+
+eval:
+  general:
+    max_concurrency: 8
+    
+    output:
+      dir: /logs/nat-eval-output/
+      cleanup: false
+      job_management:
+        append_job_id_to_output_dir: true
+    
+    dataset:
+      _type: json
+      file_path: ./examples/dynamo_integration/data/agent_leaderboard_v2_test_subset.json
+      structure:
+        disable: true
+    
+    profiler:
+      compute_llm_metrics: true
+      token_uniqueness_forecast: true
+      workflow_runtime_forecast: true
+      csv_exclude_io_text: true
+      prompt_caching_prefixes:
+        enable: true
+        min_frequency: 0.1
+      bottleneck_analysis:
+        enable_nested_stack: true
+      concurrency_spike_analysis:
+        enable: true
+        spike_threshold: 5
+
+  evaluators:
+    tool_selection_quality:
+      _type: tsq_evaluator
+      llm_name: eval_llm
+      strict_mode: false
+      tool_weight: 0.6
+      parameter_weight: 0.4

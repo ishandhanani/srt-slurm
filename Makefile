@@ -12,7 +12,7 @@ default:
 lint:
 	uv run ruff check src/srtctl/
 	uv run ruff format src/srtctl/
-	uv run ty check src/srtctl/ || true
+	uvx ty check src/
 
 test:
 	uv run pytest tests/ -v

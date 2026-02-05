@@ -360,7 +360,8 @@ def wait_for_model(
         poll_interval: Seconds between health checks
         timeout: Maximum wait time in seconds
         report_every: Log progress every N seconds
-        frontend_type: Frontend type - "sglang" uses /workers, "dynamo" uses /health
+        frontend_type: Frontend type - "sglang" uses /workers, "dynamo" uses /health,
+                      "custom" just checks for HTTP 200 without worker count validation
         stop_event: Optional threading.Event to abort waiting
 
     Returns:
@@ -374,6 +375,13 @@ def wait_for_model(
             poll_interval,
             n_prefill,
             n_decode,
+        )
+    elif frontend_type == "custom":
+        health_url = f"http://{host}:{port}/health"
+        logger.info(
+            "Polling %s every %.1fs (custom frontend, no worker count validation)",
+            health_url,
+            poll_interval,
         )
     else:
         health_url = f"http://{host}:{port}/health"
@@ -404,6 +412,11 @@ def wait_for_model(
         try:
             response = requests.get(health_url, timeout=5.0)
             if response.status_code == 200:
+                # Custom frontend: just check for HTTP 200, no worker count validation
+                if frontend_type == "custom":
+                    logger.info("Custom frontend is healthy (HTTP 200)")
+                    return True
+
                 response_json = response.json()
 
                 # Check worker counts based on frontend type

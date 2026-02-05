@@ -68,10 +68,10 @@ After setup, edit `srtslurm.yaml` to add model paths, containers, and cluster-sp
 
 ### Adding Model Paths
 
-The `model_paths` section maps short aliases to full filesystem paths:
+The `models` section maps short aliases to full filesystem paths (you can also use `model_paths`):
 
 ```yaml
-model_paths:
+models:
   deepseek-r1: "/mnt/lustre/models/DeepSeek-R1"
   deepseek-r1-fp4: "/mnt/lustre/models/deepseek-r1-0528-fp4-v2"
 ```
@@ -122,7 +122,7 @@ srtctl_root: "/path/to/srtctl"
 output_dir: "/persistent/path/to/outputs"
 
 # Model path aliases
-model_paths:
+models:
   deepseek-r1: "/models/DeepSeek-R1"
   llama-70b: "/models/Llama-3-70B"
 

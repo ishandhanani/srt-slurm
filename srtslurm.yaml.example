@@ -19,14 +19,32 @@ use_segment_sbatch_directive: true  # Default: true
 # Set to true if your cluster requires --exclusive to be set.
 use_exclusive_sbatch_directive: false # Default: false
 # Container registry
+# Two formats are supported:
+#   1. Simple string (path only, for existing containers)
+#   2. Dict with path and source (enables `srtctl container-pull`)
 default_container: "/shared/containers/sglang-latest.sqsh"
 containers:
+  # Old format (still works) - for existing containers
   sglang-latest: "/shared/containers/sglang-v0.4.sqsh"
-  sglang-dev: "/shared/containers/sglang-dev.sqsh"
   sglang-fp4: "/shared/containers/sglang-fp4.sqsh"
+  nginx: "/shared/containers/nginx.sqsh"
 
-# Model path aliases
-model_paths:
+  # New format (with source) - enables `srtctl container-pull`
+  sglang-dev:
+    path: "/shared/containers/sglang-dev.sqsh"
+    source: "docker://nvcr.io/nvidia/sglang:dev"
+
+  # Example with versioned image
+  sglang-0.4.1:
+    path: "/shared/containers/sglang-v0.4.1.sqsh"
+    source: "docker://nvcr.io/nvidia/sglang:0.4.1"
+
+# Run `srtctl container-pull` to download containers via batch job.
+# Use `srtctl container-pull --force` to re-download existing containers.
+# Use `srtctl container-pull --local` to run directly on login node.
+
+# Model path aliases (both 'models' and 'model_paths' work)
+models:
   deepseek-r1: "/shared/models/deepseek/DeepSeek-R1"
   deepseek-r1-distill: "/shared/models/deepseek/DeepSeek-R1-Distill-Qwen-32B"
   llama-3-70b: "/shared/models/meta/llama-3-70b"

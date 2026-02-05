@@ -77,6 +77,37 @@ class Nodes:
 
         return cls(head=head, bench=bench, infra=infra, worker=worker)
 
+    @classmethod
+    def from_mock(
+        cls,
+        num_nodes: int,
+        etcd_nats_dedicated_node: bool = False,
+    ) -> "Nodes":
+        """Create mock Nodes for dry-run mode.
+
+        Generates node names like node-01, node-02, etc.
+
+        Args:
+            num_nodes: Total number of nodes to simulate
+            etcd_nats_dedicated_node: If True, dedicate first node for etcd/nats
+        """
+        nodelist = [f"node-{i:02d}" for i in range(1, num_nodes + 1)]
+
+        if etcd_nats_dedicated_node:
+            if num_nodes < 2:
+                raise ValueError("etcd_nats_dedicated_node requires at least 2 nodes")
+            infra = nodelist[0]
+            head = nodelist[1]
+            bench = head
+            worker = tuple(nodelist[1:])
+        else:
+            head = nodelist[0]
+            bench = head
+            infra = head
+            worker = tuple(nodelist[:])
+
+        return cls(head=head, bench=bench, infra=infra, worker=worker)
+
 
 @dataclass(frozen=True)
 class RuntimeContext:
@@ -256,6 +287,76 @@ class RuntimeContext:
             host_path = host_template.get_path(temp_context, ensure_exists=False)
             container_path = container_template.get_path(temp_context, make_absolute=False, ensure_exists=False)
             container_mounts[host_path] = container_path
+
+        return cls(
+            job_id=job_id,
+            run_name=run_name,
+            nodes=nodes,
+            head_node_ip=head_node_ip,
+            infra_node_ip=infra_node_ip,
+            log_dir=log_dir,
+            model_path=model_path,
+            container_image=container_image,
+            gpus_per_node=config.resources.gpus_per_node,
+            network_interface=get_srtslurm_setting("network_interface", "eth0"),
+            container_mounts=container_mounts,
+            srun_options=dict(config.srun_options),
+            environment=dict(config.environment),
+            is_hf_model=is_hf_model,
+        )
+
+    @classmethod
+    def from_config_dry_run(
+        cls,
+        config: "SrtConfig",
+    ) -> "RuntimeContext":
+        """Create RuntimeContext for dry-run mode (no SLURM environment required).
+
+        Generates mock nodes and skips file validation for previewing
+        the execution plan without actually submitting to SLURM.
+
+        Args:
+            config: Validated SrtConfig (frozen dataclass)
+
+        Returns:
+            RuntimeContext with mock nodes and placeholder paths
+        """
+        job_id = "DRY_RUN"
+        run_name = f"{config.name}_{job_id}"
+
+        # Calculate total nodes
+        total_nodes = config.resources.total_nodes
+        if config.infra.etcd_nats_dedicated_node:
+            total_nodes += 1
+
+        # Generate mock nodes
+        nodes = Nodes.from_mock(
+            num_nodes=total_nodes,
+            etcd_nats_dedicated_node=config.infra.etcd_nats_dedicated_node,
+        )
+
+        # Use mock IPs (10.0.0.X pattern)
+        head_node_ip = "10.0.0.1"
+        infra_node_ip = "10.0.0.1" if not config.infra.etcd_nats_dedicated_node else "10.0.0.2"
+
+        # Create placeholder log directory (don't actually create it)
+        log_dir = Path("./dry-run-outputs") / job_id / "logs"
+
+        # Resolve model path without validation
+        model_path_str = os.path.expandvars(config.model.path)
+        is_hf_model = model_path_str.startswith("hf:")
+        model_path = Path(model_path_str[3:]) if is_hf_model else Path(model_path_str)
+
+        # Resolve container image without validation
+        container_image_str = os.path.expandvars(config.model.container)
+        container_image = Path(container_image_str)
+
+        # Build container mounts (simplified for dry-run)
+        container_mounts: dict[Path, Path] = {
+            log_dir: Path("/logs"),
+        }
+        if not is_hf_model:
+            container_mounts[model_path] = Path("/model")
 
         return cls(
             job_id=job_id,

@@ -7,9 +7,10 @@ Main orchestration script for benchmark sweeps.
 This script is called from within the sbatch job and coordinates:
 1. Starting head node infrastructure (NATS, etcd)
 2. Starting backend workers (prefill/decode/agg)
-3. Starting frontends and nginx
-4. Running benchmarks
-5. Cleanup
+3. Starting sidecars (optional custom processes)
+4. Starting frontends and nginx
+5. Running benchmarks
+6. Cleanup
 """
 
 import argparse
@@ -21,7 +22,13 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from srtctl.cli.mixins import BenchmarkStageMixin, FrontendStageMixin, PostProcessStageMixin, WorkerStageMixin
+from srtctl.cli.mixins import (
+    BenchmarkStageMixin,
+    FrontendStageMixin,
+    PostProcessStageMixin,
+    SidecarStageMixin,
+    WorkerStageMixin,
+)
 from srtctl.core.config import load_config
 from srtctl.core.health import wait_for_port
 from srtctl.core.processes import (
@@ -41,7 +48,9 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixin, PostProcessStageMixin):
+class SweepOrchestrator(
+    WorkerStageMixin, SidecarStageMixin, FrontendStageMixin, BenchmarkStageMixin, PostProcessStageMixin
+):
     """Main orchestrator for benchmark sweeps.
 
     Usage:
@@ -219,7 +228,13 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
             worker_procs = self.start_all_workers()
             registry.add_processes(worker_procs)
 
-            # Stage 3: Frontend
+            # Stage 3: Sidecars (optional - runs after workers, before frontend)
+            if self.config.sidecars:
+                logger.info("Starting sidecars")
+                sidecar_procs = self.start_sidecars()
+                registry.add_processes(sidecar_procs)
+
+            # Stage 4: Frontend
             reporter.report(JobStatus.FRONTEND, JobStage.FRONTEND, "Starting frontend")
             frontend_procs = self.start_frontend(registry)
             for proc in frontend_procs:
@@ -227,7 +242,7 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
 
             self._print_connection_info()
 
-            # Stage 4: Benchmark (status reported AFTER health check passes)
+            # Stage 5: Benchmark (status reported AFTER health check passes)
             exit_code = self.run_benchmark(registry, stop_event, reporter)
 
         except Exception as e:

@@ -271,7 +271,7 @@ echo "files total"
                 nodelist=[self.runtime.nodes.head],
                 output=str(self.runtime.log_dir / "postprocess.log"),
                 container_image="python:3.11",
-                container_mounts={str(self.runtime.log_dir): "/logs"},
+                container_mounts={self.runtime.log_dir: Path("/logs")},
                 env_to_set=env,
             )
             proc.wait(timeout=600)  # 10 min timeout for install + parse + full sync
@@ -413,7 +413,7 @@ echo "AI analysis complete."
                 nodelist=[self.runtime.nodes.head],
                 output=str(analysis_log),
                 container_image="python:3.11",
-                container_mounts={str(self.runtime.log_dir): "/logs"},
+                container_mounts={self.runtime.log_dir: Path("/logs")},
                 env_to_set=env_to_set,
             )
 

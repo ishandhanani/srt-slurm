@@ -43,13 +43,13 @@ class WorkerStageMixin:
         return self.config.backend
 
     @property
-    def backend_processes(self) -> list["Process"]:
-        """Compute physical process topology from endpoints (cached)."""
+    def backend_processes(self) -> list["Process"]:  # type: ignore[empty-body]
+        """Compute physical process topology from endpoints (provided by main class)."""
         ...
 
     @property
-    def endpoints(self) -> list["Endpoint"]:
-        """Endpoint allocation topology."""
+    def endpoints(self) -> list["Endpoint"]:  # type: ignore[empty-body]
+        """Endpoint allocation topology (provided by main class)."""
         ...
 
     def _build_worker_preamble(self) -> str | None:
@@ -57,7 +57,7 @@ class WorkerStageMixin:
 
         Runs (in order):
         1. Custom setup script from /configs/ (if config.setup_script set)
-        2. Dynamo installation (if frontend type is dynamo and not profiling)
+        2. Dynamo installation (if frontend uses dynamo infra and not profiling)
         """
         parts = []
 
@@ -69,10 +69,11 @@ class WorkerStageMixin:
                 f"if [ -f '{script_path}' ]; then bash '{script_path}'; else echo 'WARNING: {script_path} not found'; fi"
             )
 
-        # 2. Dynamo installation (required for dynamo.sglang when using dynamo frontend and not profiling)
+        # 2. Dynamo installation (required for dynamo.sglang when using dynamo/custom frontend)
         # When profiling is enabled, we use sglang.launch_server directly (no dynamo)
         # Skip if dynamo.install is False (container already has dynamo installed)
-        if self.config.frontend.type == "dynamo" and not self.config.profiling.enabled and self.config.dynamo.install:
+        uses_dynamo_infra = self.config.frontend.type in ("dynamo", "custom")
+        if uses_dynamo_infra and not self.config.profiling.enabled and self.config.dynamo.install:
             parts.append(self.config.dynamo.get_install_commands())
 
         if not parts:
