@@ -187,16 +187,13 @@ class WorkerStageMixin:
         # Build bash preamble (setup script + dynamo install + hang debugger)
         bash_preamble = self._build_worker_preamble(node=process.node, mode=mode, index=index)
 
-        # Use named container so debug scripts can attach to it later
-        container_name = f"sglang_{self.runtime.job_id}_{process.node}"
-
         proc = start_srun_process(
             command=cmd,
             nodelist=[process.node],
             output=str(worker_log),
             container_image=str(self.runtime.container_image),
             container_mounts=self.runtime.container_mounts,
-            container_name=container_name,
+            container_name=self.runtime.container_name,
             env_to_set=env_to_set,
             bash_preamble=bash_preamble,
         )
