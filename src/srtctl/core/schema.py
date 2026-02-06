@@ -610,32 +610,47 @@ class DynamoConfig:
         return self.hash is not None or self.top_of_tree
 
     def get_install_commands(self) -> str:
-        """Get the bash commands to install dynamo."""
+        """Get the bash commands to install dynamo.
+
+        For MPI jobs (TRTLLM), wraps installation in SLURM_LOCALID check to ensure
+        only the first rank on each node performs the installation, avoiding race
+        conditions and redundant installations across multiple ranks.
+        """
         if self.version is not None:
-            return (
-                f"echo 'Installing dynamo {self.version}...' && "
+            install_cmd = (
+                f"echo '[Rank ${{SLURM_PROCID:-0}}@$(hostname)] Installing dynamo {self.version}...' && "
                 f"pip install --break-system-packages --quiet ai-dynamo-runtime=={self.version} ai-dynamo=={self.version} && "
-                f"echo 'Dynamo {self.version} installed'"
+                f"echo '[Rank ${{SLURM_PROCID:-0}}@$(hostname)] Dynamo {self.version} installed'"
+            )
+        else:
+            # Source install (hash or top-of-tree)
+            git_ref = self.hash if self.hash else "HEAD"
+            checkout_cmd = f"git checkout {self.hash}" if self.hash else ""
+
+            install_cmd = (
+                f"echo '[Rank ${{SLURM_PROCID:-0}}@$(hostname)] Installing dynamo from source ({git_ref})...' && "
+                "cd /sgl-workspace/ && "
+                "git clone https://github.com/ai-dynamo/dynamo.git && "
+                "cd dynamo && "
+                f"{checkout_cmd + ' && ' if checkout_cmd else ''}"
+                "cd lib/bindings/python/ && "
+                'export RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=native" && '
+                "maturin build -o /tmp && "
+                "pip install /tmp/ai_dynamo_runtime*.whl && "
+                "cd /sgl-workspace/dynamo/ && "
+                "pip install -e . && "
+                "cd /sgl-workspace/sglang/ && "
+                f"echo '[Rank ${{SLURM_PROCID:-0}}@$(hostname)] Dynamo installed from source ({git_ref})'"
             )
 
-        # Source install (hash or top-of-tree)
-        git_ref = self.hash if self.hash else "HEAD"
-        checkout_cmd = f"git checkout {self.hash}" if self.hash else ""
-
+        # Wrap with SLURM_LOCALID check for per-node installation
+        # SLURM_LOCALID is 0 for the first rank on each node in MPI jobs
         return (
-            f"echo 'Installing dynamo from source ({git_ref})...' && "
-            "cd /sgl-workspace/ && "
-            "git clone https://github.com/ai-dynamo/dynamo.git && "
-            "cd dynamo && "
-            f"{checkout_cmd + ' && ' if checkout_cmd else ''}"
-            "cd lib/bindings/python/ && "
-            'export RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=native" && '
-            "maturin build -o /tmp && "
-            "pip install /tmp/ai_dynamo_runtime*.whl && "
-            "cd /sgl-workspace/dynamo/ && "
-            "pip install -e . && "
-            "cd /sgl-workspace/sglang/ && "
-            f"echo 'Dynamo installed from source ({git_ref})'"
+            "if [ \"${SLURM_LOCALID:-0}\" -eq 0 ]; then "
+            f"{install_cmd}; "
+            "else "
+            "echo '[Rank ${SLURM_PROCID:-0}@$(hostname)] Skipping dynamo install (not first rank on node)'; "
+            "fi"
         )
 
     Schema: ClassVar[type[Schema]] = Schema
