@@ -150,17 +150,29 @@ class TRTLLMProtocol:
         mode = process.endpoint_mode
         config = self.get_config_for_mode(mode)
 
-        # Write config to host path (log_dir)
+        container_model_path = Path("/model")
+
+        if frontend_type == "trtllm-serve":
+            return self._build_trtllm_serve_command(process, runtime, config, container_model_path)
+        return self._build_dynamo_command(process, runtime, config, container_model_path)
+
+    def _build_dynamo_command(
+        self,
+        process: "Process",
+        runtime: "RuntimeContext",
+        config: dict[str, Any],
+        container_model_path: Path,
+    ) -> list[str]:
+        """Build dynamo-style worker command (existing path)."""
+        mode = process.endpoint_mode
+
         config_filename = f"trtllm_config_{mode}.yaml"
         host_config_path = runtime.log_dir / config_filename
         host_config_path.write_text(yaml.safe_dump(config))
 
-        # Use container paths for the command
-        # (model_path is mounted to /model, log_dir is mounted to /logs)
         container_config_path = Path("/logs") / config_filename
-        container_model_path = Path("/model")
 
-        cmd = [
+        return [
             "trtllm-llmapi-launch",
             "python3",
             "-m",
@@ -177,4 +189,33 @@ class TRTLLMProtocol:
             "nats",
         ]
 
-        return cmd
+    def _build_trtllm_serve_command(
+        self,
+        process: "Process",
+        runtime: "RuntimeContext",
+        config: dict[str, Any],
+        container_model_path: Path,
+    ) -> list[str]:
+        """Build trtllm-serve worker command (static URL path, no Dynamo)."""
+        mode = process.endpoint_mode
+
+        # Use unique config filename per mode + endpoint to avoid collisions
+        config_filename = f"trtllm_worker_config_{mode}_{process.endpoint_index}.yaml"
+        host_config_path = runtime.log_dir / config_filename
+        host_config_path.write_text(yaml.safe_dump(config))
+
+        container_config_path = Path("/logs") / config_filename
+
+        return [
+            "trtllm-llmapi-launch",
+            "trtllm-serve",
+            str(container_model_path),
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(process.http_port),
+            "--backend",
+            "pytorch",
+            "--config",
+            str(container_config_path),
+        ]
