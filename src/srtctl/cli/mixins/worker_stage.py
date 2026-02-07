@@ -110,13 +110,16 @@ class WorkerStageMixin:
         )
 
         # Environment variables
-        env_to_set = {
-            "HEAD_NODE_IP": self.runtime.head_node_ip,
-            "ETCD_ENDPOINTS": f"http://{self.runtime.nodes.infra}:2379",
-            "NATS_SERVER": f"nats://{self.runtime.nodes.infra}:4222",
-            "DYN_SYSTEM_PORT": str(process.sys_port),
-            "DYN_REQUEST_PLANE": "nats",
-        }
+        env_to_set: dict[str, str] = {"HEAD_NODE_IP": self.runtime.head_node_ip}
+        if self.config.frontend.type == "dynamo":
+            env_to_set.update(
+                {
+                    "ETCD_ENDPOINTS": f"http://{self.runtime.nodes.infra}:2379",
+                    "NATS_SERVER": f"nats://{self.runtime.nodes.infra}:4222",
+                    "DYN_SYSTEM_PORT": str(process.sys_port),
+                    "DYN_REQUEST_PLANE": "nats",
+                }
+            )
 
         # Add mode-specific environment variables from backend
         # Support simple {node} and {node_id} templating
@@ -226,12 +229,15 @@ class WorkerStageMixin:
         )
 
         # Environment variables
-        env_to_set = {
-            "HEAD_NODE_IP": self.runtime.head_node_ip,
-            "ETCD_ENDPOINTS": f"http://{self.runtime.nodes.infra}:2379",
-            "NATS_SERVER": f"nats://{self.runtime.nodes.infra}:4222",
-            "DYN_SYSTEM_PORT": str(leader.sys_port),
-        }
+        env_to_set: dict[str, str] = {"HEAD_NODE_IP": self.runtime.head_node_ip}
+        if self.config.frontend.type == "dynamo":
+            env_to_set.update(
+                {
+                    "ETCD_ENDPOINTS": f"http://{self.runtime.nodes.infra}:2379",
+                    "NATS_SERVER": f"nats://{self.runtime.nodes.infra}:4222",
+                    "DYN_SYSTEM_PORT": str(leader.sys_port),
+                }
+            )
 
         # Add mode-specific environment variables from backend
         env_to_set.update(self.backend.get_environment_for_mode(mode))
