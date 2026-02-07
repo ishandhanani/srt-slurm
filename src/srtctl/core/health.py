@@ -457,6 +457,16 @@ def wait_for_model(
                 if time.time() - last_report_time >= report_every:
                     logger.info(result.message)
                     last_report_time = time.time()
+            else:
+                # Non-200 response — report periodically
+                if time.time() - last_report_time >= report_every:
+                    logger.info(
+                        "Waiting for model (HTTP %d from %s, %.0fs elapsed)",
+                        response.status_code,
+                        health_url,
+                        time.time() - start_time,
+                    )
+                    last_report_time = time.time()
 
         except requests.exceptions.RequestException as e:
             # Report connection errors periodically
