@@ -11,6 +11,7 @@ This module provides:
 - wait_for_model(): Wait for model with worker count validation (replaces bash version)
 - check_dynamo_health(): Parse dynamo /health response for worker counts
 - check_sglang_router_health(): Parse sglang /workers response for worker counts
+- check_trtllm_serve_health(): Parse trtllm-serve /health response (HTTP 200 = ready)
 """
 
 import logging
@@ -175,6 +176,35 @@ def check_dynamo_health(
         prefill_ready=prefill_count,
         prefill_expected=expected_prefill,
         decode_ready=decode_count,
+        decode_expected=expected_decode,
+    )
+
+
+def check_trtllm_serve_health(
+    response_json: dict,
+    expected_prefill: int,
+    expected_decode: int,
+) -> WorkerHealthResult:
+    """Check health using trtllm-serve disaggregated /health endpoint response.
+
+    The trtllm-serve disaggregated /health endpoint returns HTTP 200 when all
+    configured workers are connected and ready. A 200 response is sufficient —
+    the orchestrator already validates all workers internally.
+
+    Args:
+        response_json: Parsed JSON from /health endpoint (may be empty/minimal)
+        expected_prefill: Expected number of prefill workers (for reporting only)
+        expected_decode: Expected number of decode workers (for reporting only)
+
+    Returns:
+        WorkerHealthResult with ready=True (called only on HTTP 200)
+    """
+    return WorkerHealthResult(
+        ready=True,
+        message=f"Model is ready (trtllm-serve). Expected {expected_prefill} context and {expected_decode} generation servers.",
+        prefill_ready=expected_prefill,
+        prefill_expected=expected_prefill,
+        decode_ready=expected_decode,
         decode_expected=expected_decode,
     )
 
@@ -378,11 +408,12 @@ def wait_for_model(
     else:
         health_url = f"http://{host}:{port}/health"
         logger.info(
-            "Polling %s every %.1fs for %d prefills and %d decodes",
+            "Polling %s every %.1fs for %d prefills and %d decodes%s",
             health_url,
             poll_interval,
             n_prefill,
             n_decode,
+            " (trtllm-serve frontend)" if frontend_type == "trtllm-serve" else "",
         )
 
     start_time = time.time()
@@ -404,6 +435,12 @@ def wait_for_model(
         try:
             response = requests.get(health_url, timeout=5.0)
             if response.status_code == 200:
+                # trtllm-serve: HTTP 200 means all workers are ready, no JSON parsing needed
+                if frontend_type == "trtllm-serve":
+                    result = check_trtllm_serve_health({}, n_prefill, n_decode)
+                    logger.info(result.message)
+                    return True
+
                 response_json = response.json()
 
                 # Check worker counts based on frontend type

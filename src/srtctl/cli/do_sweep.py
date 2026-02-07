@@ -208,10 +208,14 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
         exit_code = 1
 
         try:
-            # Stage 1: Head infrastructure (NATS, etcd)
-            reporter.report(JobStatus.STARTING, JobStage.HEAD_INFRASTRUCTURE, "Starting head infrastructure")
-            head_proc = self.start_head_infrastructure(registry)
-            registry.add_process(head_proc)
+            # Stage 1: Head infrastructure (NATS, etcd) — only needed for dynamo frontend
+            needs_infra = self.config.frontend.type == "dynamo"
+            if needs_infra:
+                reporter.report(JobStatus.STARTING, JobStage.HEAD_INFRASTRUCTURE, "Starting head infrastructure")
+                head_proc = self.start_head_infrastructure(registry)
+                registry.add_process(head_proc)
+            else:
+                logger.info("Skipping head infrastructure (not needed for %s frontend)", self.config.frontend.type)
 
             # Stage 2: Workers
             reporter.report(JobStatus.WORKERS, JobStage.WORKERS, "Starting workers")
