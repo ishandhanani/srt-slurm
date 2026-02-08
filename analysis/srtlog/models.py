@@ -78,7 +78,7 @@ class RunMetadata:
             # New format (flat structure)
             model_data = json_data.get("model", {})
             resources_data = json_data.get("resources", {})
-            agg_workers = resources_data.get("agg_workers", 0)
+            agg_workers = resources_data.get("agg_workers") or 0
 
             # Determine mode based on agg_workers
             mode = "aggregated" if agg_workers > 0 else "disaggregated"
@@ -88,33 +88,33 @@ class RunMetadata:
                 path=run_path,
                 run_date=json_data.get("generated_at", ""),
                 container=model_data.get("container", ""),
-                prefill_nodes=resources_data.get("prefill_nodes", 0),
-                decode_nodes=resources_data.get("decode_nodes", 0),
-                prefill_workers=resources_data.get("prefill_workers", 0),
-                decode_workers=resources_data.get("decode_workers", 0),
+                prefill_nodes=resources_data.get("prefill_nodes") or 0,
+                decode_nodes=resources_data.get("decode_nodes") or 0,
+                prefill_workers=resources_data.get("prefill_workers") or 0,
+                decode_workers=resources_data.get("decode_workers") or 0,
                 mode=mode,
                 job_name=json_data.get("job_name", ""),
                 partition="",  # Not present in new format
                 model_dir=model_data.get("path", ""),  # Use model path as model_dir
-                gpus_per_node=resources_data.get("gpus_per_node", 0),
+                gpus_per_node=resources_data.get("gpus_per_node") or 0,
                 gpu_type=resources_data.get("gpu_type", ""),
                 enable_multiple_frontends=False,  # Not present in new format
                 num_additional_frontends=0,  # Not present in new format
-                agg_nodes=resources_data.get("agg_nodes", 0),  # Not present in new format
+                agg_nodes=resources_data.get("agg_nodes") or 0,
                 agg_workers=agg_workers,
             )
 
     @property
     def is_aggregated(self) -> bool:
         """Check if this is an aggregated mode run."""
-        return self.mode == "aggregated" or self.agg_nodes > 0
+        return self.mode == "aggregated" or (self.agg_nodes or 0) > 0
 
     @property
     def total_gpus(self) -> int:
         """Calculate total GPU count for both modes."""
         if self.is_aggregated:
-            return self.agg_nodes * self.gpus_per_node
-        return (self.prefill_nodes + self.decode_nodes) * self.gpus_per_node
+            return (self.agg_nodes or 0) * (self.gpus_per_node or 0)
+        return ((self.prefill_nodes or 0) + (self.decode_nodes or 0)) * (self.gpus_per_node or 0)
 
     @property
     def topology_label(self) -> str:
@@ -167,6 +167,10 @@ class ProfilerResults:
     request_goodput: list[float | None] = field(default_factory=list)
     concurrency_values: list[int] = field(default_factory=list)
     request_rate: list[float] = field(default_factory=list)
+
+    # Per-user throughput at P90 latency (for Pareto plots)
+    # This is 1000 / P90_ITL - throughput for users experiencing tail latency
+    output_tps_per_user_at_p90_latency: list[float | None] = field(default_factory=list)
 
     # Latency metrics - mean (per concurrency level)
     mean_ttft_ms: list[float] = field(default_factory=list)
@@ -237,6 +241,9 @@ class ProfilerResults:
         self.request_throughput = results.get("request_throughput", [])
         self.request_goodput = results.get("request_goodput", [])
         self.request_rate = results.get("request_rate", [])
+
+        # Per-user throughput at P90 latency
+        self.output_tps_per_user_at_p90_latency = results.get("output_tps_per_user_at_p90_latency", [])
 
         # Mean latencies
         self.mean_ttft_ms = results.get("mean_ttft_ms", [])

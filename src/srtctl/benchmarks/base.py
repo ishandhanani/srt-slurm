@@ -60,6 +60,16 @@ class BenchmarkRunner(ABC):
         ...
 
 
+class AIPerfBenchmarkRunner(BenchmarkRunner):
+    """Marker base class for AIPerf-driven benchmarks.
+
+    Benchmarks that inherit from this class signal to the orchestrator
+    that they can consume server metrics URLs via the AIPERF_SERVER_METRICS_URLS
+    environment variable. Backends that implement get_benchmark_env() can
+    provide Prometheus endpoints for server-side metrics collection.
+    """
+
+
 # Registry of benchmark runners
 _BENCHMARK_RUNNERS: dict[str, type[BenchmarkRunner]] = {}
 

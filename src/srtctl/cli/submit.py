@@ -10,6 +10,7 @@ This is the main entrypoint for submitting benchmarks via YAML configs.
 Usage:
     srtctl apply -f config.yaml                     # Submit job
     srtctl apply -f config.yaml -o /path/to/logs   # Submit with custom output dir
+    srtctl apply -f config.yaml --run-name-suffix _tep8x1_tep8x3   # outputs/12345_tep8x1_tep8x3
     srtctl dry-run -f sweep.yaml --sweep            # Dry run sweep
 """
 
@@ -53,6 +54,7 @@ def generate_minimal_sbatch_script(
     config_path: Path,
     setup_script: str | None = None,
     output_dir: Path | None = None,
+    run_name_suffix: str | None = None,
 ) -> str:
     """Generate minimal sbatch script that calls the Python orchestrator.
 
@@ -64,6 +66,7 @@ def generate_minimal_sbatch_script(
         config_path: Path to the YAML config file
         setup_script: Optional setup script override (passed via env var)
         output_dir: Custom output directory (CLI flag, highest priority)
+        run_name_suffix: Optional suffix for output dir (e.g. _tep8x1_tep8x3 -> outputs/12345_tep8x1_tep8x3)
 
     Returns:
         Rendered sbatch script as string
@@ -101,6 +104,7 @@ def generate_minimal_sbatch_script(
     # Resolve container image path (expand aliases from srtslurm.yaml)
     container_image = os.path.expandvars(config.model.container)
 
+    run_suffix = run_name_suffix or get_srtslurm_setting("run_name_suffix") or ""
     rendered = template.render(
         job_name=config.name,
         total_nodes=total_nodes,
@@ -118,6 +122,7 @@ def generate_minimal_sbatch_script(
         container_image=container_image,
         srtctl_source=str(srtctl_source.resolve()),
         output_base=output_base,
+        run_name_suffix=run_suffix,
         setup_script=setup_script,
     )
 
@@ -131,6 +136,7 @@ def submit_with_orchestrator(
     tags: list[str] | None = None,
     setup_script: str | None = None,
     output_dir: Path | None = None,
+    run_name_suffix: str | None = None,
 ) -> None:
     """Submit job using the new Python orchestrator.
 
@@ -143,7 +149,9 @@ def submit_with_orchestrator(
         tags: Optional tags for the run
         setup_script: Optional custom setup script name (overrides config)
         output_dir: Custom output directory (CLI flag, highest priority)
+        run_name_suffix: Optional suffix for output dir name (e.g. _tep8x1_tep8x3)
     """
+    run_suffix = run_name_suffix if run_name_suffix is not None else (get_srtslurm_setting("run_name_suffix") or "")
 
     if config is None:
         config = load_config(config_path)
@@ -153,6 +161,7 @@ def submit_with_orchestrator(
         config_path=config_path,
         setup_script=setup_script,
         output_dir=output_dir,
+        run_name_suffix=run_suffix or None,
     )
 
     if dry_run:
@@ -187,19 +196,20 @@ def submit_with_orchestrator(
         )
 
         job_id = result.stdout.strip().split()[-1]
+        job_dir_name = f"{job_id}{run_suffix}"
 
         # Determine output directory
         # Priority: CLI -o flag > srtslurm.yaml output_dir > srtctl_root/outputs
         if output_dir:
-            job_output_dir = output_dir / job_id
+            job_output_dir = output_dir / job_dir_name
         else:
             custom_output_dir = get_srtslurm_setting("output_dir")
             if custom_output_dir:
-                job_output_dir = Path(os.path.expandvars(custom_output_dir)) / job_id
+                job_output_dir = Path(os.path.expandvars(custom_output_dir)) / job_dir_name
             else:
                 srtctl_root = get_srtslurm_setting("srtctl_root")
                 srtctl_source = Path(srtctl_root) if srtctl_root else Path(__file__).parent.parent.parent.parent
-                job_output_dir = srtctl_source / "outputs" / job_id
+                job_output_dir = srtctl_source / "outputs" / job_dir_name
         job_output_dir.mkdir(parents=True, exist_ok=True)
 
         shutil.copy(config_path, job_output_dir / "config.yaml")
@@ -277,6 +287,7 @@ def submit_single(
     setup_script: str | None = None,
     tags: list[str] | None = None,
     output_dir: Path | None = None,
+    run_name_suffix: str | None = None,
 ):
     """Submit a single job from YAML config.
 
@@ -289,6 +300,7 @@ def submit_single(
         setup_script: Optional custom setup script name
         tags: Optional list of tags
         output_dir: Custom output directory (CLI flag, highest priority)
+        run_name_suffix: Optional suffix for output dir name (e.g. _tep8x1_tep8x3)
     """
     if config is None and config_path:
         config = load_config(config_path)
@@ -304,6 +316,7 @@ def submit_single(
         tags=tags,
         setup_script=setup_script,
         output_dir=output_dir,
+        run_name_suffix=run_name_suffix,
     )
 
 
@@ -323,6 +336,7 @@ def submit_sweep(
     setup_script: str | None = None,
     tags: list[str] | None = None,
     output_dir: Path | None = None,
+    run_name_suffix: str | None = None,
 ):
     """Submit parameter sweep.
 
@@ -332,6 +346,7 @@ def submit_sweep(
         setup_script: Optional custom setup script name
         tags: Optional list of tags
         output_dir: Custom output directory (CLI flag, highest priority)
+        run_name_suffix: Optional suffix for output dir name (e.g. _tep8x1_tep8x3)
     """
     from srtctl.core.sweep import generate_sweep_configs
 
@@ -406,6 +421,7 @@ def submit_sweep(
                 setup_script=setup_script,
                 tags=tags,
                 output_dir=output_dir,
+                run_name_suffix=run_name_suffix,
             )
         finally:
             with contextlib.suppress(OSError):
@@ -436,6 +452,7 @@ def submit_directory(
     tags: list[str] | None = None,
     force_sweep: bool = False,
     output_dir: Path | None = None,
+    run_name_suffix: str | None = None,
 ) -> None:
     """Submit all YAML configs in a directory recursively.
 
@@ -446,6 +463,7 @@ def submit_directory(
         tags: Optional list of tags
         force_sweep: If True, treat all configs as sweeps
         output_dir: Custom output directory (CLI flag, highest priority)
+        run_name_suffix: Optional suffix for output dir name (e.g. _tep8x1_tep8x3)
     """
     yaml_files = find_yaml_files(directory)
 
@@ -481,10 +499,22 @@ def submit_directory(
         try:
             is_sweep = force_sweep or is_sweep_config(yaml_file)
             if is_sweep:
-                submit_sweep(yaml_file, dry_run=dry_run, setup_script=setup_script, tags=tags, output_dir=output_dir)
+                submit_sweep(
+                    yaml_file,
+                    dry_run=dry_run,
+                    setup_script=setup_script,
+                    tags=tags,
+                    output_dir=output_dir,
+                    run_name_suffix=run_name_suffix,
+                )
             else:
                 submit_single(
-                    config_path=yaml_file, dry_run=dry_run, setup_script=setup_script, tags=tags, output_dir=output_dir
+                    config_path=yaml_file,
+                    dry_run=dry_run,
+                    setup_script=setup_script,
+                    tags=tags,
+                    output_dir=output_dir,
+                    run_name_suffix=run_name_suffix,
                 )
             success_count += 1
         except Exception as e:
@@ -532,6 +562,13 @@ def main():
     def add_common_args(p):
         p.add_argument("-f", "--file", type=Path, required=True, dest="config", help="YAML config file or directory")
         p.add_argument("-o", "--output", type=Path, dest="output_dir", help="Custom output directory for job logs")
+        p.add_argument(
+            "--run-name-suffix",
+            type=str,
+            dest="run_name_suffix",
+            default=None,
+            help="Suffix for output dir name (e.g. _tep8x1_tep8x3 -> outputs/12345_tep8x1_tep8x3)",
+        )
         p.add_argument("--sweep", action="store_true", help="Force sweep mode")
         p.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
 
@@ -555,6 +592,7 @@ def main():
     try:
         setup_script = getattr(args, "setup_script", None)
         output_dir = getattr(args, "output_dir", None)
+        run_name_suffix = getattr(args, "run_name_suffix", None)
 
         # Handle directory input
         if args.config.is_dir():
@@ -565,12 +603,18 @@ def main():
                 tags=tags,
                 force_sweep=args.sweep,
                 output_dir=output_dir,
+                run_name_suffix=run_name_suffix,
             )
         else:
             is_sweep = args.sweep or is_sweep_config(args.config)
             if is_sweep:
                 submit_sweep(
-                    args.config, dry_run=is_dry_run, setup_script=setup_script, tags=tags, output_dir=output_dir
+                    args.config,
+                    dry_run=is_dry_run,
+                    setup_script=setup_script,
+                    tags=tags,
+                    output_dir=output_dir,
+                    run_name_suffix=run_name_suffix,
                 )
             else:
                 submit_single(
@@ -579,6 +623,7 @@ def main():
                     setup_script=setup_script,
                     tags=tags,
                     output_dir=output_dir,
+                    run_name_suffix=run_name_suffix,
                 )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")

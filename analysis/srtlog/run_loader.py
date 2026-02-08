@@ -204,6 +204,7 @@ class RunLoader:
         """Load benchmark results from profiler output files.
 
         Looks for directories like "sa-bench_isl_1024_osl_1024/" or "vllm_isl_1024_osl_1024/" and parses JSON files.
+        Also supports aiperf format with directories like "aiperf_isl_1024_osl_1024_<timestamp>/".
         Uses parquet caching to avoid re-parsing on subsequent loads.
 
         Checks both the run directory and the logs/ subdirectory for benchmark results.
@@ -224,10 +225,19 @@ class RunLoader:
 
         # Use profiler_type from metadata to construct directory name
         profiler_type = run.profiler.profiler_type
-        pattern_strs = [f"{profiler_type}_isl_{run.profiler.isl}_osl_{run.profiler.osl}"]
+
+        # For aiperf, the directory has a timestamp suffix: aiperf_isl_{isl}_osl_{osl}_{timestamp}
+        if profiler_type == "aiperf":
+            pattern_strs = [f"aiperf_isl_{run.profiler.isl}_osl_{run.profiler.osl}_\\d+"]
+        else:
+            pattern_strs = [f"{profiler_type}_isl_{run.profiler.isl}_osl_{run.profiler.osl}"]
 
         # Define source patterns for cache validation (check all possible patterns)
-        source_patterns = [f"{pattern}/*.json" for pattern in pattern_strs]
+        if profiler_type == "aiperf":
+            # For aiperf, source patterns include subdirectory structure
+            source_patterns = [f"{pattern}/concurrency_*/*.json" for pattern in pattern_strs]
+        else:
+            source_patterns = [f"{pattern}/*.json" for pattern in pattern_strs]
 
         # Try to load from cache first
         if cache_mgr.is_cache_valid("benchmark_results", source_patterns):
@@ -263,6 +273,7 @@ class RunLoader:
                     "std_e2el_ms",
                     "total_input_tokens",
                     "total_output_tokens",
+                    "output_tps_per_user_at_p90_latency",
                 ]
                 for field in optional_fields:
                     if field in cached_df.columns:
@@ -277,11 +288,17 @@ class RunLoader:
         for pattern_str in pattern_strs:
             profiler_pattern = re.compile(pattern_str)
             for search_path in search_paths:
+                if not os.path.exists(search_path):
+                    continue
                 for entry in os.listdir(search_path):
                     if profiler_pattern.match(entry):
                         result_dir = os.path.join(search_path, entry)
                         if os.path.isdir(result_dir):
-                            results = self._parse_profiler_results(result_dir)
+                            # Use appropriate parser based on profiler type
+                            if profiler_type == "aiperf":
+                                results = self._parse_aiperf_results(result_dir)
+                            else:
+                                results = self._parse_profiler_results(result_dir)
                             run.profiler.add_benchmark_results(results)
 
                             # Save to cache
@@ -316,6 +333,7 @@ class RunLoader:
                                     "std_e2el_ms": "std_e2el_ms",
                                     "total_input_tokens": "total_input_tokens",
                                     "total_output_tokens": "total_output_tokens",
+                                    "output_tps_per_user_at_p90_latency": "output_tps_per_user_at_p90_latency",
                                 }
 
                                 for result_key, cache_key in optional_fields.items():
@@ -326,6 +344,225 @@ class RunLoader:
                                 cache_mgr.save_to_cache("benchmark_results", cache_df, source_patterns)
 
                             return  # Found results, stop searching
+
+    def _parse_aiperf_results(self, result_dir: str) -> dict:
+        """Parse aiperf benchmark result JSON files.
+
+        Aiperf organizes results in concurrency subdirectories:
+        result_dir/
+            concurrency_4/
+                profile_export_aiperf.json
+            concurrency_8/
+                profile_export_aiperf.json
+            ...
+
+        Args:
+            result_dir: Path to directory containing concurrency_* subdirectories
+
+        Returns:
+            Dict with concurrencies, output_tps, mean_itl_ms, etc.
+        """
+        result = []
+
+        # Find all concurrency subdirectories
+        for entry in os.listdir(result_dir):
+            if not entry.startswith("concurrency_"):
+                continue
+
+            concurrency_dir = os.path.join(result_dir, entry)
+            if not os.path.isdir(concurrency_dir):
+                continue
+
+            # Extract concurrency value from directory name
+            try:
+                concurrency = int(entry.split("_")[1])
+            except (IndexError, ValueError):
+                logger.warning(f"Could not parse concurrency from directory: {entry}")
+                continue
+
+            # Look for profile_export_aiperf.json
+            json_path = os.path.join(concurrency_dir, "profile_export_aiperf.json")
+            if not os.path.exists(json_path):
+                logger.warning(f"No profile_export_aiperf.json found in {concurrency_dir}")
+                continue
+
+            try:
+                with open(json_path) as f:
+                    content = json.load(f)
+
+                    # Extract metrics from aiperf JSON format
+                    # aiperf uses nested dicts with 'avg', 'p99', etc.
+                    def get_avg(obj):
+                        if isinstance(obj, dict):
+                            return obj.get("avg")
+                        return obj
+
+                    def get_p99(obj):
+                        if isinstance(obj, dict):
+                            return obj.get("p99")
+                        return None
+
+                    def get_std(obj):
+                        if isinstance(obj, dict):
+                            return obj.get("std")
+                        return None
+
+                    def get_p50(obj):
+                        if isinstance(obj, dict):
+                            return obj.get("p50")
+                        return None
+
+                    # Get request_rate from input_config if available
+                    input_config = content.get("input_config", {})
+                    loadgen = input_config.get("loadgen", {})
+                    request_rate = loadgen.get("request_rate")
+
+                    # Calculate TPOT from output_token_throughput_per_user
+                    # TPOT = 1000 / output_token_throughput_per_user (ms per token)
+                    otps_per_user = content.get("output_token_throughput_per_user", {})
+                    otps_per_user_avg = get_avg(otps_per_user)
+                    mean_tpot_ms = 1000 / otps_per_user_avg if otps_per_user_avg and otps_per_user_avg > 0 else None
+
+                    # Calculate output TPS/user at P90 latency = 1000 / P90_ITL
+                    # This represents throughput for users experiencing P90 (tail) latency
+                    itl_data = content.get("inter_token_latency", {})
+                    p90_itl = itl_data.get("p90") if isinstance(itl_data, dict) else None
+                    output_tps_per_user_at_p90_latency = 1000 / p90_itl if p90_itl and p90_itl > 0 else None
+
+                    res = {
+                        "max_concurrency": concurrency,
+                        # Throughput metrics
+                        "output_throughput": get_avg(content.get("output_token_throughput")),
+                        "total_token_throughput": get_avg(content.get("total_token_throughput")),
+                        "request_throughput": get_avg(content.get("request_throughput")),
+                        "request_goodput": None,  # Not available in aiperf
+                        "request_rate": request_rate,
+                        # Per-user throughput at P90 latency (for Pareto plots)
+                        # This is 1000 / P90_ITL - throughput for users at the slow tail
+                        "output_tps_per_user_at_p90_latency": output_tps_per_user_at_p90_latency,
+                        # Mean latencies
+                        "mean_ttft_ms": get_avg(content.get("time_to_first_token")),
+                        "mean_tpot_ms": mean_tpot_ms,
+                        "mean_itl_ms": get_avg(content.get("inter_token_latency")),
+                        "mean_e2el_ms": get_avg(content.get("request_latency")),
+                        # Median latencies
+                        "median_ttft_ms": get_p50(content.get("time_to_first_token")),
+                        "median_tpot_ms": None,  # Not directly available
+                        "median_itl_ms": get_p50(content.get("inter_token_latency")),
+                        "median_e2el_ms": get_p50(content.get("request_latency")),
+                        # P99 latencies
+                        "p99_ttft_ms": get_p99(content.get("time_to_first_token")),
+                        "p99_tpot_ms": None,  # Not directly available
+                        "p99_itl_ms": get_p99(content.get("inter_token_latency")),
+                        "p99_e2el_ms": get_p99(content.get("request_latency")),
+                        # Std dev latencies
+                        "std_ttft_ms": get_std(content.get("time_to_first_token")),
+                        "std_tpot_ms": None,  # Not directly available
+                        "std_itl_ms": get_std(content.get("inter_token_latency")),
+                        "std_e2el_ms": get_std(content.get("request_latency")),
+                        # Token counts
+                        "total_input_tokens": get_avg(content.get("total_isl")),
+                        "total_output_tokens": get_avg(content.get("total_osl")),
+                        # Metadata
+                        "backend": None,
+                        "model_id": None,
+                        "date": content.get("start_time"),
+                        "duration": get_avg(content.get("benchmark_duration")),
+                        "completed": not content.get("was_cancelled", False),
+                        "num_prompts": get_avg(content.get("request_count")),
+                    }
+
+                    result.append(res)
+            except Exception as e:
+                logger.warning(f"Error parsing {json_path}: {e}")
+                continue
+
+        # Organize results - sort by concurrency
+        out = {
+            # Primary metrics
+            "concurrencies": [],
+            "output_tps": [],
+            "total_tps": [],
+            "request_throughput": [],
+            "request_goodput": [],
+            "request_rate": [],
+            # Per-user throughput
+            "output_tps_per_user_at_p90_latency": [],
+            # Mean latencies
+            "mean_ttft_ms": [],
+            "mean_tpot_ms": [],
+            "mean_itl_ms": [],
+            "mean_e2el_ms": [],
+            # Median latencies
+            "median_ttft_ms": [],
+            "median_tpot_ms": [],
+            "median_itl_ms": [],
+            "median_e2el_ms": [],
+            # P99 latencies
+            "p99_ttft_ms": [],
+            "p99_tpot_ms": [],
+            "p99_itl_ms": [],
+            "p99_e2el_ms": [],
+            # Std dev latencies
+            "std_ttft_ms": [],
+            "std_tpot_ms": [],
+            "std_itl_ms": [],
+            "std_e2el_ms": [],
+            # Token counts
+            "total_input_tokens": [],
+            "total_output_tokens": [],
+            # Metadata
+            "backend": [],
+            "model_id": [],
+            "date": [],
+            "duration": [],
+            "completed": [],
+            "num_prompts": [],
+        }
+
+        # Sort by concurrency and aggregate
+        for data in sorted(result, key=lambda x: x.get("max_concurrency", 0) or 0):
+            out["concurrencies"].append(data.get("max_concurrency"))
+            # Throughput
+            out["output_tps"].append(data.get("output_throughput"))
+            out["total_tps"].append(data.get("total_token_throughput"))
+            out["request_throughput"].append(data.get("request_throughput"))
+            out["request_goodput"].append(data.get("request_goodput"))
+            out["request_rate"].append(data.get("request_rate"))
+            # Per-user throughput
+            out["output_tps_per_user_at_p90_latency"].append(data.get("output_tps_per_user_at_p90_latency"))
+            # Mean latencies
+            out["mean_ttft_ms"].append(data.get("mean_ttft_ms"))
+            out["mean_tpot_ms"].append(data.get("mean_tpot_ms"))
+            out["mean_itl_ms"].append(data.get("mean_itl_ms"))
+            out["mean_e2el_ms"].append(data.get("mean_e2el_ms"))
+            # Median latencies
+            out["median_ttft_ms"].append(data.get("median_ttft_ms"))
+            out["median_tpot_ms"].append(data.get("median_tpot_ms"))
+            out["median_itl_ms"].append(data.get("median_itl_ms"))
+            out["median_e2el_ms"].append(data.get("median_e2el_ms"))
+            # P99 latencies
+            out["p99_ttft_ms"].append(data.get("p99_ttft_ms"))
+            out["p99_tpot_ms"].append(data.get("p99_tpot_ms"))
+            out["p99_itl_ms"].append(data.get("p99_itl_ms"))
+            out["p99_e2el_ms"].append(data.get("p99_e2el_ms"))
+            # Std dev latencies
+            out["std_ttft_ms"].append(data.get("std_ttft_ms"))
+            out["std_tpot_ms"].append(data.get("std_tpot_ms"))
+            out["std_itl_ms"].append(data.get("std_itl_ms"))
+            out["std_e2el_ms"].append(data.get("std_e2el_ms"))
+            # Token counts
+            out["total_input_tokens"].append(data.get("total_input_tokens"))
+            out["total_output_tokens"].append(data.get("total_output_tokens"))
+            # Metadata
+            out["backend"].append(data.get("backend"))
+            out["model_id"].append(data.get("model_id"))
+            out["date"].append(data.get("date"))
+            out["duration"].append(data.get("duration"))
+            out["completed"].append(data.get("completed"))
+            out["num_prompts"].append(data.get("num_prompts"))
+
+        return out
 
     def _parse_profiler_results(self, result_dir: str) -> dict:
         """Parse profiler result JSON files.
@@ -573,6 +810,12 @@ class RunLoader:
                     "Output TPS/GPU": tps_per_gpu,
                     "Total TPS/GPU": total_tps_per_gpu if total_tps_per_gpu else "N/A",
                     "Output TPS/User": tps_per_user,
+                    "Output TPS/User @P90 Latency": (
+                        run.profiler.output_tps_per_user_at_p90_latency[i]
+                        if i < len(run.profiler.output_tps_per_user_at_p90_latency)
+                        and run.profiler.output_tps_per_user_at_p90_latency[i]
+                        else "N/A"
+                    ),
                     "Mean TTFT (ms)": (run.profiler.mean_ttft_ms[i] if i < len(run.profiler.mean_ttft_ms) else "N/A"),
                     "Mean TPOT (ms)": tpot if tpot else "N/A",
                     "Mean ITL (ms)": (run.profiler.mean_itl_ms[i] if i < len(run.profiler.mean_itl_ms) else "N/A"),

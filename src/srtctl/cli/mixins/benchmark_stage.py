@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from srtctl.core.processes import ProcessRegistry
     from srtctl.core.runtime import RuntimeContext
     from srtctl.core.schema import SrtConfig
-    from srtctl.core.topology import Endpoint
+    from srtctl.core.topology import Endpoint, Process
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ class BenchmarkStageMixin:
         self.config: SrtConfig
         self.runtime: RuntimeContext
         self.endpoints: list[Endpoint]
+        self.backend_processes: list[Process]
     """
 
     # Type hints for mixin dependencies
@@ -44,6 +45,11 @@ class BenchmarkStageMixin:
     @property
     def endpoints(self) -> list["Endpoint"]:
         """Endpoint allocation topology."""
+        ...
+
+    @property
+    def backend_processes(self) -> list["Process"]:
+        """Backend worker processes."""
         ...
 
     def run_benchmark(
@@ -164,7 +170,7 @@ class BenchmarkStageMixin:
         """Run the actual benchmark script."""
 
         cmd = runner.build_command(self.config, self.runtime)
-        env_to_set = self._get_benchmark_profiling_env(runner)
+        env_to_set = self._get_benchmark_env(runner)
 
         logger.info("Script: %s", runner.script_path)
         logger.info("Command: %s", shlex.join(cmd))
@@ -256,5 +262,28 @@ class BenchmarkStageMixin:
 
             # The profile.sh script only generates traffic when PROFILING_MODE=prefill
             env["PROFILING_MODE"] = "prefill"
+
+        return env
+
+    def _get_benchmark_env(self, runner: "BenchmarkRunner") -> dict[str, str]:
+        """Get environment variables for the benchmark script.
+
+        Combines profiling environment with backend-specific benchmark environment.
+        Backends can implement get_benchmark_env() to provide additional variables
+        like server metrics URLs for AIPerf benchmarks.
+        """
+        env = self._get_benchmark_profiling_env(runner)
+
+        # Call backend hook if available (e.g., for server metrics URLs)
+        backend_env_hook = getattr(self.config.backend, "get_benchmark_env", None)
+        if callable(backend_env_hook):
+            env.update(
+                backend_env_hook(
+                    runtime=self.runtime,
+                    processes=self.backend_processes,
+                    benchmark_type=self.config.benchmark.type,
+                    runner=runner,
+                )
+            )
 
         return env
