@@ -79,6 +79,7 @@ backend:
       data-parallel-size: 1
       tensor-parallel-size: 4
       expert-parallel-size: 1
+      numa-node: [0, 0, 1, 1]
       fp4-gemm-backend: "flashinfer_trtllm"
       disaggregation-transfer-backend: nixl
 
@@ -102,6 +103,7 @@ backend:
       scheduler-recv-interval: 10
       tensor-parallel-size: 4
       expert-parallel-size: 1
+      numa-node: [0, 0, 1, 1]
       fp4-gemm-backend: "flashinfer_trtllm"
       disaggregation-transfer-backend: nixl
 

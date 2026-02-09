@@ -163,6 +163,7 @@ backend:
       enable-dp-lm-head: true
       prefill-round-robin-balance: true
       enable-dp-attention: true
+      numa-node: [0, 0, 1, 1]
       fp4-gemm-backend: "flashinfer_cutlass"
       disaggregation-transfer-backend: nixl
 

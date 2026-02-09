@@ -81,6 +81,7 @@ backend:
       data-parallel-size: 1
       tensor-parallel-size: 4
       expert-parallel-size: 1
+      numa-node: [0, 0, 1, 1]
       enable-dp-attention: false
       fp4-gemm-backend: "flashinfer_trtllm"
       disaggregation-transfer-backend: nixl
@@ -107,6 +108,7 @@ backend:
       enable-symm-mem: true
       tensor-parallel-size: 4
       expert-parallel-size: 1
+      numa-node: [0, 0, 1, 1]
       enable-dp-attention: false
       fp4-gemm-backend: "flashinfer_trtllm"
       disaggregation-transfer-backend: nixl

@@ -67,6 +67,7 @@ backend:
       disaggregation-mode: decode
       disaggregation-transfer-backend: nixl
       enable-dp-attention: true
+      numa-node: [0, 0, 1, 1]
       enable-symm-mem: true
       expert-parallel-size: 4
       kv-cache-dtype: fp8_e4m3
