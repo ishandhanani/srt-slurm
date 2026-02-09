@@ -62,8 +62,10 @@ echo "Start: $(date)"
 echo "=========================================="
 echo ""
 
-# Copy config to output directory
-cp "{{ config_path }}" "${OUTPUT_DIR}/config.yaml"
+# Copy config to output directory (skip if pre-staged by srtctl apply)
+if [[ ! -f "${OUTPUT_DIR}/config.yaml" ]]; then
+    cp "{{ config_path }}" "${OUTPUT_DIR}/config.yaml"
+fi
 
 # Get head node
 HEAD_NODE=$(scontrol show hostnames ${SLURM_NODELIST} | head -n1)
@@ -103,7 +105,7 @@ echo ""
 # The orchestrator will spawn containerized workers
 # Output goes to SLURM's --output (sweep_%j.log)
 set +e  # Temporarily disable exit-on-error to capture exit code
-python3 -u -m srtctl.cli.do_sweep "{{ config_path }}"
+python3 -u -m srtctl.cli.do_sweep "${OUTPUT_DIR}/config.yaml"
 EXIT_CODE=$?
 set -e  # Re-enable exit-on-error
 

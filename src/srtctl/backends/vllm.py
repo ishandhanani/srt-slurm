@@ -192,8 +192,9 @@ class VLLMProtocol:
     ) -> list[Process]:
         """Convert endpoints to processes.
 
-        For DP+EP mode (data-parallel-size set), creates one process per GPU.
-        For standard TP mode, creates one process per node.
+        For DP+EP mode (data-parallel-size set), creates one process per node.
+        vLLM handles spawning per-GPU DP engine cores internally within each process.
+        For standard TP mode, also creates one process per node (via default helper).
         """
         from srtctl.core.topology import NodePortAllocator, Process, endpoints_to_processes
 
@@ -204,71 +205,36 @@ class VLLMProtocol:
             # Standard TP mode: one process per node
             return endpoints_to_processes(endpoints, base_sys_port=base_sys_port)
 
-        # DP+EP mode: one process per GPU
+        # DP+EP mode: one process per node (vLLM spawns DP engines internally)
         processes: list[Process] = []
         current_sys_port = base_sys_port
         port_allocator = NodePortAllocator()
 
         for endpoint in endpoints:
-            if not self._is_dp_mode(endpoint.mode):
-                # Non-DP endpoints get standard processing
-                # (This shouldn't happen in practice since all modes should be consistent)
-                for node_rank, node in enumerate(endpoint.nodes):
-                    is_leader = node_rank == 0
-                    http_port = port_allocator.next_http_port(node) if is_leader else 0
-                    bootstrap_port = (
-                        port_allocator.next_bootstrap_port(node) if endpoint.mode == "prefill" and is_leader else None
-                    )
-                    kv_events_port = port_allocator.next_kv_events_port()
-                    nixl_port = port_allocator.next_nixl_port()
+            for node_rank, node in enumerate(endpoint.nodes):
+                is_leader = node_rank == 0
+                http_port = port_allocator.next_http_port(node) if is_leader else 0
+                bootstrap_port = (
+                    port_allocator.next_bootstrap_port(node) if endpoint.mode == "prefill" and is_leader else None
+                )
+                kv_events_port = port_allocator.next_kv_events_port()
+                nixl_port = port_allocator.next_nixl_port()
 
-                    processes.append(
-                        Process(
-                            node=node,
-                            gpu_indices=endpoint.gpu_indices,
-                            sys_port=current_sys_port,
-                            http_port=http_port,
-                            endpoint_mode=endpoint.mode,
-                            endpoint_index=endpoint.index,
-                            node_rank=node_rank,
-                            bootstrap_port=bootstrap_port,
-                            kv_events_port=kv_events_port,
-                            nixl_port=nixl_port,
-                        )
+                processes.append(
+                    Process(
+                        node=node,
+                        gpu_indices=endpoint.gpu_indices,  # All GPUs on this node
+                        sys_port=current_sys_port,
+                        http_port=http_port,
+                        endpoint_mode=endpoint.mode,
+                        endpoint_index=endpoint.index,
+                        node_rank=node_rank,
+                        bootstrap_port=bootstrap_port,
+                        kv_events_port=kv_events_port,
+                        nixl_port=nixl_port,
                     )
-                    current_sys_port += 1
-            else:
-                # DP+EP mode: one process per GPU
-                # Each process gets a single GPU and a unique dp_rank
-                dp_rank = 0
-                for _node_rank, node in enumerate(endpoint.nodes):
-                    for gpu_idx in sorted(endpoint.gpu_indices):
-                        is_leader = dp_rank == 0
-                        http_port = port_allocator.next_http_port(node) if is_leader else 0
-                        bootstrap_port = (
-                            port_allocator.next_bootstrap_port(node)
-                            if endpoint.mode == "prefill" and is_leader
-                            else None
-                        )
-                        kv_events_port = port_allocator.next_kv_events_port()
-                        nixl_port = port_allocator.next_nixl_port()
-
-                        processes.append(
-                            Process(
-                                node=node,
-                                gpu_indices=frozenset([gpu_idx]),  # Single GPU per process
-                                sys_port=current_sys_port,
-                                http_port=http_port,
-                                endpoint_mode=endpoint.mode,
-                                endpoint_index=endpoint.index,
-                                node_rank=dp_rank,  # dp_rank stored in node_rank for now
-                                bootstrap_port=bootstrap_port,
-                                kv_events_port=kv_events_port,
-                                nixl_port=nixl_port,
-                            )
-                        )
-                        current_sys_port += 1
-                        dp_rank += 1
+                )
+                current_sys_port += 1
 
         return processes
 
@@ -350,22 +316,35 @@ class VLLMProtocol:
         is_dp_mode = self._is_dp_mode(mode)
 
         if is_dp_mode:
-            # DP+EP mode: each GPU runs its own process
-            # process.node_rank is the dp_rank (set in endpoints_to_processes)
-            dp_rank = process.node_rank
+            # DP+EP mode: one process per node, vLLM spawns per-GPU engine cores internally.
+            # Uses --data-parallel-size-local (GPUs on this node) and --data-parallel-start-rank
+            # (starting rank offset for this node) instead of per-GPU --data-parallel-rank.
             dp_rpc_port = config.pop("data-parallel-rpc-port", None) or config.pop("data_parallel_rpc_port", 13345)
+
+            # Pop these from config to avoid duplication via _config_to_cli_args
+            config.pop("data-parallel-size-local", None)
+            config.pop("data_parallel_size_local", None)
+            config.pop("data-parallel-start-rank", None)
+            config.pop("data_parallel_start_rank", None)
+
+            num_local_gpus = len(process.gpu_indices)
+            start_rank = process.node_rank * num_local_gpus
 
             cmd.extend(
                 [
-                    "--data-parallel-rank",
-                    str(dp_rank),
+                    "--data-parallel-size-local",
+                    str(num_local_gpus),
+                    "--data-parallel-start-rank",
+                    str(start_rank),
                     "--data-parallel-address",
                     leader_ip,
                     "--data-parallel-rpc-port",
                     str(dp_rpc_port),
                 ]
             )
-            # Note: --data-parallel-size is added via _config_to_cli_args from vllm_config
+
+            # Note: --data-parallel-size (total) is added via _config_to_cli_args from vllm_config
+            # Note: dynamo.vllm does not support --headless; DP coordination handles leader election
         elif is_multi_node:
             # Standard TP+PP multi-node coordination flags
             node_rank = endpoint_nodes.index(process.node)
