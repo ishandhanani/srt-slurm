@@ -4,7 +4,17 @@
 """Benchmark runners for srtctl."""
 
 # Import runners to trigger registration
-from srtctl.benchmarks import aiperf, gpqa, longbenchv2, mmlu, mooncake_router, profiling, router, sa_bench
+from srtctl.benchmarks import (
+    aiperf,
+    gpqa,
+    longbenchv2,
+    mmlu,
+    mooncake_router,
+    profiling,
+    router,
+    sa_bench,
+    trace_replay,
+)
 from srtctl.benchmarks.base import (
     AIPerfBenchmarkRunner,
     BenchmarkRunner,
@@ -28,4 +38,5 @@ __all__ = [
     "mooncake_router",
     "profiling",
     "aiperf",
+    "trace_replay",
 ]

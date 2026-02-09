@@ -103,4 +103,3 @@ class AiperfRunner(AIPerfBenchmarkRunner):
             str(prefill_gpus),
             str(decode_gpus),
         ]
-

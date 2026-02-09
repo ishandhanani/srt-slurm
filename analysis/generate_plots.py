@@ -252,17 +252,19 @@ def generate_pareto_subplots(
         save_figure(fig, output_dir, filename, format)
 
 
-def generate_latency_plots(df: pd.DataFrame, selected_runs: list[str], output_dir: str, format: str):
+def generate_latency_plots(
+    df: pd.DataFrame, selected_runs: list[str], run_labels: dict[str, str], output_dir: str, format: str
+):
     """Generate latency vs concurrency plots using matplotlib."""
     colors = plt.cm.Set1.colors
 
-    # (metric_col, filename, title, use_log_scale)
+    # (metric_col, y_label, filename, title, use_log_scale, convert_to_seconds)
     metrics = [
-        ("Mean TTFT (ms)", "latency_ttft", "TTFT vs Concurrency", True),
-        ("Mean TPOT (ms)", "latency_tpot", "TPOT vs Concurrency", False),
+        ("Mean TTFT (ms)", "Mean TTFT (s)", "latency_ttft", "TTFT vs Concurrency", True, True),
+        ("Mean TPOT (ms)", "Mean TPOT (ms)", "latency_tpot", "TPOT vs Concurrency", False, False),
     ]
 
-    for metric_col, filename, title, use_log_scale in metrics:
+    for metric_col, y_label, filename, title, use_log_scale, convert_to_seconds in metrics:
         fig, ax = plt.subplots(figsize=(10, 6))
 
         for idx, run_id in enumerate(selected_runs):
@@ -272,23 +274,31 @@ def generate_latency_plots(df: pd.DataFrame, selected_runs: list[str], output_di
             if valid_data.empty:
                 continue
 
+            label = run_labels.get(run_id, run_id)
             color = colors[idx % len(colors)]
+
+            y_values = valid_data[metric_col]
+            if convert_to_seconds:
+                y_values = y_values / 1000.0  # Convert ms to seconds
 
             ax.plot(
                 valid_data["Concurrency"],
-                valid_data[metric_col],
+                y_values,
                 "o-",
                 color=color,
-                label=run_id,
+                label=label,
                 markersize=8,
                 linewidth=2,
             )
 
         ax.set_xlabel("Concurrency", fontsize=12)
-        ax.set_ylabel(metric_col, fontsize=12)
+        ax.set_ylabel(y_label, fontsize=12)
         ax.set_title(title, fontsize=14)
         if use_log_scale:
             ax.set_yscale("log")
+            # Use scalar formatter to avoid scientific notation (e.g., "4" instead of "4 x 10^0")
+            ax.yaxis.set_major_formatter(plt.ScalarFormatter())
+            ax.ticklabel_format(style="plain", axis="y")
         ax.grid(True, alpha=0.3)
         ax.legend(loc="best", fontsize=9)
 
@@ -654,6 +664,93 @@ def generate_rate_match_plot(prefill_nodes: list[dict], decode_nodes: list[dict]
         plt.close(fig)
 
 
+def generate_combined_summary_plot(
+    df: pd.DataFrame, selected_runs: list[str], run_labels: dict[str, str], output_dir: str, format: str
+):
+    """Generate a 2x2 combined summary plot.
+
+    Top row: TTFT, TPOT (latency plots)
+    Bottom row: Output TPS/GPU, Total TPS/GPU (pareto plots)
+    """
+    colors = plt.cm.Set1.colors
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    # Top-left: TTFT (in seconds)
+    ax = axes[0, 0]
+    metric_col = "Mean TTFT (ms)"
+    for idx, run_id in enumerate(selected_runs):
+        run_data = df[df["Run ID"] == run_id].sort_values("Concurrency")
+        valid_data = run_data[run_data[metric_col] != "N/A"].copy()
+        if valid_data.empty:
+            continue
+        label = run_labels.get(run_id, run_id)
+        color = colors[idx % len(colors)]
+        y_values = valid_data[metric_col] / 1000.0  # Convert to seconds
+        ax.plot(valid_data["Concurrency"], y_values, "o-", color=color, label=label, markersize=6, linewidth=1.5)
+    ax.set_xlabel("Concurrency", fontsize=10)
+    ax.set_ylabel("Mean TTFT (s)", fontsize=10)
+    ax.set_title("TTFT vs Concurrency", fontsize=11)
+    ax.set_yscale("log")
+    ax.yaxis.set_major_formatter(plt.ScalarFormatter())
+    ax.ticklabel_format(style="plain", axis="y")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize=7)
+
+    # Top-right: TPOT
+    ax = axes[0, 1]
+    metric_col = "Mean TPOT (ms)"
+    for idx, run_id in enumerate(selected_runs):
+        run_data = df[df["Run ID"] == run_id].sort_values("Concurrency")
+        valid_data = run_data[run_data[metric_col] != "N/A"].copy()
+        if valid_data.empty:
+            continue
+        label = run_labels.get(run_id, run_id)
+        color = colors[idx % len(colors)]
+        ax.plot(valid_data["Concurrency"], valid_data[metric_col], "o-", color=color, label=label, markersize=6, linewidth=1.5)
+    ax.set_xlabel("Concurrency", fontsize=10)
+    ax.set_ylabel("Mean TPOT (ms)", fontsize=10)
+    ax.set_title("TPOT vs Concurrency", fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize=7)
+
+    # Bottom-left: Output TPS/GPU
+    ax = axes[1, 0]
+    x_metric, y_metric = "Output TPS/User", "Output TPS/GPU"
+    for idx, run_id in enumerate(selected_runs):
+        run_data = df[df["Run ID"] == run_id].copy()
+        run_data = run_data[(run_data[y_metric] != "N/A") & (run_data[x_metric] != "N/A")]
+        if run_data.empty:
+            continue
+        label = run_labels.get(run_id, run_id)
+        color = colors[idx % len(colors)]
+        ax.plot(run_data[x_metric], run_data[y_metric], "o-", color=color, label=label, markersize=6, linewidth=1.5)
+    ax.set_xlabel(x_metric, fontsize=10)
+    ax.set_ylabel(y_metric, fontsize=10)
+    ax.set_title(f"{y_metric} vs {x_metric}", fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize=7)
+
+    # Bottom-right: Total TPS/GPU
+    ax = axes[1, 1]
+    x_metric, y_metric = "Output TPS/User", "Total TPS/GPU"
+    for idx, run_id in enumerate(selected_runs):
+        run_data = df[df["Run ID"] == run_id].copy()
+        run_data = run_data[(run_data[y_metric] != "N/A") & (run_data[x_metric] != "N/A")]
+        if run_data.empty:
+            continue
+        label = run_labels.get(run_id, run_id)
+        color = colors[idx % len(colors)]
+        ax.plot(run_data[x_metric], run_data[y_metric], "o-", color=color, label=label, markersize=6, linewidth=1.5)
+    ax.set_xlabel(x_metric, fontsize=10)
+    ax.set_ylabel(y_metric, fontsize=10)
+    ax.set_title(f"{y_metric} vs {x_metric}", fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best", fontsize=7)
+
+    fig.tight_layout()
+    save_figure(fig, output_dir, "summary_combined", format)
+
+
 def export_data_csv(df: pd.DataFrame, output_dir: str):
     """Export benchmark data to CSV."""
     os.makedirs(output_dir, exist_ok=True)
@@ -675,6 +772,12 @@ def main():
     )
     parser.add_argument(
         "--job-ids", "-j", nargs="+", type=str, help="Specific job IDs to include (default: all available)"
+    )
+    parser.add_argument(
+        "--min-concurrency", type=int, default=None, help="Minimum concurrency to include (default: no minimum)"
+    )
+    parser.add_argument(
+        "--max-concurrency", type=int, default=None, help="Maximum concurrency to include (default: no maximum)"
     )
     parser.add_argument("--no-pareto", action="store_true", help="Skip Pareto plots")
     parser.add_argument("--no-latency", action="store_true", help="Skip latency plots")
@@ -731,34 +834,28 @@ def main():
     for run in all_runs:
         if run.metadata.is_aggregated:
             run_id = f"{run.job_id}_{run.metadata.agg_workers}A_{run.metadata.run_date}"
-            total_gpus = run.metadata.agg_nodes * run.metadata.gpus_per_node
-            label = (
-                f"{run.job_id} | "
-                f"{run.metadata.agg_workers}A | "
-                f"{total_gpus} GPUs | "
-                f"{run.profiler.isl}/{run.profiler.osl}"
-            )
         else:
             run_id = (
                 f"{run.job_id}_{run.metadata.prefill_workers}P_{run.metadata.decode_workers}D_{run.metadata.run_date}"
             )
-            prefill_gpus = run.metadata.prefill_nodes * run.metadata.gpus_per_node
-            decode_gpus = run.metadata.decode_nodes * run.metadata.gpus_per_node
-            label = (
-                f"{run.job_id} | "
-                f"{run.metadata.prefill_workers}P{run.metadata.decode_workers}D | "
-                f"{prefill_gpus}/{decode_gpus} | "
-                f"{run.profiler.isl}/{run.profiler.osl}"
-            )
 
-        if run.metadata.gpu_type:
-            label += f" | {run.metadata.gpu_type}"
+        # Use directory name as label (e.g., "1573140_ctx3_dep8_gen1_dep8_batch32_8_nvfp4_router")
+        label = os.path.basename(run.metadata.path)
 
         selected_runs.append(run_id)
         run_labels[run_id] = label
 
     # Get DataFrame
     df = loader.to_dataframe(all_runs)
+
+    # Filter by concurrency range if specified
+    if args.min_concurrency is not None or args.max_concurrency is not None:
+        original_len = len(df)
+        if args.min_concurrency is not None:
+            df = df[df["Concurrency"] >= args.min_concurrency]
+        if args.max_concurrency is not None:
+            df = df[df["Concurrency"] <= args.max_concurrency]
+        logger.info(f"Filtered by concurrency range: {original_len} -> {len(df)} rows")
 
     # Create output directory
     os.makedirs(args.output, exist_ok=True)
@@ -774,10 +871,14 @@ def main():
 
     if not args.no_latency:
         logger.info("Generating latency plots...")
-        generate_latency_plots(df, selected_runs, args.output, args.format)
+        generate_latency_plots(df, selected_runs, run_labels, args.output, args.format)
         if args.individual:
             logger.info("Generating latency subplot grid...")
             generate_latency_subplots(df, selected_runs, run_labels, args.output, args.format)
+
+    # Generate combined 2x2 summary plot (TTFT, TPOT, Output TPS/GPU, Total TPS/GPU)
+    logger.info("Generating combined summary plot...")
+    generate_combined_summary_plot(df, selected_runs, run_labels, args.output, args.format)
 
     if not args.no_csv:
         logger.info("Exporting benchmark data to CSV...")
@@ -845,8 +946,10 @@ def main():
 
 
 if __name__ == "__main__":
-    """
+    r"""
     # Combined (all runs overlaid)
+    # force deleting parquet caches:
+    # find outputs/ -type d -name "cached_assets" -exec rm -rf {} \;
     # sa-bench (old runs)
         python outputs/generate_plots.py outputs/ --job-ids 1539007 1539009 1539470 1547123 1547869 --no-csv --individual -o ./plots
         python outputs/generate_plots.py outputs/ --job-ids 1539007 1539009 1539470 1547123 1547869 --no-csv -o ./plots/combined
@@ -855,6 +958,8 @@ if __name__ == "__main__":
         python outputs/generate_plots.py outputs/ --job-ids 1539470 --no-csv -o ./plots/tep8x3_tep8x1
         python outputs/generate_plots.py outputs/ --job-ids 1547123 --no-csv -o ./plots/dep8x2_dep8x2
         python outputs/generate_plots.py outputs/ --job-ids 1547869 --no-csv -o ./plots/agg_dep8x4
+        python analysis/generate_plots.py outputs/ --job-ids 1572120 1572121 1572122 1572123 1572124 1572125 --no-csv -o ./plots/aiperf_adp --min-concurrency 1 --max-concurrency 128
+        python analysis/generate_plots.py outputs/ --job-ids 1572122 1572123 1572124 1572125 1573138 1573139 1573140 --no-csv -o ./plots/aiperf_adp_router --min-concurrency 1 --max-concurrency 128
 
     # aiperf 
         python outputs/generate_plots.py outputs/ --job-ids 1551614 1551670 1551671 1551672 --no-csv -o ./plots/aiperf_runs

@@ -527,6 +527,7 @@ class BenchmarkConfig:
     mooncake_workload: str | None = None  # "mooncake", "conversation", "synthetic", "toolagent"
     ttft_threshold_ms: int | None = None  # Goodput TTFT threshold in ms (default: 2000)
     itl_threshold_ms: int | None = None  # Goodput ITL threshold in ms (default: 25)
+    trace_file: str | None = None  # Custom trace file path (overrides mooncake_workload)
 
     def get_concurrency_list(self) -> list[int]:
         if self.concurrencies is None:

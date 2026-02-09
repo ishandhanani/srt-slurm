@@ -212,6 +212,7 @@ class TRTLLMProtocol:
             str(container_model_path),
             "--served-model-name",
             runtime.model_path.name,
+            "--publish-events-and-metrics"
         ]
 
         # Only add disaggregation mode for prefill/decode, not for agg
@@ -224,5 +225,12 @@ class TRTLLMProtocol:
             "--request-plane",
             "nats",
         ])
+
+        # Pass kv-block-size to match TRT-LLM's tokens_per_block setting
+        # This ensures Dynamo's KV event publisher uses the same block size as TRT-LLM
+        kv_cache_config = config.get("kv_cache_config", {})
+        tokens_per_block = kv_cache_config.get("tokens_per_block")
+        if tokens_per_block:
+            cmd.extend(["--kv-block-size", str(tokens_per_block)])
 
         return cmd

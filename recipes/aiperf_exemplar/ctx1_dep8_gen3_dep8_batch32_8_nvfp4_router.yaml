@@ -1,4 +1,4 @@
-name: ctx1_dep8_gen3_dep8_batch32_8_nvfp4  # 2 prefill, 2 decode workers
+name: ctx1_dep8_gen3_dep8_batch32_8_nvfp4_router  # 2 prefill, 2 decode workers
 
 model:
   path: "deepseek-v32-nvfp4"
@@ -55,7 +55,7 @@ backend:
       enable_attention_dp: true
       kv_cache_config:
         dtype: fp8
-        enable_block_reuse: false
+        enable_block_reuse: true    # dynamo prefill router
         free_gpu_memory_fraction: 0.9
         tokens_per_block: 64
       max_batch_size: 32                   # max bs 
@@ -113,7 +113,10 @@ benchmark:
   req_rate: 100
 
 frontend:
-  type: "dynamo"
+  type: dynamo
+  args:
+    router-mode: "kv"
+    router-reset-states: true
   enable_multiple_frontends: false
 
 

@@ -2,7 +2,8 @@ name: base_agg1_dep8_batch8_nvfp4  # 4 agg workers
 
 model:
   path: "deepseek-v32-nvfp4"
-  container: "nvcr.io#nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0"
+  # container: "nvcr.io#nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0"
+  container: "dyn-090-with-adp-trtllm"
   precision: "fp4"
 
 resources:
