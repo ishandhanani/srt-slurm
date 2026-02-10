@@ -81,6 +81,8 @@ The trace directory is automatically mounted into the container.
 Trace files are synthetically generated using Dynamo's prefix data generator tool.
 
 **Tool:** https://github.com/ai-dynamo/dynamo/tree/main/benchmarks/prefix_data_generator 
+> [!NOTE]
+> Before [PR #6117](https://github.com/ai-dynamo/dynamo/pull/6117) is merged to main, use the `synthesizer.py` in this branch for correct dataset behavior.
 
 **Source trace:** Download `conversation_trace.jsonl` (Original Mooncake Trace Dataset) from [dynamo_exemplar/traces](https://gitlab-master.nvidia.com/jothomson/dynamo_exemplar/-/blob/karenc/dsv3_gb200/traces/)  
 
@@ -101,7 +103,7 @@ This trace and a few others can be found here: [dynamo_exemplar/traces](https://
 
 ## TRTLLM Attention DP Support
 
-To use TRTLLM attention data parallelism (required for Exemplar on GB200), use the Dynamo 0.9.0 container with TRTLLM ADP support :
+To use TRTLLM attention data parallelism (necessary for DEP8 configs), use the Dynamo 0.9.0 container with TRTLLM ADP support :
 
 `gitlab-master.nvidia.com:5005/dl/ai-dynamo/dynamo:9590b0130162891b49126fc77a88fe7770e02dd6-43393213-trtllm-arm64` ([original commit](https://gitlab-master.nvidia.com/dl/ai-dynamo/dynamo/-/commit/9590b0130162891b49126fc77a88fe7770e02dd6))
 
@@ -121,4 +123,5 @@ model:
   container: "dyn-090-with-adp-trtllm"  
 ```
 
-Note: Dynamo 0.9.0 with TRTLLM ADP is not yet in an official release.
+> [!NOTE]
+> Dynamo 0.9.0 with TRTLLM ADP is not yet in an official release.
