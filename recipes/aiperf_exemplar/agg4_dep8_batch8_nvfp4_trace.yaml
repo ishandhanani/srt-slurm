@@ -2,8 +2,7 @@ name: agg4_dep8_batch8_nvfp4_trace  # 4 agg workers, round robin
 
 model:
   path: "deepseek-v32-nvfp4"
-  # container: "nvcr.io#nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0"
-  container: "dyn-090-with-adp-trtllm"  # but doesn't use router
+  container: "dyn-090-with-adp-trtllm"  # agg mode doesn't use kvrouter anyways
   precision: "fp4"
 
 resources:
@@ -47,7 +46,7 @@ backend:
         free_gpu_memory_fraction: 0.9 
         tokens_per_block: 64
       max_batch_size: 8                  
-      max_seq_len: 121000                   # 8k osl
+      max_seq_len: 121000                  
       moe_config:
         backend: TRTLLM
         use_low_precision_moe_combine: true
@@ -60,14 +59,13 @@ backend:
       moe_expert_parallel_size: 8          # EP8
       num_postprocess_workers: 8           # increased from 4
       print_iter_log: true
-      stream_interval: 10                  # reduced from 100
+      stream_interval: 10                   
       tensor_parallel_size: 8              # TP8 (gets ignored with dep=true)
 
 
 benchmark:
   type: "trace-replay"                     
-  # trace_file: "traces/conversation_trace_synth_15x1+10.0_speedup1_maxseqlen120000.jsonl"
-  trace_file: "traces/conversation_trace_synth_16.00x1+10.00_speedup1_maxisl110000.jsonl"
+  trace_file: "traces/conversation_trace_synth_16.00x1+10.00_speedup1_maxisl110000.jsonl" # should have trace in srt-slurm/traces/
   ttft_threshold_ms: 20000  # 20 seconds
   itl_threshold_ms: 50
 
