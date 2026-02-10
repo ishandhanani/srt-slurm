@@ -97,7 +97,8 @@ datagen synthesize \
     --max-isl 110000 \
     --num-requests 10000
 ```
-The prefix len multiplication increases the cache hit rate of the dataset.
+This trace and a few others can be found here: [dynamo_exemplar/traces](conversation_trace_synth_16.00x1+10.00_speedup1_maxisl110000.jsonl)  
+
 
 ## TRTLLM Attention DP Support
 
