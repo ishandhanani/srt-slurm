@@ -82,8 +82,7 @@ Trace files are synthetically generated using Dynamo's prefix data generator too
 
 **Tool:** https://github.com/ai-dynamo/dynamo/tree/main/benchmarks/prefix_data_generator 
 
-**Source trace:** Download `conversation_trace.jsonl` (Original Mooncake Trace Dataset) from:
-https://gitlab-master.nvidia.com/jothomson/dynamo_exemplar/-/tree/karenc/dsv3_gb200/traces
+**Source trace:** Download `conversation_trace.jsonl` (Original Mooncake Trace Dataset) from [dynamo_exemplar/traces](https://gitlab-master.nvidia.com/jothomson/dynamo_exemplar/-/blob/karenc/dsv3_gb200/traces/)  
 
 **Example generation command:**
 
@@ -97,7 +96,7 @@ datagen synthesize \
     --max-isl 110000 \
     --num-requests 10000
 ```
-This trace and a few others can be found here: [dynamo_exemplar/traces](conversation_trace_synth_16.00x1+10.00_speedup1_maxisl110000.jsonl)  
+This trace and a few others can be found here: [dynamo_exemplar/traces](https://gitlab-master.nvidia.com/jothomson/dynamo_exemplar/-/blob/karenc/dsv3_gb200/traces/conversation_trace_synth_16.00x1+10.00_speedup1_maxisl110000.jsonl?ref_type=heads)  
 
 
 ## TRTLLM Attention DP Support
