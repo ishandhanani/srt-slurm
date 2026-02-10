@@ -265,6 +265,165 @@ class TestSGLangProtocol:
         assert config.is_grpc_mode("agg") is False
 
 
+class TestMockerProtocol:
+    """Tests for MockerProtocol."""
+
+    def test_mocker_config_structure(self):
+        """Test Mocker config has expected structure."""
+        from srtctl.backends import MockerProtocol
+
+        config = MockerProtocol()
+
+        assert config.type == "mocker"
+        assert hasattr(config, "prefill_environment")
+        assert hasattr(config, "decode_environment")
+        assert hasattr(config, "mocker_config")
+
+    def test_get_environment_for_mode(self):
+        """Test environment variable retrieval per mode."""
+        from srtctl.backends import MockerProtocol
+
+        config = MockerProtocol(
+            aggregated_environment={"DYN_LOG": "warn"},
+        )
+
+        assert config.get_environment_for_mode("agg") == {"DYN_LOG": "warn"}
+        assert config.get_environment_for_mode("prefill") == {}
+        assert config.get_environment_for_mode("decode") == {}
+
+    def test_get_config_for_mode(self):
+        """Test config retrieval per mode."""
+        from srtctl.backends import MockerProtocol, MockerServerConfig
+
+        config = MockerProtocol(
+            mocker_config=MockerServerConfig(
+                aggregated={"model-path": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B", "block-size": 64},
+            )
+        )
+
+        agg_config = config.get_config_for_mode("agg")
+        assert agg_config["model-path"] == "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+        assert agg_config["block-size"] == 64
+        assert config.get_config_for_mode("prefill") == {}
+        assert config.get_config_for_mode("decode") == {}
+
+    def test_get_served_model_name(self):
+        """Test served model name extraction from mocker config."""
+        from srtctl.backends import MockerProtocol, MockerServerConfig
+
+        config = MockerProtocol(
+            mocker_config=MockerServerConfig(
+                aggregated={"model-path": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"},
+            )
+        )
+
+        assert config.get_served_model_name("fallback") == "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+
+    def test_get_served_model_name_fallback(self):
+        """Test served model name falls back to default."""
+        from srtctl.backends import MockerProtocol
+
+        config = MockerProtocol()
+        assert config.get_served_model_name("fallback") == "fallback"
+
+    def test_build_worker_command(self):
+        """Test mocker worker command generation."""
+        from pathlib import Path
+        from unittest.mock import MagicMock
+
+        from srtctl.backends import MockerProtocol, MockerServerConfig
+        from srtctl.core.topology import Process
+
+        config = MockerProtocol(
+            mocker_config=MockerServerConfig(
+                aggregated={"model-path": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B", "block-size": 64},
+            )
+        )
+
+        process = Process(
+            node="node0",
+            gpu_indices=frozenset([0]),
+            sys_port=8081,
+            http_port=30000,
+            endpoint_mode="agg",
+            endpoint_index=0,
+            node_rank=0,
+        )
+
+        mock_runtime = MagicMock()
+        mock_runtime.model_path = Path("/model")
+
+        cmd = config.build_worker_command(
+            process=process,
+            endpoint_processes=[process],
+            runtime=mock_runtime,
+        )
+
+        assert cmd[0] == "python3"
+        assert cmd[1] == "-m"
+        assert cmd[2] == "dynamo.mocker"
+        assert "--block-size" in cmd
+        assert "64" in cmd
+        assert "--model-path" in cmd
+        assert "deepseek-ai/DeepSeek-R1-Distill-Llama-8B" in cmd
+
+    def test_get_process_environment_empty(self):
+        """Test mocker returns empty process environment."""
+        from srtctl.backends import MockerProtocol
+        from srtctl.core.topology import Process
+
+        config = MockerProtocol()
+        process = Process(
+            node="node0",
+            gpu_indices=frozenset([0]),
+            sys_port=8081,
+            http_port=30000,
+            endpoint_mode="agg",
+            endpoint_index=0,
+            node_rank=0,
+        )
+
+        assert config.get_process_environment(process) == {}
+
+    def test_srun_config(self):
+        """Test mocker uses per-process launching."""
+        from srtctl.backends import MockerProtocol
+
+        config = MockerProtocol()
+        srun = config.get_srun_config()
+
+        assert srun.mpi is None
+        assert srun.oversubscribe is False
+        assert srun.launch_per_endpoint is False
+
+    def test_mocker_backend_schema_deserialization(self):
+        """Test mocker backend can be deserialized from YAML-like dict."""
+        from srtctl.core.schema import ModelConfig, ResourceConfig, SrtConfig
+
+        config = SrtConfig(
+            name="test-mocker",
+            model=ModelConfig(path="deepseek-ai/DeepSeek-R1-Distill-Llama-8B", container="/container.sqsh", precision="bf16"),
+            resources=ResourceConfig(gpu_type="h100", gpus_per_node=8, agg_nodes=1, agg_workers=8),
+        )
+
+        # Load from dict (simulates YAML parsing)
+        schema = SrtConfig.Schema()
+        loaded = schema.load({
+            "name": "test-mocker",
+            "model": {"path": "test-model", "container": "/container.sqsh", "precision": "bf16"},
+            "resources": {"gpu_type": "h100", "gpus_per_node": 8, "agg_nodes": 1, "agg_workers": 8},
+            "backend": {
+                "type": "mocker",
+                "mocker_config": {
+                    "aggregated": {"model-path": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B", "block-size": 64},
+                },
+            },
+        })
+
+        assert loaded.backend.type == "mocker"
+        assert loaded.backend.get_config_for_mode("agg")["block-size"] == 64
+
+
 class TestServedModelName:
     """Tests for served_model_name property extraction from backend configs."""
 
