@@ -26,10 +26,7 @@ from marshmallow_dataclass import dataclass
 if TYPE_CHECKING:
     from srtctl.backends.base import SrunConfig
     from srtctl.core.runtime import RuntimeContext
-    from srtctl.core.topology import Endpoint, Process
-
-# Type alias for worker modes
-WorkerMode = Literal["prefill", "decode", "agg"]
+    from srtctl.core.topology import Endpoint, Process, WorkerMode
 
 
 @dataclass(frozen=True)
