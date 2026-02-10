@@ -31,9 +31,9 @@ echo "SA-Bench Config: endpoint=${ENDPOINT}; isl=${ISL}; osl=${OSL}; concurrenci
 # Parse concurrency list
 IFS='x' read -r -a CONCURRENCY_LIST <<< "$CONCURRENCIES"
 
-# Quick curl to verify endpoint is working
+# Quick curl to verify endpoint is working (generous timeout for first-request warmup)
 echo "Verifying endpoint..."
-curl -s "${ENDPOINT}/v1/chat/completions" \
+curl -s --max-time 600 "${ENDPOINT}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -d "{
         \"model\": \"${MODEL_NAME}\",

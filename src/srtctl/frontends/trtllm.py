@@ -121,6 +121,8 @@ class TRTLLMServeFrontend:
             "disaggregated",
             "-c",
             "/logs/disagg_config.yaml",
+            "-t",
+            "7200"
         ]
         cmd.extend(self.get_frontend_args_list(config.frontend.args))
 
