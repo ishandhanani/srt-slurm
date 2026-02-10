@@ -960,6 +960,7 @@ if __name__ == "__main__":
         python outputs/generate_plots.py outputs/ --job-ids 1547869 --no-csv -o ./plots/agg_dep8x4
         python analysis/generate_plots.py outputs/ --job-ids 1572120 1572121 1572122 1572123 1572124 1572125 --no-csv -o ./plots/aiperf_adp --min-concurrency 1 --max-concurrency 128
         python analysis/generate_plots.py outputs/ --job-ids 1572122 1572123 1572124 1572125 1573138 1573139 1573140 --no-csv -o ./plots/aiperf_adp_router --min-concurrency 1 --max-concurrency 128
+        python analysis/generate_plots.py outputs/ --job-ids 1573345 1577312 --no-csv -o ./plots/aiperf_adp_router_trace
 
     # aiperf 
         python outputs/generate_plots.py outputs/ --job-ids 1551614 1551670 1551671 1551672 --no-csv -o ./plots/aiperf_runs
