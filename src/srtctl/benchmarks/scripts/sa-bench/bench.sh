@@ -65,7 +65,8 @@ for concurrency in "${CONCURRENCY_LIST[@]}"; do
         --ignore-eos \
         --request-rate 250 \
         --percentile-metrics ttft,tpot,itl,e2el \
-        --max-concurrency "$concurrency"
+        --max-concurrency "$concurrency" \
+        --trust-remote-code
 
     num_prompts=$((concurrency * 10))
     
@@ -94,7 +95,8 @@ for concurrency in "${CONCURRENCY_LIST[@]}"; do
         --percentile-metrics ttft,tpot,itl,e2el \
         --max-concurrency "$concurrency" \
         --use-chat-template \
-        --save-result --result-dir "$result_dir" --result-filename "$result_filename"
+        --save-result --result-dir "$result_dir" --result-filename "$result_filename" \
+        --trust-remote-code
     
     echo "$(date '+%Y-%m-%d %H:%M:%S')"
     echo "Completed benchmark with concurrency: $concurrency"
