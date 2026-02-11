@@ -90,7 +90,7 @@ backend:
         enable_block_reuse: false
         free_gpu_memory_fraction: 0.8
       max_batch_size: 8
-      max_num_tokens: 256
+      max_num_tokens: 32
       max_seq_len: 9344
       moe_config:
         backend: DEEPGEMM
