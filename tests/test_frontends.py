@@ -10,7 +10,6 @@ import pytest
 
 from srtctl.frontends import DynamoFrontend, SGLangFrontend, get_frontend
 
-
 # ============================================================================
 # get_frontend() Tests
 # ============================================================================
@@ -130,13 +129,15 @@ class TestGetFrontendArgsList:
         """Mixed arg types are handled correctly."""
         frontend = SGLangFrontend()
 
-        result = frontend.get_frontend_args_list({
-            "policy": "round_robin",
-            "verbose": True,
-            "timeout": 60,
-            "disabled": False,
-            "optional": None,
-        })
+        result = frontend.get_frontend_args_list(
+            {
+                "policy": "round_robin",
+                "verbose": True,
+                "timeout": 60,
+                "disabled": False,
+                "optional": None,
+            }
+        )
 
         # Check all expected args are present
         assert "--policy" in result
@@ -152,10 +153,12 @@ class TestGetFrontendArgsList:
         """DynamoFrontend has same args list behavior."""
         frontend = DynamoFrontend()
 
-        result = frontend.get_frontend_args_list({
-            "router-mode": "kv",
-            "router-reset-states": True,
-        })
+        result = frontend.get_frontend_args_list(
+            {
+                "router-mode": "kv",
+                "router-reset-states": True,
+            }
+        )
 
         assert "--router-mode" in result
         assert "kv" in result
@@ -392,9 +395,7 @@ class TestFrontendEnvHandling:
         frontend = SGLangFrontend()
         topology = MockTopology(frontend_nodes=["node0"])
         config = MockConfig(
-            frontend=MockFrontendConfig(
-                env={"MY_VAR": "my_value", "ANOTHER": "123"}
-            ),
+            frontend=MockFrontendConfig(env={"MY_VAR": "my_value", "ANOTHER": "123"}),
             resources=MockResourceConfig(num_agg=1),
         )
 
@@ -465,9 +466,7 @@ class TestFrontendEnvHandling:
         frontend = SGLangFrontend()
         topology = MockTopology(frontend_nodes=["node0"])
         config = MockConfig(
-            frontend=MockFrontendConfig(
-                args={"policy": "cache_aware", "verbose": True}
-            ),
+            frontend=MockFrontendConfig(args={"policy": "cache_aware", "verbose": True}),
             resources=MockResourceConfig(num_agg=1),
         )
 
@@ -492,4 +491,3 @@ class TestFrontendEnvHandling:
         assert "--policy" in cmd
         assert "cache_aware" in cmd
         assert "--verbose" in cmd
-

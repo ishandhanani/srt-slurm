@@ -614,11 +614,11 @@ class TestWorkerEnvironmentTemplating:
                     mock_backend = MagicMock()
                     mock_backend.get_environment_for_mode.side_effect = config.backend.get_environment_for_mode
                     mock_backend.build_worker_command.return_value = ["echo", "test"]
-                    
-                    with patch.object(worker_stage, 'config') as mock_config:
+
+                    with patch.object(worker_stage, "config") as mock_config:
                         mock_config.backend = mock_backend
                         mock_config.profiling = config.profiling
-                        
+
                         with patch("srtctl.cli.mixins.worker_stage.start_srun_process") as mock_srun:
                             mock_srun.return_value = MagicMock()
 
@@ -730,11 +730,11 @@ class TestWorkerEnvironmentTemplating:
                     mock_backend = MagicMock()
                     mock_backend.get_environment_for_mode.side_effect = config.backend.get_environment_for_mode
                     mock_backend.build_worker_command.return_value = ["echo", "test"]
-                    
-                    with patch.object(worker_stage, 'config') as mock_config:
+
+                    with patch.object(worker_stage, "config") as mock_config:
                         mock_config.backend = mock_backend
                         mock_config.profiling = config.profiling
-                        
+
                         with patch("srtctl.cli.mixins.worker_stage.start_srun_process") as mock_srun:
                             mock_srun.return_value = MagicMock()
 
@@ -752,12 +752,13 @@ class TestWorkerEnvironmentTemplating:
                             # Mixed case: supported replaced, unsupported kept
                             assert env_vars["MIXED"] == "gpu-01-{unsupported_var}-cache"
 
+
 class TestInfraConfig:
     """Tests for InfraConfig dataclass."""
 
     def test_infra_config_defaults(self):
         """Test that InfraConfig has correct defaults."""
-        from srtctl.core.schema import InfraConfig, ModelConfig, ResourceConfig, SrtConfig
+        from srtctl.core.schema import ModelConfig, ResourceConfig, SrtConfig
 
         config = SrtConfig(
             name="test",
@@ -987,12 +988,26 @@ class TestVLLMDataParallelMode:
 
         # Create endpoint_processes spanning 2 nodes
         endpoint_processes = [
-            Process(node="node0", gpu_indices=frozenset([i]), sys_port=8081 + i, http_port=0,
-                    endpoint_mode="prefill", endpoint_index=0, node_rank=i)
+            Process(
+                node="node0",
+                gpu_indices=frozenset([i]),
+                sys_port=8081 + i,
+                http_port=0,
+                endpoint_mode="prefill",
+                endpoint_index=0,
+                node_rank=i,
+            )
             for i in range(8)
         ] + [
-            Process(node="node1", gpu_indices=frozenset([i]), sys_port=8089 + i, http_port=0,
-                    endpoint_mode="prefill", endpoint_index=0, node_rank=8 + i)
+            Process(
+                node="node1",
+                gpu_indices=frozenset([i]),
+                sys_port=8089 + i,
+                http_port=0,
+                endpoint_mode="prefill",
+                endpoint_index=0,
+                node_rank=8 + i,
+            )
             for i in range(8)
         ]
 

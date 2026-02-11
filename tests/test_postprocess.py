@@ -3,14 +3,11 @@
 
 """Tests for post-processing: benchmark extraction, S3 upload, and AI analysis."""
 
-import os
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from srtctl.core.schema import (
-    AIAnalysisConfig,
     DEFAULT_AI_ANALYSIS_PROMPT,
+    AIAnalysisConfig,
     ReportingConfig,
     ReportingStatusConfig,
     S3Config,
@@ -256,14 +253,16 @@ class TestAIAnalysisConfigSchema:
     def test_schema_load_full(self):
         """Test loading full config from dict."""
         schema = AIAnalysisConfig.Schema()
-        config = schema.load({
-            "enabled": True,
-            "openrouter_api_key": "sk-or-test",
-            "gh_token": "ghp_test",
-            "repos_to_search": ["my/repo"],
-            "pr_search_days": 7,
-            "prompt": "Custom prompt",
-        })
+        config = schema.load(
+            {
+                "enabled": True,
+                "openrouter_api_key": "sk-or-test",
+                "gh_token": "ghp_test",
+                "repos_to_search": ["my/repo"],
+                "pr_search_days": 7,
+                "prompt": "Custom prompt",
+            }
+        )
 
         assert config.enabled is True
         assert config.openrouter_api_key == "sk-or-test"
@@ -314,11 +313,13 @@ class TestS3Config:
     def test_schema_load(self):
         """Test loading S3Config from dict."""
         schema = S3Config.Schema()
-        config = schema.load({
-            "bucket": "test-bucket",
-            "prefix": "prefix",
-            "region": "eu-west-1",
-        })
+        config = schema.load(
+            {
+                "bucket": "test-bucket",
+                "prefix": "prefix",
+                "region": "eu-west-1",
+            }
+        )
         assert config.bucket == "test-bucket"
         assert config.prefix == "prefix"
         assert config.region == "eu-west-1"
@@ -351,11 +352,13 @@ class TestReportingConfig:
     def test_schema_load(self):
         """Test loading ReportingConfig from nested dict."""
         schema = ReportingConfig.Schema()
-        config = schema.load({
-            "status": {"endpoint": "https://dashboard.example.com"},
-            "ai_analysis": {"enabled": True, "pr_search_days": 7},
-            "s3": {"bucket": "my-bucket", "prefix": "logs"},
-        })
+        config = schema.load(
+            {
+                "status": {"endpoint": "https://dashboard.example.com"},
+                "ai_analysis": {"enabled": True, "pr_search_days": 7},
+                "s3": {"bucket": "my-bucket", "prefix": "logs"},
+            }
+        )
         assert config.status.endpoint == "https://dashboard.example.com"
         assert config.ai_analysis.enabled is True
         assert config.ai_analysis.pr_search_days == 7
@@ -418,7 +421,6 @@ class TestRollupFaultTolerance:
 
     def test_generate_rollup_timeout_does_not_raise(self, tmp_path):
         """Test _generate_rollup handles timeout gracefully."""
-        from srtctl.cli.mixins.postprocess_stage import PostProcessStageMixin
         import subprocess
 
         mixin = self._create_mixin_with_runtime(tmp_path, benchmark_type="sa-bench")
@@ -492,7 +494,7 @@ class TestRollupFaultTolerance:
             "benchmark_type": "sa-bench",
             "timestamp": "2026-01-27T00:00:00Z",
             "config": {"model": "test-model", "isl": 100, "osl": 100},
-            "runs": [{"concurrency": 4, "throughput_toks": 100.0}]
+            "runs": [{"concurrency": 4, "throughput_toks": 100.0}],
         }
         rollup = tmp_path / "benchmark-rollup.json"
         rollup.write_text(json.dumps(rollup_data))

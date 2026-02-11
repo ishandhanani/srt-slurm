@@ -11,14 +11,12 @@ implementing the same contract.
 
 from unittest.mock import patch
 
+import mock_status_server
 import pytest
 
 from srtctl.contract import JobCreatePayload, JobStage, JobStatus, JobUpdatePayload
 from srtctl.core.schema import ReportingConfig, ReportingStatusConfig
 from srtctl.core.status import StatusReporter, create_job_record
-
-import mock_status_server
-
 
 # ============================================================================
 # Fixtures
@@ -68,9 +66,7 @@ class _MockResponse:
 @pytest.fixture
 def reporting():
     """Reporting config pointing to mock server."""
-    return ReportingConfig(
-        status=ReportingStatusConfig(endpoint="http://mock:8080")
-    )
+    return ReportingConfig(status=ReportingStatusConfig(endpoint="http://mock:8080"))
 
 
 @pytest.fixture
@@ -103,33 +99,23 @@ class TestStatusLifecycleHappyPath:
         # Step 1: report_started (orchestrator.run entry)
         # We can't call report_started without a real SrtConfig/RuntimeContext,
         # so we simulate it with a direct report() call
-        result = reporter.report(
-            JobStatus.STARTING, JobStage.STARTING, "Job started on gb200-01"
-        )
+        result = reporter.report(JobStatus.STARTING, JobStage.STARTING, "Job started on gb200-01")
         assert result is True
 
         # Step 2: Head infrastructure
-        result = reporter.report(
-            JobStatus.STARTING, JobStage.HEAD_INFRASTRUCTURE, "Starting head infrastructure"
-        )
+        result = reporter.report(JobStatus.STARTING, JobStage.HEAD_INFRASTRUCTURE, "Starting head infrastructure")
         assert result is True
 
         # Step 3: Workers
-        result = reporter.report(
-            JobStatus.WORKERS, JobStage.WORKERS, "Starting workers"
-        )
+        result = reporter.report(JobStatus.WORKERS, JobStage.WORKERS, "Starting workers")
         assert result is True
 
         # Step 4: Frontend
-        result = reporter.report(
-            JobStatus.FRONTEND, JobStage.FRONTEND, "Starting frontend"
-        )
+        result = reporter.report(JobStatus.FRONTEND, JobStage.FRONTEND, "Starting frontend")
         assert result is True
 
         # Step 5: Benchmark
-        result = reporter.report(
-            JobStatus.BENCHMARK, JobStage.BENCHMARK, "Running benchmark"
-        )
+        result = reporter.report(JobStatus.BENCHMARK, JobStage.BENCHMARK, "Running benchmark")
         assert result is True
 
         # Step 6: Completed

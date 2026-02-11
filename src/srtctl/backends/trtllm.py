@@ -188,11 +188,13 @@ class TRTLLMProtocol:
         if mode != "agg":
             cmd.extend(["--disaggregation-mode", mode])
 
-        cmd.extend([
-            "--extra-engine-args",
-            str(container_config_path),
-            "--request-plane",
-            "nats",
-        ])
+        cmd.extend(
+            [
+                "--extra-engine-args",
+                str(container_config_path),
+                "--request-plane",
+                "nats",
+            ]
+        )
 
         return cmd

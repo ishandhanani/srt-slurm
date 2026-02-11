@@ -287,4 +287,3 @@ class TestGenerateSweepConfigs:
 
         assert prefill1["mem-fraction-static"] == "0.85"
         assert prefill2["mem-fraction-static"] == "0.9"
-

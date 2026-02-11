@@ -346,6 +346,7 @@ class NodeAnalyzer:
             List of NodeMetrics objects
         """
         import time
+
         from .models import BatchMetrics, MemoryMetrics, NodeMetrics
 
         start_time = time.time()

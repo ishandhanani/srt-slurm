@@ -5,8 +5,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from srtctl.contract import JobCreatePayload, JobStage, JobStatus, JobUpdatePayload
 from srtctl.core.schema import ReportingConfig, ReportingStatusConfig
 from srtctl.core.status import (
@@ -14,7 +12,6 @@ from srtctl.core.status import (
     _resolve_endpoints,
     create_job_record,
 )
-
 
 # ============================================================================
 # _resolve_endpoints Tests
@@ -66,9 +63,7 @@ class TestStatusReporterFromConfig:
 
     def test_creates_enabled_reporter_with_endpoint(self):
         """Reporter is enabled when endpoint is configured."""
-        reporting = ReportingConfig(
-            status=ReportingStatusConfig(endpoint="https://status.example.com")
-        )
+        reporting = ReportingConfig(status=ReportingStatusConfig(endpoint="https://status.example.com"))
 
         reporter = StatusReporter.from_config(reporting, job_id="12345")
 
@@ -102,9 +97,7 @@ class TestStatusReporterFromConfig:
 
     def test_strips_trailing_slash_from_endpoint(self):
         """Trailing slash is removed from endpoint URL."""
-        reporting = ReportingConfig(
-            status=ReportingStatusConfig(endpoint="https://status.example.com/")
-        )
+        reporting = ReportingConfig(status=ReportingStatusConfig(endpoint="https://status.example.com/"))
 
         reporter = StatusReporter.from_config(reporting, job_id="12345")
 
@@ -112,9 +105,7 @@ class TestStatusReporterFromConfig:
 
     def test_creates_reporter_with_endpoints_list(self):
         """Reporter uses endpoints list when provided."""
-        reporting = ReportingConfig(
-            status=ReportingStatusConfig(endpoints=["https://a.com", "https://b.com"])
-        )
+        reporting = ReportingConfig(status=ReportingStatusConfig(endpoints=["https://a.com", "https://b.com"]))
 
         reporter = StatusReporter.from_config(reporting, job_id="12345")
 
@@ -403,9 +394,7 @@ class TestCreateJobRecord:
     def test_sends_post_request_to_correct_url(self, mock_post):
         """Sends POST request to /api/jobs."""
         mock_post.return_value = MagicMock(status_code=201)
-        reporting = ReportingConfig(
-            status=ReportingStatusConfig(endpoint="https://status.example.com")
-        )
+        reporting = ReportingConfig(status=ReportingStatusConfig(endpoint="https://status.example.com"))
 
         create_job_record(
             reporting=reporting,
@@ -421,9 +410,7 @@ class TestCreateJobRecord:
     def test_returns_true_on_201_created(self, mock_post):
         """Returns True on HTTP 201."""
         mock_post.return_value = MagicMock(status_code=201)
-        reporting = ReportingConfig(
-            status=ReportingStatusConfig(endpoint="https://status.example.com")
-        )
+        reporting = ReportingConfig(status=ReportingStatusConfig(endpoint="https://status.example.com"))
 
         result = create_job_record(
             reporting=reporting,
@@ -439,9 +426,7 @@ class TestCreateJobRecord:
         import requests
 
         mock_post.side_effect = requests.exceptions.ConnectionError("Network error")
-        reporting = ReportingConfig(
-            status=ReportingStatusConfig(endpoint="https://status.example.com")
-        )
+        reporting = ReportingConfig(status=ReportingStatusConfig(endpoint="https://status.example.com"))
 
         result = create_job_record(
             reporting=reporting,
@@ -455,9 +440,7 @@ class TestCreateJobRecord:
     def test_sends_to_all_endpoints(self, mock_post):
         """Sends POST to every configured endpoint."""
         mock_post.return_value = MagicMock(status_code=201)
-        reporting = ReportingConfig(
-            status=ReportingStatusConfig(endpoints=["https://a.com", "https://b.com"])
-        )
+        reporting = ReportingConfig(status=ReportingStatusConfig(endpoints=["https://a.com", "https://b.com"]))
 
         result = create_job_record(
             reporting=reporting,
@@ -480,9 +463,7 @@ class TestCreateJobRecord:
             req.exceptions.ConnectionError("Network error"),
             MagicMock(status_code=201),
         ]
-        reporting = ReportingConfig(
-            status=ReportingStatusConfig(endpoints=["https://a.com", "https://b.com"])
-        )
+        reporting = ReportingConfig(status=ReportingStatusConfig(endpoints=["https://a.com", "https://b.com"]))
 
         result = create_job_record(
             reporting=reporting,

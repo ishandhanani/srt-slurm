@@ -7,16 +7,16 @@ import os
 import streamlit as st
 
 from analysis.dashboard.components import (
-    load_node_metrics,
-    create_node_throughput_graph,
-    create_kv_cache_utilization_graph,
-    create_queue_depth_graph,
-    create_node_inflight_requests_graph,
-    create_decode_running_requests_graph,
-    create_decode_gen_throughput_graph,
-    create_decode_transfer_req_graph,
-    create_decode_prealloc_req_graph,
     create_decode_disagg_stacked_graph,
+    create_decode_gen_throughput_graph,
+    create_decode_prealloc_req_graph,
+    create_decode_running_requests_graph,
+    create_decode_transfer_req_graph,
+    create_kv_cache_utilization_graph,
+    create_node_inflight_requests_graph,
+    create_node_throughput_graph,
+    create_queue_depth_graph,
+    load_node_metrics,
 )
 from analysis.srtlog.visualizations import aggregate_all_nodes, group_nodes_by_dp
 

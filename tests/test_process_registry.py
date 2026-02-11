@@ -7,8 +7,6 @@ from pathlib import Path
 from subprocess import Popen
 from unittest.mock import MagicMock
 
-import pytest
-
 from srtctl.core.processes import ManagedProcess, ProcessRegistry
 
 

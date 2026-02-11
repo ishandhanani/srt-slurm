@@ -387,4 +387,3 @@ class TestProfilingRunner:
         """Profiling script exists."""
         script = SCRIPTS_DIR / "profiling" / "profile.sh"
         assert script.exists()
-
