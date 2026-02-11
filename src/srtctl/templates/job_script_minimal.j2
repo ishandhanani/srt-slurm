@@ -86,10 +86,14 @@ fi
 
 # Use uv to install srtctl (handles native extensions properly)
 echo "Using uv to install srtctl..."
-uv pip install --quiet --target="${SRTCTL_INSTALL_DIR}" "${SRTCTL_SOURCE}"
+echo "Creating Python 3.12 environment for orchestrator..."
+SRTCTL_PY_DIR="${OUTPUT_DIR}/.srtctl_py312"
+uv venv --python 3.12 "${SRTCTL_PY_DIR}"
+SRTCTL_PY="${SRTCTL_PY_DIR}/bin/python"
 
-export PYTHONPATH="${SRTCTL_INSTALL_DIR}:${PYTHONPATH}"
-echo "Installed to ${SRTCTL_INSTALL_DIR}"
+echo "Installing srtctl into Python 3.12 environment..."
+uv pip install --quiet --python "${SRTCTL_PY}" "${SRTCTL_SOURCE}"
+echo "srtctl installed into ${SRTCTL_PY_DIR}"
 
 {% if setup_script %}
 # Custom setup script override from CLI
@@ -103,7 +107,7 @@ echo ""
 # The orchestrator will spawn containerized workers
 # Output goes to SLURM's --output (sweep_%j.log)
 set +e  # Temporarily disable exit-on-error to capture exit code
-python3 -u -m srtctl.cli.do_sweep "{{ config_path }}"
+"${SRTCTL_PY}" -u -m srtctl.cli.do_sweep "{{ config_path }}"
 EXIT_CODE=$?
 set -e  # Re-enable exit-on-error
 
