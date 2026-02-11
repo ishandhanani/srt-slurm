@@ -174,6 +174,9 @@ class TRTLLMProtocol:
 
         return [
             "trtllm-llmapi-launch",
+            "numactl",
+            "-m",
+            "0,1",
             "python3",
             "-m",
             "dynamo.trtllm",
