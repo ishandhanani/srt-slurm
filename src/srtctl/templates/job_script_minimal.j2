@@ -69,13 +69,11 @@ cp "{{ config_path }}" "${OUTPUT_DIR}/config.yaml"
 HEAD_NODE=$(scontrol show hostnames ${SLURM_NODELIST} | head -n1)
 echo "Head node: ${HEAD_NODE}"
 
-# Install srtctl using container's pip (host may not have pip)
-SRTCTL_INSTALL_DIR="${OUTPUT_DIR}/.srtctl_install"
-mkdir -p "${SRTCTL_INSTALL_DIR}"
+# Set source directory for container mounts (/configs)
 export SRTCTL_SOURCE_DIR="${SRTCTL_SOURCE}"
 
 echo ""
-echo "Installing srtctl dependencies..."
+echo "Preparing srtctl environment..."
 
 # Install uv if not present (single binary, no dependencies)
 if ! command -v uv &> /dev/null; then
@@ -84,16 +82,7 @@ if ! command -v uv &> /dev/null; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-# Use uv to install srtctl (handles native extensions properly)
-echo "Using uv to install srtctl..."
-echo "Creating Python 3.12 environment for orchestrator..."
-SRTCTL_PY_DIR="${OUTPUT_DIR}/.srtctl_py312"
-uv venv --python 3.12 "${SRTCTL_PY_DIR}"
-SRTCTL_PY="${SRTCTL_PY_DIR}/bin/python"
-
-echo "Installing srtctl into Python 3.12 environment..."
-uv pip install --quiet --python "${SRTCTL_PY}" "${SRTCTL_SOURCE}"
-echo "srtctl installed into ${SRTCTL_PY_DIR}"
+echo "Using uv with Python 3.12..."
 
 {% if setup_script %}
 # Custom setup script override from CLI
@@ -107,7 +96,8 @@ echo ""
 # The orchestrator will spawn containerized workers
 # Output goes to SLURM's --output (sweep_%j.log)
 set +e  # Temporarily disable exit-on-error to capture exit code
-"${SRTCTL_PY}" -u -m srtctl.cli.do_sweep "{{ config_path }}"
+cd "${SRTCTL_SOURCE}"
+uv run --python 3.12 --no-dev -m srtctl.cli.do_sweep "{{ config_path }}"
 EXIT_CODE=$?
 set -e  # Re-enable exit-on-error
 
