@@ -6,7 +6,7 @@ model:
   precision: "fp4"
 
 resources:
-  gpu_type: "gb200"
+  gpu_type: "gb300"
   prefill_nodes: 2
   prefill_workers: 8
   gpus_per_prefill: 1
