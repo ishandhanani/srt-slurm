@@ -24,6 +24,7 @@
 ## Operations
 
 - [Monitoring](monitoring.md)
+- [Debugging Hangs](debugging.md)
 - [Analyzing Results](analyzing.md)
 - [SLURM FAQ](slurm-faq.md)
 

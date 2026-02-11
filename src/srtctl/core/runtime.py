@@ -274,6 +274,15 @@ class RuntimeContext:
             is_hf_model=is_hf_model,
         )
 
+    @property
+    def container_name(self) -> str:
+        """Container name for this job.
+
+        Returns:
+            Container name in format: sglang_{job_id}
+        """
+        return f"srtctl_{self.job_id}"
+
     def format_string(self, template: str, **extra_kwargs) -> str:
         """Format a template string with runtime values.
 

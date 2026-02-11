@@ -788,6 +788,27 @@ class HealthCheckConfig:
 
 
 @dataclass(frozen=True)
+class DebugConfig:
+    """Configuration for hang debugging with cuda-gdb backtrace collection.
+
+    When enabled, launches a background script that waits for a configurable
+    amount of time, then collects CUDA kernel info and backtraces from all
+    worker processes using cuda-gdb and py-spy.
+
+    Attributes:
+        enabled: If True, enable hang debugging
+        wait_seconds: Time to wait before collecting backtraces (default: 600 = 10 minutes)
+        output_dir: Directory for backtrace output (default: {log_dir}/backtraces)
+    """
+
+    enabled: bool = False
+    wait_seconds: int = 600
+    output_dir: str | None = None
+
+    Schema: ClassVar[type[Schema]] = Schema
+
+
+@dataclass(frozen=True)
 class InfraConfig:
     """Infrastructure configuration for etcd/nats placement.
 
@@ -798,6 +819,25 @@ class InfraConfig:
     """
 
     etcd_nats_dedicated_node: bool = False
+
+    Schema: ClassVar[type[Schema]] = Schema
+
+
+@dataclass(frozen=True)
+class NvidiaSmiConfig:
+    """Configuration for nvidia-smi monitoring during job execution.
+
+    When enabled, periodically runs nvidia-smi on worker nodes to collect
+    GPU metrics (utilization, memory, temperature, etc.) for debugging
+    and performance analysis.
+
+    Attributes:
+        enabled: If True, enable nvidia-smi monitoring
+        interval: Interval in seconds between nvidia-smi calls (default: 30)
+    """
+
+    enabled: bool = False
+    interval: int = 30
 
     Schema: ClassVar[type[Schema]] = Schema
 
@@ -830,6 +870,8 @@ class SrtConfig:
     output: OutputConfig = field(default_factory=OutputConfig)
     health_check: HealthCheckConfig = field(default_factory=HealthCheckConfig)
     infra: InfraConfig = field(default_factory=InfraConfig)
+    debug: DebugConfig = field(default_factory=DebugConfig)
+    nvidia_smi: NvidiaSmiConfig = field(default_factory=NvidiaSmiConfig)
 
     environment: dict[str, str] = field(default_factory=dict)
     container_mounts: dict[

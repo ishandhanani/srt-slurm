@@ -145,6 +145,7 @@ def start_srun_process(
     output: str | None = None,
     container_image: str | None = None,
     container_mounts: dict[Path, Path] | None = None,
+    container_name: str | None = None,
     env_to_pass_through: list[str] | None = None,
     env_to_set: dict[str, str] | None = None,
     bash_preamble: str | None = None,
@@ -169,6 +170,7 @@ def start_srun_process(
         output: Output file path (optional)
         container_image: Container image path (optional)
         container_mounts: Dict of host_path -> container_path mounts
+        container_name: Named container (for attaching to existing container)
         env_to_pass_through: Environment variable names to pass through
         env_to_set: Environment variables to set (name -> value)
         bash_preamble: Bash commands to run before the main command
@@ -226,6 +228,9 @@ def start_srun_process(
         if container_mounts:
             mount_str = ",".join(f"{host}:{container}" for host, container in container_mounts.items())
             srun_cmd.extend(["--container-mounts", mount_str])
+
+        if container_name:
+            srun_cmd.extend(["--container-name", container_name])
 
     # Additional srun options
     if srun_options:

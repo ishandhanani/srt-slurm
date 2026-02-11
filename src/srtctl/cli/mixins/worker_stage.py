@@ -52,12 +52,20 @@ class WorkerStageMixin:
         """Endpoint allocation topology."""
         ...
 
-    def _build_worker_preamble(self) -> str | None:
+    def _build_worker_preamble(
+        self, node: str | None = None, mode: str | None = None, index: int | None = None
+    ) -> str | None:
         """Build bash preamble for worker processes.
 
         Runs (in order):
         1. Custom setup script from /configs/ (if config.setup_script set)
         2. Dynamo installation (if frontend type is dynamo and not profiling)
+        3. Hang debugger script in background (if debug.enabled)
+
+        Args:
+            node: Worker node name (for debug log naming)
+            mode: Worker mode - prefill/decode/agg (for debug log naming)
+            index: Worker index (for debug log naming)
         """
         parts = []
 
@@ -74,6 +82,25 @@ class WorkerStageMixin:
         # Skip if dynamo.install is False (container already has dynamo installed)
         if self.config.frontend.type == "dynamo" and not self.config.profiling.enabled and self.config.dynamo.install:
             parts.append(self.config.dynamo.get_install_commands())
+
+        # 3. Hang debugger (runs in background, waits then collects backtraces)
+        # Use subshell so the & doesn't break && chaining
+        if self.config.debug.enabled and node and mode is not None and index is not None:
+            debug_script = "/srtctl-benchmarks/debug/collect_backtraces.sh"
+            wait_seconds = self.config.debug.wait_seconds
+            output_dir = "/logs/backtraces"
+            # Pass node/mode/index for consistent backtrace file naming
+            log_file = f"/logs/{node}_hang_debug.log"
+            parts.append(
+                f"mkdir -p {output_dir} && "
+                f"(nohup bash {debug_script} {wait_seconds} {output_dir} {node} {mode} {index} > {log_file} 2>&1 &)"
+            )
+        
+        # 4. Monitor NVIDIA SMI (runs in background, logs to /logs/{node}_nvidia_smi.log)
+        if self.config.nvidia_smi.enabled and node is not None:
+            interval = self.config.nvidia_smi.interval
+            smi_log = f"/logs/{node}_nvidia_smi.log"
+            parts.append(f"(nohup nvidia-smi -l {interval} > {smi_log} 2>&1 &)")
 
         if not parts:
             return None
@@ -157,8 +184,8 @@ class WorkerStageMixin:
         if profiling.enabled:
             logger.info("Profiling: %s mode", profiling.type)
 
-        # Build bash preamble (setup script + dynamo install)
-        bash_preamble = self._build_worker_preamble()
+        # Build bash preamble (setup script + dynamo install + hang debugger)
+        bash_preamble = self._build_worker_preamble(node=process.node, mode=mode, index=index)
 
         proc = start_srun_process(
             command=cmd,
@@ -166,6 +193,7 @@ class WorkerStageMixin:
             output=str(worker_log),
             container_image=str(self.runtime.container_image),
             container_mounts=self.runtime.container_mounts,
+            container_name=self.runtime.container_name,
             env_to_set=env_to_set,
             bash_preamble=bash_preamble,
         )
@@ -256,8 +284,8 @@ class WorkerStageMixin:
         if profiling.enabled:
             logger.info("Profiling: %s mode", profiling.type)
 
-        # Build bash preamble (setup script + dynamo install)
-        bash_preamble = self._build_worker_preamble()
+        # Build bash preamble (setup script + dynamo install + hang debugger)
+        bash_preamble = self._build_worker_preamble(node=leader.node, mode=mode, index=index)
 
         # Get srun config from backend
         srun_config = self.backend.get_srun_config()
@@ -313,4 +341,5 @@ class WorkerStageMixin:
                     result[managed.name] = managed
 
         logger.info("Started %d worker processes", len(result))
+
         return result

@@ -149,6 +149,26 @@ infra:
   etcd_nats_dedicated_node: true  # Reserve first node for infra services
 ```
 
+### DebugConfig
+
+Enables automated hang debugging with cuda-gdb backtrace collection:
+
+```yaml
+debug:
+  enabled: true               # Enable hang debugging
+  wait_seconds: 600          # Wait time before collecting backtraces (default: 600 = 10 min)
+  output_dir: /path/to/dir   # Optional: output directory (default: {log_dir}/backtraces)
+```
+
+**How it works:**
+- Launches a background script on each worker node after workers start
+- Waits for the configured time (default: 10 minutes)
+- Automatically collects CUDA kernel info and Python backtraces from all worker processes using `cuda-gdb`
+- Saves backtraces to `{log_dir}/backtraces/backtrace_{hostname}_{pid}.txt`
+- Non-critical: failures don't stop the job
+
+**Use case:** Debugging hangs that occur consistently after a certain amount of time. Set `wait_seconds` to slightly before the expected hang time to capture the state.
+
 ### ResourceConfig
 
 Supports explicit GPUs per worker (overrides computed values):

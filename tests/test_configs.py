@@ -1244,3 +1244,181 @@ class TestVLLMDataParallelMode:
         # But should still have multi-node flags
         assert "--master-addr" in cmd
         assert "--nnodes" in cmd
+
+
+class TestDebugConfig:
+    """Tests for DebugConfig hang debugging."""
+
+    def test_debug_config_defaults(self):
+        """Test DebugConfig has correct defaults."""
+        from srtctl.core.schema import DebugConfig, ModelConfig, ResourceConfig, SrtConfig
+
+        config = SrtConfig(
+            name="test",
+            model=ModelConfig(path="/model", container="/container.sqsh", precision="fp8"),
+            resources=ResourceConfig(gpu_type="h100", gpus_per_node=8, agg_nodes=1),
+        )
+
+        # debug config should exist with default values
+        assert config.debug is not None
+        assert config.debug.enabled is False
+        assert config.debug.wait_seconds == 600
+        assert config.debug.output_dir is None
+
+    def test_debug_config_enabled(self):
+        """Test DebugConfig with hang debugging enabled."""
+        from srtctl.core.schema import DebugConfig, ModelConfig, ResourceConfig, SrtConfig
+
+        config = SrtConfig(
+            name="test",
+            model=ModelConfig(path="/model", container="/container.sqsh", precision="fp8"),
+            resources=ResourceConfig(gpu_type="h100", gpus_per_node=8, agg_nodes=1),
+            debug=DebugConfig(enabled=True, wait_seconds=300, output_dir="/custom/backtraces"),
+        )
+
+        assert config.debug.enabled is True
+        assert config.debug.wait_seconds == 300
+        assert config.debug.output_dir == "/custom/backtraces"
+
+    def test_debug_config_from_yaml(self):
+        """Test DebugConfig can be loaded from YAML."""
+        from pathlib import Path
+        from tempfile import NamedTemporaryFile
+
+        from srtctl.core.schema import SrtConfig
+
+        yaml_content = """
+name: debug-test
+model:
+  path: /model
+  container: /container.sqsh
+  precision: fp8
+resources:
+  gpu_type: h100
+  gpus_per_node: 8
+  agg_nodes: 1
+debug:
+  enabled: true
+  wait_seconds: 120
+  output_dir: /tmp/debug
+"""
+
+        with NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config_path = Path(f.name)
+
+        try:
+            config = SrtConfig.from_yaml(config_path)
+
+            assert config.debug.enabled is True
+            assert config.debug.wait_seconds == 120
+            assert config.debug.output_dir == "/tmp/debug"
+        finally:
+            config_path.unlink()
+
+    def test_debug_preamble_integration(self, tmp_path):
+        """Test that debug script is added to worker preamble when enabled."""
+        from unittest.mock import MagicMock
+
+        from srtctl.cli.mixins.worker_stage import WorkerStageMixin
+        from srtctl.core.schema import DebugConfig, ModelConfig, ResourceConfig, SrtConfig
+
+        # Create config with debug enabled
+        config = SrtConfig(
+            name="test",
+            model=ModelConfig(path="/model", container="/container.sqsh", precision="fp8"),
+            resources=ResourceConfig(gpu_type="h100", gpus_per_node=8, agg_nodes=1),
+            debug=DebugConfig(enabled=True, wait_seconds=60),
+        )
+
+        # Create a minimal mixin instance with mocked dependencies
+        class TestMixin(WorkerStageMixin):
+            pass
+
+        mixin = TestMixin()
+        mixin.config = config
+        mixin.runtime = MagicMock()
+        mixin.runtime.job_id = "12345"
+
+        # Build the preamble with worker info
+        preamble = mixin._build_worker_preamble(node="node0", mode="decode", index=0)
+
+        # Verify debug script is in the preamble
+        assert preamble is not None
+        assert "collect_backtraces.sh" in preamble
+        assert "60" in preamble  # wait_seconds
+        assert "node0" in preamble  # node
+        assert "decode" in preamble  # mode
+        assert "/logs/backtraces" in preamble  # output_dir
+        assert "nohup" in preamble  # runs in background
+        assert "&" in preamble  # background process
+        assert "node0_hang_debug.log" in preamble  # log file name
+
+
+class TestNvidiaSmiConfig:
+    """Tests for NvidiaSmiConfig GPU monitoring."""
+
+    def test_nvidia_smi_config_defaults(self):
+        """Test NvidiaSmiConfig has correct defaults."""
+        from srtctl.core.schema import ModelConfig, NvidiaSmiConfig, ResourceConfig, SrtConfig
+
+        config = SrtConfig(
+            name="test",
+            model=ModelConfig(path="/model", container="/container.sqsh", precision="fp8"),
+            resources=ResourceConfig(gpu_type="h100", gpus_per_node=8, agg_nodes=1),
+        )
+
+        # nvidia_smi config should exist with default values
+        assert config.nvidia_smi is not None
+        assert config.nvidia_smi.enabled is False
+        assert config.nvidia_smi.interval == 30
+
+    def test_nvidia_smi_config_enabled(self):
+        """Test NvidiaSmiConfig with monitoring enabled."""
+        from srtctl.core.schema import ModelConfig, NvidiaSmiConfig, ResourceConfig, SrtConfig
+
+        config = SrtConfig(
+            name="test",
+            model=ModelConfig(path="/model", container="/container.sqsh", precision="fp8"),
+            resources=ResourceConfig(gpu_type="h100", gpus_per_node=8, agg_nodes=1),
+            nvidia_smi=NvidiaSmiConfig(enabled=True, interval=5),
+        )
+
+        assert config.nvidia_smi.enabled is True
+        assert config.nvidia_smi.interval == 5
+
+    def test_nvidia_smi_config_from_yaml(self):
+        """Test NvidiaSmiConfig can be loaded from YAML."""
+        from pathlib import Path
+        from tempfile import NamedTemporaryFile
+
+        from srtctl.core.schema import SrtConfig
+
+        yaml_content = """
+name: nvidia-smi-test
+model:
+  path: /model
+  container: /container.sqsh
+  precision: fp8
+resources:
+  gpu_type: h100
+  gpus_per_node: 8
+  agg_nodes: 1
+nvidia_smi:
+  enabled: true
+  interval: 15
+"""
+
+        with NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config_path = Path(f.name)
+
+        try:
+            config = SrtConfig.from_yaml(config_path)
+
+            assert config.nvidia_smi.enabled is True
+            assert config.nvidia_smi.interval == 15
+        finally:
+            config_path.unlink()
