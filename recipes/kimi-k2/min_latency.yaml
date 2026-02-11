@@ -2,7 +2,7 @@ name: "ctx1_gen5_tep8_batch1_eplb0_mtp3"
 
 model:
   path: "kimi-k2"
-  container: "/mnt/lustre01/users/slurm-shared/jothomson/meta-srtlsurm/nvidian+dynamo-dev+jothomson+dynamo-0.9.0-pre-arm64.sqsh"
+  container: "nvcr.io#nvidian/dynamo-dev/jothomson:trtllm-kimi-mpi-fix"
   precision: "fp4"
 
 resources:
@@ -120,7 +120,7 @@ benchmark:
   req_rate: "inf"
 
 frontend:
-  type: "dynamo"
+  type: "trtllm-serve"
   enable_multiple_frontends: false
 
 dynamo:

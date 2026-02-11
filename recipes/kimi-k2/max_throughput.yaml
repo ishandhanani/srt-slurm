@@ -2,17 +2,17 @@ name: "ctx7_gen2_dep8_batch192_eplb0_mtp0"
 
 model:
   path: "kimi-k2"
-  container: "/mnt/lustre01/users/slurm-shared/jothomson/meta-srtlsurm/nvidian+dynamo-dev+jothomson+dynamo-0.9.0-pre-arm64.sqsh"
+  container: "nvcr.io#nvidian/dynamo-dev/jothomson:trtllm-kimi-mpi-fix"
   precision: "fp4"
 
 resources:
   gpu_type: "gb200"
-  prefill_nodes: 1
-  prefill_workers: 1
+  prefill_nodes: 7
+  prefill_workers: 7
   gpus_per_prefill: 4
 
-  decode_workers: 5
-  decode_nodes: 10
+  decode_workers: 2
+  decode_nodes: 4
   gpus_per_decode: 8
 
   gpus_per_node: 4
@@ -100,6 +100,7 @@ backend:
       num_postprocess_workers: 4
       trust_remote_code: true
 
+
 benchmark:
   type: "sa-bench"
   isl: 8192
@@ -108,7 +109,8 @@ benchmark:
   req_rate: "inf"
 
 frontend:
-  type: "dynamo"
+  type: "trtllm-serve"
+  enable_multiple_frontends: false
 
 dynamo:
   install: false
