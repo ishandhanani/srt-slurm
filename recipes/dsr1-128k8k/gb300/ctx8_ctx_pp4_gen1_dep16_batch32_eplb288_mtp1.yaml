@@ -118,7 +118,9 @@ backend:
       max_seq_len: 139520
       moe_config:
         backend: WIDEEP
-        load_balancer: /lustre/fsw/coreai_comparch_infbench//lingjiew/semi_analysis/tllm/disagg/bench-128k-8k/disagg_e2e//bm_20251215_deepseek-r1-random-131072-8192-ratio1_chat_template_v1//ctx8_ctx_pp4_gen1_dep16_batch32_eplb288_mtp1/moe_load_balancer.yaml
+        load_balancer:
+          num_slots: 288
+          layer_updates_per_iter: 1
         use_low_precision_moe_combine: true
       moe_expert_parallel_size: 16
       num_postprocess_workers: 4
