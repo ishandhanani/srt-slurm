@@ -78,15 +78,15 @@ backend:
         max_tokens_in_buffer: 1152
       cuda_graph_config:
         enable_padding: true
-        max_batch_size: 384
+        max_batch_size: 48
       disable_overlap_scheduler: false
       enable_attention_dp: true
       kv_cache_config:
         dtype: fp8
         enable_block_reuse: false
         free_gpu_memory_fraction: 0.8
-      max_batch_size: 384
-      max_num_tokens: 1536
+      max_batch_size: 48
+      max_num_tokens: 192
       max_seq_len: 2176
       moe_config:
         backend: DEEPGEMM
