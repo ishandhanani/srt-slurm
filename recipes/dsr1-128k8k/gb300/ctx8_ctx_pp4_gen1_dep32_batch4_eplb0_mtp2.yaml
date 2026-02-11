@@ -36,10 +36,6 @@ backend:
 
   trtllm_config:
     prefill:
-      build_config:
-        max_batch_size: 1
-        max_num_tokens: 131328
-        max_seq_len: 131328
       cache_transceiver_config:
         backend: UCX
         max_tokens_in_buffer: 131104
@@ -65,10 +61,6 @@ backend:
 
 
     decode:
-      build_config:
-        max_batch_size: 4
-        max_num_tokens: 16
-        max_seq_len: 139520
       cache_transceiver_config:
         backend: UCX
         max_tokens_in_buffer: 131104
