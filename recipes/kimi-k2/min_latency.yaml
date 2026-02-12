@@ -113,7 +113,7 @@ backend:
         speculative_model_dir: /model/eagle
 
 benchmark:
-  type: "sa-bench"
+  type: "trtllm-bench"
   isl: 8192
   osl: 1024
   concurrencies: "5"
