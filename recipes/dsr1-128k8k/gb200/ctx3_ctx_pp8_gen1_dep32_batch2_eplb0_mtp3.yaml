@@ -114,7 +114,7 @@ backend:
 
 
 benchmark:
-  type: "sa-bench"
+  type: "trtllm-bench"
   isl: 131072
   osl: 8192
   concurrencies: ['128']

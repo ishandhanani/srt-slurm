@@ -162,6 +162,8 @@ class BenchmarkStageMixin:
         logger.info("Command: %s", shlex.join(cmd))
         logger.info("Log: %s", log_file)
 
+        mpi = "pmix" if runner.name == "TRTLLM-Bench" else None
+
         proc = start_srun_process(
             command=cmd,
             nodelist=[self.runtime.nodes.head],
@@ -169,6 +171,7 @@ class BenchmarkStageMixin:
             container_image=str(self.runtime.container_image),
             container_mounts=self.runtime.container_mounts,
             env_to_set=env_to_set,
+            mpi=mpi,
         )
 
         # Wait for benchmark to complete
