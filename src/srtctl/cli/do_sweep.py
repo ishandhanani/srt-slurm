@@ -80,7 +80,16 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
     @functools.cached_property
     def backend_processes(self) -> list[Process]:
         """Compute physical process topology from endpoints (cached)."""
-        return self.backend.endpoints_to_processes(self.endpoints)
+        # NOTE: On shared clusters, fixed DYN_SYSTEM_PORT ranges can collide across jobs
+        # and crash dynamo.sglang with "Address already in use". Use a job-specific base.
+        try:
+            return self.backend.endpoints_to_processes(
+                self.endpoints,
+                base_sys_port=self.runtime.sys_port_base,
+            )
+        except TypeError:
+            # Backends that don't accept base_sys_port keep their default behavior.
+            return self.backend.endpoints_to_processes(self.endpoints)
 
     def start_head_infrastructure(self, registry: ProcessRegistry) -> ManagedProcess:
         """Start NATS and etcd on the infra node.
@@ -130,14 +139,16 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
             critical=True,
         )
 
-        # 300s timeout to handle slow container imports on first run
+        # NOTE: Starting infra requires an `srun` into the container image.
+        # On busy clusters, `pyxis` image import can easily exceed 60s, so keep this
+        # timeout comfortably larger than the container startup overhead.
         logger.info("Waiting for NATS (port 4222) on %s...", infra_node)
-        if not wait_for_port(infra_node, 4222, timeout=300):
+        if not wait_for_port(self.runtime.infra_node_ip, 4222, timeout=300):
             raise RuntimeError("NATS failed to start")
         logger.info("NATS is ready")
 
         logger.info("Waiting for etcd (port 2379) on %s...", infra_node)
-        if not wait_for_port(infra_node, 2379, timeout=300):
+        if not wait_for_port(self.runtime.infra_node_ip, 2379, timeout=300):
             raise RuntimeError("etcd failed to start")
         logger.info("etcd is ready")
 
@@ -154,7 +165,10 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
         logger.info("=" * 60)
         logger.info("Connection Commands")
         logger.info("=" * 60)
-        logger.info("Frontend URL: http://%s:8000", self.runtime.nodes.head)
+        if self.runtime.effective_frontend_type == "direct":
+            logger.info("Worker URL: http://%s:%d", self.runtime.nodes.head, self.runtime.frontend_port)
+        else:
+            logger.info("Frontend URL: http://%s:%d", self.runtime.nodes.head, self.runtime.frontend_port)
         logger.info("")
         logger.info("To connect to head node (%s):", self.runtime.nodes.head)
         logger.info(
@@ -211,8 +225,9 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
         try:
             # Stage 1: Head infrastructure (NATS, etcd)
             reporter.report(JobStatus.STARTING, JobStage.HEAD_INFRASTRUCTURE, "Starting head infrastructure")
-            head_proc = self.start_head_infrastructure(registry)
-            registry.add_process(head_proc)
+            if self.runtime.effective_frontend_type != "direct":
+                head_proc = self.start_head_infrastructure(registry)
+                registry.add_process(head_proc)
 
             # Stage 2: Workers
             reporter.report(JobStatus.WORKERS, JobStage.WORKERS, "Starting workers")

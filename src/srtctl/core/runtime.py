@@ -97,8 +97,8 @@ class RuntimeContext:
 
     # Computed paths (all absolute)
     log_dir: Path
-    model_path: Path  # For HF models (hf:prefix), this is the HF model ID as a Path
-    container_image: Path
+    model_path: Path
+    container_image: str | Path
 
     # Resource configuration
     gpus_per_node: int
@@ -117,8 +117,20 @@ class RuntimeContext:
     # Environment variables
     environment: dict[str, str] = field(default_factory=dict)
 
+    # Effective frontend type used by the orchestrator.
+    # This is inferred under the hood based on backend + serving mode.
+    # Examples:
+    # - "dynamo": dynamo frontend (/health)
+    # - "sglang": sglang router (/workers)
+    # - "direct": no router; benchmark/health hit the worker OAI server directly
+    effective_frontend_type: str = "dynamo"
+
     # Frontend port (for benchmark endpoint)
     frontend_port: int = 8000
+
+    # Base port for Dynamo system status servers (DYN_SYSTEM_PORT).
+    # Must be unique per-job on shared clusters to avoid "Address already in use" collisions.
+    sys_port_base: int = 8081
 
     @classmethod
     def from_config(
@@ -148,6 +160,44 @@ class RuntimeContext:
         # Resolve node IPs
         head_node_ip = get_hostname_ip(nodes.head)
         infra_node_ip = get_hostname_ip(nodes.infra)
+
+        # Infer frontend behavior under the hood.
+        # Stock SGLang variants (frontend.type: "sglang"):
+        # - Aggregated, agg_workers=1: run only sglang.launch_server (no router) -> hit worker directly
+        # - Aggregated, agg_workers>1: use sglang router
+        # - Disaggregated: use sglang router
+        #
+        # Dynamo runs (frontend.type: "dynamo"): keep existing behavior.
+        r = config.resources
+        backend_type = getattr(config.backend, "type", "sglang")
+        if backend_type == "sglang" and config.frontend.type == "sglang":
+            # Stock SGLang behavior
+            if (not r.is_disaggregated) and r.num_agg == 1:
+                effective_frontend_type = "direct"
+            else:
+                # Disagg OR multi-agg => router
+                effective_frontend_type = "sglang"
+        else:
+            # Dynamo (and any other backend/frontends): preserve user config
+            effective_frontend_type = config.frontend.type
+
+        # Endpoint port that benchmarks/health checks should target.
+        # - Router/frontends listen on 8000 (or nginx public port)
+        # - Direct-to-worker mode: hit the agg worker leader HTTP port (allocated from 30000)
+        frontend_port = 30000 if effective_frontend_type == "direct" else 8000
+
+        # Choose a job-specific system-port base to avoid collisions across jobs on shared nodes.
+        # We reserve a small contiguous range per job and let process allocation increment within it.
+        #
+        # IMPORTANT: Dynamo expects DYN_SYSTEM_PORT to fit in a signed 16-bit int (i16),
+        # so keep the base <= 32767. We also reserve 100 ports per job.
+        #
+        # Range: 10000..29900 (step 100). This gives 100 ports per job and stays < 32767.
+        try:
+            job_seed = int(job_id)
+        except Exception:
+            job_seed = abs(hash(job_id))
+        sys_port_base = 10000 + (job_seed % 200) * 100
 
         # Compute log directory using FormattablePath or default logic
         # Check for SRTCTL_OUTPUT_DIR from sbatch script first (ensures consistency)
@@ -193,8 +243,9 @@ class RuntimeContext:
             if not container_image.is_file():
                 raise ValueError(f"Container image path is not a file: {container_image}")
         else:
-            # Image name (e.g., nvcr.io/nvidia/pytorch:23.12) - keep as string, convert to Path for type compatibility
-            container_image = Path(container_image_str)
+            # Image name (e.g., nvcr.io/nvidia/pytorch:23.12 or docker://lmsysorg/sglang:v0.5.5)
+            # Keep as a plain string; Path(...) would mangle schemes like docker:// into docker:/
+            container_image = container_image_str
 
         # Build container mounts
         container_mounts: dict[Path, Path] = {
@@ -211,6 +262,17 @@ class RuntimeContext:
             configs_dir = Path(source_dir) / "configs"
             if configs_dir.exists():
                 container_mounts[configs_dir.resolve()] = Path("/configs")
+
+                # Workaround for some pyxis/enroot environments that source /root/.cargo/env on container start.
+                # Provide an empty file so container startup does not fail if it is missing.
+                cargo_env = log_dir / "cargo_env"
+                try:
+                    cargo_env.parent.mkdir(parents=True, exist_ok=True)
+                    cargo_env.touch(exist_ok=True)
+                    container_mounts[cargo_env.resolve()] = Path("/root/.cargo/env")
+                except Exception:
+                    # Best-effort; if we cannot create/mount this file, proceed and let pyxis report the error.
+                    pass
 
         # Mount srtctl benchmark scripts
         from srtctl.benchmarks.base import SCRIPTS_DIR
@@ -249,6 +311,9 @@ class RuntimeContext:
             srun_options=dict(config.srun_options),
             environment=dict(config.environment),
             is_hf_model=is_hf_model,
+            effective_frontend_type=effective_frontend_type,
+            frontend_port=frontend_port,
+            sys_port_base=sys_port_base,
         )
 
         # Expand FormattablePath mounts
@@ -272,6 +337,9 @@ class RuntimeContext:
             srun_options=dict(config.srun_options),
             environment=dict(config.environment),
             is_hf_model=is_hf_model,
+            effective_frontend_type=effective_frontend_type,
+            frontend_port=frontend_port,
+            sys_port_base=sys_port_base,
         )
 
     def format_string(self, template: str, **extra_kwargs) -> str:

@@ -183,6 +183,11 @@ class FrontendStageMixin:
             List of ManagedProcess instances for all frontend processes.
         """
         logger.info("Starting frontend layer")
+        # Direct-to-worker mode: skip nginx/router/frontend entirely
+        if self.runtime.effective_frontend_type == "direct":
+            logger.info("Frontend disabled (effective_frontend_type=direct)")
+            return []
+
         topology = self._compute_frontend_topology()
         processes: list[ManagedProcess] = []
 
@@ -191,8 +196,8 @@ class FrontendStageMixin:
             nginx_proc = self._start_nginx(topology)
             processes.append(nginx_proc)
 
-        # Get frontend implementation based on config type
-        frontend_impl = get_frontend(self.config.frontend.type)
+        # Get frontend implementation based on effective type
+        frontend_impl = get_frontend(self.runtime.effective_frontend_type)
         frontend_procs = frontend_impl.start_frontends(
             topology=topology,
             runtime=self.runtime,

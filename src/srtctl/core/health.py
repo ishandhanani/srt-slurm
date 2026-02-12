@@ -366,6 +366,54 @@ def wait_for_model(
     Returns:
         True if model is ready with expected workers, False if timeout/aborted
     """
+    if frontend_type in ("direct", "none"):
+        # Direct-to-worker mode (no router/frontend).
+        # Treat model as ready when /health is 200 and /v1/models returns at least one model.
+        health_url = f"http://{host}:{port}/health"
+        models_url = f"http://{host}:{port}/v1/models"
+        logger.info(
+            "Polling %s every %.1fs for direct worker readiness (frontend=direct)",
+            health_url,
+            poll_interval,
+        )
+
+        start_time = time.time()
+        last_report_time = start_time
+
+        while True:
+            if stop_event and stop_event.is_set():
+                logger.warning("Wait for model aborted by stop event")
+                return False
+
+            elapsed = time.time() - start_time
+            if elapsed >= timeout:
+                logger.error("Model did not get healthy in %.0f seconds", timeout)
+                return False
+
+            try:
+                r = requests.get(health_url, timeout=5.0)
+                if r.status_code == 200:
+                    mr = requests.get(models_url, timeout=5.0)
+                    if mr.status_code == 200:
+                        data = mr.json()
+                        models = data.get("data", [])
+                        if models:
+                            logger.info("Model is ready (direct worker). Found %d model(s).", len(models))
+                            return True
+
+                if time.time() - last_report_time >= report_every:
+                    logger.info("Waiting for direct worker to become ready...")
+                    last_report_time = time.time()
+
+            except requests.exceptions.RequestException as e:
+                if time.time() - last_report_time >= report_every:
+                    logger.debug("Health check failed: %s", e)
+                    last_report_time = time.time()
+            except Exception as e:
+                logger.debug("Unexpected error during health check: %s", e)
+
+            time.sleep(poll_interval)
+
     if frontend_type == "sglang":
         health_url = f"http://{host}:{port}/workers"
         logger.info(
