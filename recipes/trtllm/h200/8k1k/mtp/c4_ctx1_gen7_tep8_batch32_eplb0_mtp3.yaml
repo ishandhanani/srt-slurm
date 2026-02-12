@@ -77,8 +77,8 @@ backend:
       pipeline_parallel_size: 1
       enable_attention_dp: false
       enable_chunked_prefill: false
-      max_batch_size: 32
-      max_num_tokens: 128
+      max_batch_size: 4
+      max_num_tokens: 16
       max_seq_len: 9256
       kv_cache_config:
         enable_block_reuse: false
@@ -92,7 +92,7 @@ backend:
         use_low_precision_moe_combine: true
       cuda_graph_config:
         enable_padding: true
-        batch_sizes: [1, 2, 4, 8, 16, 32]
+        batch_sizes: [1, 2, 4]
       disable_overlap_scheduler: false
       print_iter_log: true
       # Performance tuning

@@ -75,8 +75,8 @@ backend:
       enable_attention_dp: false
       enable_lm_head_tp_in_adp: false
       enable_chunked_prefill: false
-      max_batch_size: 256
-      max_num_tokens: 256
+      max_batch_size: 4
+      max_num_tokens: 4
       max_seq_len: 2088
       kv_cache_config:
         enable_block_reuse: false
@@ -94,38 +94,6 @@ backend:
         - 1
         - 2
         - 4
-        - 8
-        - 16
-        - 24
-        - 32
-        - 40
-        - 48
-        - 56
-        - 64
-        - 72
-        - 80
-        - 88
-        - 96
-        - 104
-        - 112
-        - 120
-        - 128
-        - 136
-        - 144
-        - 152
-        - 160
-        - 168
-        - 176
-        - 184
-        - 192
-        - 200
-        - 208
-        - 216
-        - 224
-        - 232
-        - 240
-        - 248
-        - 256
       disable_overlap_scheduler: false
       print_iter_log: true
       # Performance tuning
