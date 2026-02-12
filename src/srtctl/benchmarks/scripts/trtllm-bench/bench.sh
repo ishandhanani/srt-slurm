@@ -56,7 +56,7 @@ for concurrency in "${CONCURRENCY_LIST[@]}"; do
         --host "$HOST" --port "$PORT" \
         --backend "openai" --endpoint /v1/completions \
         --dataset-name random \
-        --dataset-path /tmp/random_dataset \
+        --download-path /tmp/random_dataset \
         --num-prompts "$num_warmup_prompts" \
         --random-prefix-len 0 \
         --random-input-len "$ISL" \
@@ -86,7 +86,7 @@ for concurrency in "${CONCURRENCY_LIST[@]}"; do
         --host "$HOST" --port "$PORT" \
         --backend "openai" --endpoint /v1/completions \
         --dataset-name random \
-        --dataset-path /tmp/random_dataset \
+        --download-path /tmp/random_dataset \
         --num-prompts "$num_prompts" \
         --random-prefix-len 0 \
         --random-input-len "$ISL" \
