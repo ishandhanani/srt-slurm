@@ -23,6 +23,8 @@ DECODE_GPUS=${11:-0}
 HOST=$(echo "$ENDPOINT" | sed 's|http://||' | cut -d: -f1)
 PORT=$(echo "$ENDPOINT" | sed 's|http://||' | cut -d: -f2 | cut -d/ -f1)
 
+MODEL_PATH="/model/"
+
 echo "TRTLLM-Bench Config: endpoint=${ENDPOINT}; isl=${ISL}; osl=${OSL}; concurrencies=${CONCURRENCIES}; req_rate=${REQ_RATE}; model=${MODEL_NAME}"
 
 # Parse concurrency list
