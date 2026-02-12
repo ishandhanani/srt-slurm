@@ -62,14 +62,12 @@ backend:
       enable_lm_head_tp_in_adp: false
       pipeline_parallel_size: 1
       max_batch_size: 1
-      max_num_tokens: 256
+      max_num_tokens: 4
       max_seq_len: 9256
       cuda_graph_config:
         enable_padding: true
         batch_sizes:
         - 1
-        - 2
-        - 4
       print_iter_log: true
       kv_cache_config:
         enable_block_reuse: false
