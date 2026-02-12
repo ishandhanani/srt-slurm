@@ -47,6 +47,7 @@ ulimit -n 65536
 # Benchmark
 result_dir="/logs/trtllm-bench_isl_${ISL}_osl_${OSL}"
 mkdir -p "$result_dir"
+mkdir -p /tmp/random_dataset
 
 for concurrency in "${CONCURRENCY_LIST[@]}"; do
 
