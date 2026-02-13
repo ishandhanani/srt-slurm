@@ -24,6 +24,7 @@ srtctl = "srtctl.cli.submit:main"
 srtctl-i = "srtctl.cli.interactive:main"
 srtctl-sweep = "srtctl.cli.do_sweep:main"
 srtctl-setup-head = "srtctl.cli.setup_head:main"
+srtctl-rate-match = "srtctl.cli.rate_match:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/srtctl"]

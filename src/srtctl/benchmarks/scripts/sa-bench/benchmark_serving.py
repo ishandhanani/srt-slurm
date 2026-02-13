@@ -358,7 +358,7 @@ def sample_random_requests(
         size=num_prompts,
     )
     output_lens = np.random.randint(
-        int(output_len * range_ratio),
+        max(1, int(output_len * range_ratio)),
         output_len + 1,
         size=num_prompts,
     )
@@ -544,38 +544,42 @@ async def benchmark(
     goodput_config_dict: dict[str, float],
     max_concurrency: int | None,
     lora_modules: list[str] | None,
+    no_test_input: bool = False,
 ):
     if backend in ASYNC_REQUEST_FUNCS:
         request_func = ASYNC_REQUEST_FUNCS[backend]
     else:
         raise ValueError(f"Unknown backend: {backend}")
 
-    print("Starting initial single prompt test run...")
-    test_prompt, test_prompt_len, test_output_len, test_mm_content = input_requests[0]
-    if backend != "openai-chat" and test_mm_content is not None:
-        # multi-modal benchmark is only available on OpenAI Chat backend.
-        raise ValueError("Multi-modal content is only supported on 'openai-chat' backend.")
-    test_input = RequestFuncInput(
-        model=model_id,
-        model_name=model_name,
-        prompt=test_prompt,
-        api_url=api_url,
-        prompt_len=test_prompt_len,
-        output_len=test_output_len,
-        logprobs=logprobs,
-        best_of=best_of,
-        multi_modal_content=test_mm_content,
-        ignore_eos=ignore_eos,
-    )
-
-    test_output = await request_func(request_func_input=test_input)
-    if not test_output.success:
-        raise ValueError(
-            "Initial test run failed - Please make sure benchmark arguments "
-            f"are correctly specified. Error: {test_output.error}"
+    if not no_test_input:
+        print("Starting initial single prompt test run...")
+        test_prompt, test_prompt_len, test_output_len, test_mm_content = input_requests[0]
+        if backend != "openai-chat" and test_mm_content is not None:
+            # multi-modal benchmark is only available on OpenAI Chat backend.
+            raise ValueError("Multi-modal content is only supported on 'openai-chat' backend.")
+        test_input = RequestFuncInput(
+            model=model_id,
+            model_name=model_name,
+            prompt=test_prompt,
+            api_url=api_url,
+            prompt_len=test_prompt_len,
+            output_len=test_output_len,
+            logprobs=logprobs,
+            best_of=best_of,
+            multi_modal_content=test_mm_content,
+            ignore_eos=ignore_eos,
         )
+
+        test_output = await request_func(request_func_input=test_input)
+        if not test_output.success:
+            raise ValueError(
+                "Initial test run failed - Please make sure benchmark arguments "
+                f"are correctly specified. Error: {test_output.error}"
+            )
+        else:
+            print("Initial test run completed. Starting main benchmark run...")
     else:
-        print("Initial test run completed. Starting main benchmark run...")
+        print("Skipping initial test run (--no-test-input specified). Starting main benchmark run...")
 
     if lora_modules:
         # For each input request, choose a LoRA module at random.
@@ -953,6 +957,7 @@ def main(args: argparse.Namespace):
             goodput_config_dict=goodput_config_dict,
             max_concurrency=args.max_concurrency,
             lora_modules=args.lora_modules,
+            no_test_input=args.no_test_input,
         )
     )
 
@@ -1162,6 +1167,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Set ignore_eos flag when sending the benchmark request."
         "Warning: ignore_eos is not supported in deepspeed_mii and tgi.",
+    )
+    parser.add_argument(
+        "--no-test-input",
+        action="store_true",
+        help="Skip the initial single-prompt test request. "
+        "Use for GEN-only benchmarks with TLLM_BENCHMARK_REQ_QUEUES_SIZE "
+        "where single requests would deadlock.",
     )
     parser.add_argument(
         "--percentile-metrics",

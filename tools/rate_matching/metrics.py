@@ -34,13 +34,16 @@ def compute_rate_matching(
     gpus_per_ctx_instance: int = 8,
     gpus_per_gen_instance: int = 8,
     max_total_gpus: int = 64,
+    isl: int = 0,
 ) -> dict:
     """Compute rate-matched allocation from CTX and GEN SOL results.
 
     Aligned with original rate-matching methodology.
 
     Args:
-        ctx_result: Output of process_ctx_results (needs 'request_rate_req_per_s')
+        ctx_result: Output of process_ctx_results (needs 'request_rate_req_per_s',
+                    and optionally 'avg_prev_device_step_time_ms' for E2E latency
+                    estimation).
         gen_result: Output of process_gen_results (needs 'concurrency', 'tpot_ms',
                     'output_throughput', 'throughput_per_user', 'mode', etc.)
         osl: Output sequence length (needed for gen_req_rate calculation)
@@ -49,10 +52,13 @@ def compute_rate_matching(
         gpus_per_ctx_instance: GPUs per CTX worker (typically tp_size)
         gpus_per_gen_instance: GPUs per GEN worker (ep_rank/tp_size)
         max_total_gpus: Maximum total GPU budget for allocation search
+        isl: Input sequence length (needed for total_throughput and
+             estimate_e2e_latency calculations).
 
     Returns:
         Dict with allocation info: ctx_instances, gen_instances, ratio_str,
-        output_tput_per_gpu, total_gpus, gen_req_rate, etc.
+        output_tput_per_gpu, total_gpus, gen_req_rate, and derived metrics
+        (total_throughput, output_tput_per_gen_gpu, estimate_e2e_latency).
     """
     ctx_request_rate = ctx_result.get('request_rate_req_per_s',
                                       ctx_result.get('request_rate', 0))
@@ -110,6 +116,36 @@ def compute_rate_matching(
     best_total_gpus = best["total_gpus"]
     total_output_tput_per_gpu = total_output_throughput / best_total_gpus if best_total_gpus > 0 else 0
 
+    # -----------------------------------------------------------------------
+    # Additional derived metrics (from original methodology)
+    # -----------------------------------------------------------------------
+
+    # output_tput_per_gen_gpu: throughput normalised by GEN GPUs only.
+    # Useful for comparing GEN efficiency across modes independently of the
+    # CTX allocation.  (Original: output_throughput_per_gen_gpu)
+    output_tput_per_gen_gpu = gen_output_throughput / ep_rank if ep_rank > 0 else 0
+
+    # total_throughput / total_tput_per_gpu: input + output token throughput.
+    # Original: total_throughput = output_throughput * (isl + osl) / osl
+    if isl > 0 and osl > 0:
+        io_ratio = (isl + osl) / osl
+        total_throughput = gen_output_throughput * io_ratio
+        total_tput_per_gpu = output_tput_per_gpu * io_ratio
+    else:
+        total_throughput = gen_output_throughput
+        total_tput_per_gpu = output_tput_per_gpu
+
+    # estimate_e2e_latency: TTFT + decode time for the expected output length.
+    # Original: e2e_latency = ctx_step_time + (osl * avg_random_ratio - 1) / throughput_per_user
+    # ctx_step_time comes from CTX results (avg_prev_device_step_time in seconds).
+    ctx_step_time_ms = ctx_result.get('avg_prev_device_step_time_ms')
+    if ctx_step_time_ms is not None and gen_throughput_per_user > 0 and osl > 0:
+        ctx_step_time_s = ctx_step_time_ms / 1000.0
+        expected_output_tokens = osl * avg_random_ratio
+        estimate_e2e_latency_s = ctx_step_time_s + (expected_output_tokens - 1) / gen_throughput_per_user
+    else:
+        estimate_e2e_latency_s = None
+
     result = {
         "config_name": f"{mode}_c{gen_concurrency}_b{batch_size}",
         "mode": mode,
@@ -124,6 +160,9 @@ def compute_rate_matching(
         "interactivity": gen_interactivity,
         "tpot_ms": gen_tpot_ms,
         "output_throughput": gen_output_throughput,
+        "output_tput_per_gen_gpu": output_tput_per_gen_gpu,
+        "total_throughput": total_throughput,
+        "total_tput_per_gpu": total_tput_per_gpu,
         "ctx_request_rate": ctx_request_rate,
         "gen_req_rate": gen_req_rate,
         "ctx_gen_inst_ratio": ctx_gen_inst_ratio,
@@ -133,6 +172,10 @@ def compute_rate_matching(
         "ratio_str": f"{best['ctx_instances']}:{best['gen_instances']}",
         **best,
     }
+
+    if estimate_e2e_latency_s is not None:
+        result["estimate_e2e_latency_s"] = round(estimate_e2e_latency_s, 4)
+
     return result
 
 

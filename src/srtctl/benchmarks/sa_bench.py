@@ -96,4 +96,6 @@ class SABenchRunner(BenchmarkRunner):
             str(total_gpus),
             str(prefill_gpus),
             str(decode_gpus),
+            str(b.skip_initial_test).lower(),  # Position 12: skip_initial_test
+            str(b.random_range_ratio),  # Position 13: random_range_ratio (1.0 = exact, 0.8 = 20-100%)
         ]

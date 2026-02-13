@@ -43,6 +43,16 @@ class WorkloadConfig(BaseModel):
             "avg_random_ratio = (random_ratio + 1) / 2"
         ),
     )
+    mtp_accept_rates: Optional[dict[int, float]] = Field(
+        default=None,
+        description=(
+            "Override the hardcoded MTP accept-rate lookup table. "
+            "Key = mtp_num (1, 2, 3, ...), value = effective tokens per "
+            "decode step per user.  MTP-0 (STP) is always 1.0 and does "
+            "not need to be specified.  Example: {1: 1.82, 2: 2.30, 3: 2.60}. "
+            "When omitted, the built-in table (measured for ISL 1k/8k/32k) is used."
+        ),
+    )
 
 
 class ResourceConfig(BaseModel):
@@ -206,7 +216,7 @@ class E2EValidationSettings(BaseModel):
 class SweepSettings(BaseModel):
     """Automation knobs for the sweep pipeline."""
     poll_interval: int = Field(default=300, description="SLURM job poll interval in seconds")
-    max_retries: int = Field(default=3, description="Max retries per job on failure")
+    max_retries: int = Field(default=3, ge=0, description="Max retries per job on failure")
     run_e2e_validation: bool = Field(default=True, description="Run E2E after Pareto extraction")
     parallel_submissions: bool = Field(
         default=False,

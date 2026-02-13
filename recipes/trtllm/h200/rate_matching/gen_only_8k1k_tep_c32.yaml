@@ -112,6 +112,7 @@ benchmark:
   osl: 1024              # Target OSL
   concurrencies: "32"    # TEP c32
   req_rate: "inf"
+  skip_initial_test: true  # Required for GEN-only with TLLM_BENCHMARK_REQ_QUEUES_SIZE
 
 frontend:
   type: "dynamo"

@@ -16,6 +16,7 @@ See WORKLOG.md "Engine-Agnostic Refactoring Plan" for details.
 Usage:
     python process_ctx_results.py -i /path/to/job/logs
     python process_ctx_results.py -i outputs/11059/logs --isl 8192
+    python process_ctx_results.py -i outputs/11059/logs --isl 1024 --max-batch-size 8
 
 Methodology:
     1. Parse per-iteration logs from prefill worker (*_prefill_w*.out or *_agg_w*.out)
@@ -66,27 +67,35 @@ def parse_arguments() -> argparse.Namespace:
                         help='Whether CTX uses dep mode (affects request_rate calculation)')
     parser.add_argument('-o', '--output', type=str, default=None,
                         help='Output JSON file path (default: <input>/ctx_results.json)')
+    parser.add_argument('--max-batch-size', type=int, default=None,
+                        help='Prefill max_batch_size (used as num_ctx_requests threshold). '
+                             'When provided, only fully-packed iterations are kept. '
+                             'Omit to use permissive threshold=1.')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Enable verbose output')
     return parser.parse_args()
 
 
-def get_threshold_for_isl(isl: int) -> int:
-    """Get num_ctx_requests threshold based on ISL."""
-    thresholds = {
-        1024: 16,
-        8192: 2,
-        32768: 1,
-    }
-    if isl in thresholds:
-        return thresholds[isl]
-    # Default threshold based on ISL range
-    if isl <= 2048:
-        return 16
-    elif isl <= 16384:
-        return 2
-    else:
-        return 1
+def get_threshold_for_isl(isl: int, max_batch_size: Optional[int] = None) -> int:
+    """Get minimum num_ctx_requests per iteration.
+
+    The original rate-matching methodology filters by
+    ``num_ctx_requests >= max_batch_size`` so that only *fully-packed*
+    prefill iterations contribute to the throughput measurement.
+
+    When ``max_batch_size`` is provided (the normal orchestrator path),
+    it is used directly -- this is GPU-agnostic because the value comes
+    from the generated CTX SOL config, which already resolves any YAML
+    overrides and workload-specific defaults.
+
+    When ``max_batch_size`` is *not* provided (standalone CLI usage),
+    we fall back to threshold=1 (permissive) to avoid baking in
+    GPU-specific assumptions.  Users can pass ``--max-batch-size``
+    on the CLI if they need the stricter filter.
+    """
+    if max_batch_size is not None:
+        return max_batch_size
+    return 1
 
 
 def find_prefill_log(logs_dir: Path) -> Optional[Path]:
@@ -161,11 +170,27 @@ def parse_log_file(log_file: Path, verbose: bool = False) -> list[dict]:
     return data
 
 
-def process_ctx_data(data: list[dict], isl: int, ctx_dep: bool = True, verbose: bool = False) -> dict:
-    """
-    Process CTX log data using the rate-matching methodology.
-    
-    Returns metrics dict with ctx_throughput, request_rate, etc.
+def process_ctx_data(
+    data: list[dict],
+    isl: int,
+    ctx_dep: bool = True,
+    verbose: bool = False,
+    max_batch_size: Optional[int] = None,
+) -> dict:
+    """Process CTX log data using the rate-matching methodology.
+
+    Args:
+        data: Parsed per-iteration log entries.
+        isl: Input sequence length.
+        ctx_dep: Whether CTX uses DEP mode (affects request_rate multi-rank scaling).
+        verbose: Print debug info.
+        max_batch_size: If provided, only iterations with
+            ``num_ctx_requests >= max_batch_size`` are kept (fully-packed
+            batches).  Passed through from the generated CTX SOL config
+            so the threshold is always GPU-agnostic.
+
+    Returns:
+        Metrics dict with ctx_throughput, request_rate, etc.
     """
     if not data:
         return {'error': 'No data to process'}
@@ -187,8 +212,21 @@ def process_ctx_data(data: list[dict], isl: int, ctx_dep: bool = True, verbose: 
     if df.empty:
         return {'error': 'No pure prefill iterations found'}
     
-    # Step 2: Get filtering threshold based on ISL
-    threshold = get_threshold_for_isl(isl)
+    # Step 1b: sa-bench runs warmup + measurement in sequence, causing iter
+    # numbers to restart. Keep only the LAST contiguous run (the measurement).
+    # Detect restarts where iter[i] <= iter[i-1].
+    iter_vals = df['iter'].values
+    last_restart_idx = 0
+    for i in range(1, len(iter_vals)):
+        if iter_vals[i] <= iter_vals[i - 1]:
+            last_restart_idx = i
+    if last_restart_idx > 0:
+        df = df.iloc[last_restart_idx:].copy()
+        if verbose:
+            print(f"Detected iter restart at index {last_restart_idx}, keeping last run: {len(df)} entries")
+    
+    # Step 2: Get filtering threshold based on ISL / max_batch_size
+    threshold = get_threshold_for_isl(isl, max_batch_size=max_batch_size)
     
     # Step 3: Filter by num_ctx_requests threshold
     df_filtered = df[df['num_ctx_requests'] >= threshold].copy()
@@ -196,7 +234,7 @@ def process_ctx_data(data: list[dict], isl: int, ctx_dep: bool = True, verbose: 
     if verbose:
         print(f"After filtering num_ctx_requests >= {threshold}: {len(df_filtered)} entries")
     
-    # Step 4: Skip first 2 and last 2 iterations
+    # Step 4: Skip first 2 and last 2 iterations (warmup/cooldown)
     if len(df_filtered) > 4:
         df_filtered = df_filtered.iloc[2:-2].copy()
         if verbose:
@@ -289,7 +327,11 @@ def main():
     print(f"Parsed {len(data)} iteration entries")
     
     # Process data
-    results = process_ctx_data(data, args.isl, args.ctx_dep, verbose=args.verbose)
+    results = process_ctx_data(
+        data, args.isl, args.ctx_dep,
+        verbose=args.verbose,
+        max_batch_size=args.max_batch_size,
+    )
     
     if 'error' in results:
         print(f"Error: {results['error']}")

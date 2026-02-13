@@ -331,9 +331,13 @@ def generate_gen_sol_config(
     # GEN-only: add isolation env vars to decode
     decode_env = cfg.backend.decode_environment or dict(_DEFAULT_DECODE_ENV)
     decode_env = {**decode_env, **_GEN_SOL_DECODE_ENV_EXTRAS}
-    # Set benchmark request queue size to match max concurrency
-    conc_max = max(gen_item.concurrency) if isinstance(gen_item.concurrency, list) else gen_item.concurrency
-    decode_env["TLLM_BENCHMARK_REQ_QUEUES_SIZE"] = str(conc_max)
+    # Set benchmark request queue size to the MINIMUM concurrency in the sweep.
+    # The decode worker won't start processing until this many requests are queued.
+    # Using max would deadlock lower concurrency levels (e.g. c=1 with queue_size=128).
+    # The original repo sets this per-concurrency with one job per level; we sweep
+    # multiple concurrencies in one job, so we use the min to ensure all levels run.
+    conc_min = min(gen_item.concurrency) if isinstance(gen_item.concurrency, list) else gen_item.concurrency
+    decode_env["TLLM_BENCHMARK_REQ_QUEUES_SIZE"] = str(conc_min)
 
     mtp_suffix = f"_mtp{gen_item.mtp_num}" if gen_item.mtp_num > 0 else ""
     conc_str = _format_concurrency(gen_item.concurrency)

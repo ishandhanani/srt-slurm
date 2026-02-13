@@ -534,6 +534,9 @@ class BenchmarkConfig:
     mooncake_workload: str | None = None  # "mooncake", "conversation", "synthetic", "toolagent"
     ttft_threshold_ms: int | None = None  # Goodput TTFT threshold in ms (default: 2000)
     itl_threshold_ms: int | None = None  # Goodput ITL threshold in ms (default: 25)
+    # SA-bench specific fields
+    skip_initial_test: bool = False  # Skip initial test request (for GEN-only with TLLM_BENCHMARK_REQ_QUEUES_SIZE)
+    random_range_ratio: float = 0.8  # Range ratio for random ISL/OSL sampling (1.0 = exact, 0.8 = ±20% range)
 
     def get_concurrency_list(self) -> list[int]:
         if self.concurrencies is None:

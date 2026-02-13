@@ -68,16 +68,49 @@ MTP_ACCEPT_RATES = {
 # Default fallback (uses 1k/1k values)
 _DEFAULT_ACCEPT_RATES = {0: 1.0, 1: 1.8, 2: 2.28, 3: 2.56}
 
+# Track which ISLs we've already warned about (avoid spam in loops)
+_WARNED_ISLS: set[int] = set()
 
-def get_mtp_accept_rate(isl: int, mtp_num: int) -> float:
+
+def get_mtp_accept_rate(
+    isl: int,
+    mtp_num: int,
+    overrides: dict[int, float] | None = None,
+) -> float:
     """Get the MTP accept rate for a given ISL and MTP level.
 
     Returns the effective tokens per decode step per user.
-    For STP (mtp_num=0), returns 1.0.
+    For STP (mtp_num=0), always returns 1.0.
     For MTP, returns a value > 1 (e.g., 2.56 for MTP-3 at 1k/1k).
+
+    Args:
+        isl: Input sequence length (used to select from hardcoded table).
+        mtp_num: MTP level (0 = STP, 1+ = MTP).
+        overrides: Optional dict of {mtp_num: accept_rate} that takes
+            precedence over the hardcoded table.  Typically comes from
+            ``workload.mtp_accept_rates`` in the sweep YAML.
     """
-    rates = MTP_ACCEPT_RATES.get(isl, _DEFAULT_ACCEPT_RATES)
-    return rates.get(mtp_num, 1.0)
+    if mtp_num == 0:
+        return 1.0
+
+    # Config overrides take precedence
+    if overrides is not None:
+        return overrides.get(mtp_num, 1.0)
+
+    # Hardcoded table lookup
+    if isl in MTP_ACCEPT_RATES:
+        return MTP_ACCEPT_RATES[isl].get(mtp_num, 1.0)
+
+    # Unknown ISL -- warn once, fall back to defaults
+    if isl not in _WARNED_ISLS:
+        _WARNED_ISLS.add(isl)
+        print(
+            f"  WARNING: ISL {isl} not in MTP accept-rate table "
+            f"(known: {sorted(MTP_ACCEPT_RATES.keys())}). "
+            f"Falling back to 1k/1k defaults. Consider adding "
+            f"'mtp_accept_rates' to your sweep YAML workload config."
+        )
+    return _DEFAULT_ACCEPT_RATES.get(mtp_num, 1.0)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -171,6 +204,7 @@ def process_gen_data(
     isl: int = 1024,
     num_gpus: int = 8,
     verbose: bool = False,
+    mtp_accept_rate_overrides: dict[int, float] | None = None,
 ) -> dict:
     """Process GEN log data using the original rate-matching methodology.
 
@@ -197,6 +231,8 @@ def process_gen_data(
         isl: Input sequence length (for MTP accept rate lookup)
         num_gpus: GPUs used for this decode worker
         verbose: Print debug info
+        mtp_accept_rate_overrides: Optional dict from sweep YAML
+            (workload.mtp_accept_rates) that overrides the hardcoded table.
 
     Returns:
         Dict with tpot_ms, throughput_per_user, output_throughput, etc.
@@ -297,8 +333,8 @@ def process_gen_data(
     avg_step_time_ms = df['prev_device_step_time_ms'].mean()
     elapsed_time_avg = avg_step_time_ms / 1000.0  # Convert to seconds
 
-    # MTP accept rate from hardcoded lookup table
-    mtp_accept_rate = get_mtp_accept_rate(isl, mtp_num)
+    # MTP accept rate: config overrides > hardcoded table > defaults
+    mtp_accept_rate = get_mtp_accept_rate(isl, mtp_num, overrides=mtp_accept_rate_overrides)
 
     # throughput_per_user = (1 / elapsed_time_avg) * mtp_accept_rate
     # This is tokens/s/user (interactivity)
@@ -341,6 +377,7 @@ def process_gen_data_all_concurrencies(
     isl: int = 1024,
     num_gpus: int = 8,
     verbose: bool = False,
+    mtp_accept_rate_overrides: dict[int, float] | None = None,
 ) -> dict[int, dict]:
     """Process GEN log data for MULTIPLE concurrencies from a single decode log.
 
@@ -364,6 +401,7 @@ def process_gen_data_all_concurrencies(
             isl=isl,
             num_gpus=num_gpus,
             verbose=verbose,
+            mtp_accept_rate_overrides=mtp_accept_rate_overrides,
         )
         results[conc] = result
     return results

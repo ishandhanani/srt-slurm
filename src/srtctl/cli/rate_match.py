@@ -7,8 +7,17 @@ This shim exists so the installed entry point (srtctl-rate-match) works.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+# Force unbuffered stdout/stderr so output appears immediately in terminals
+# (without this, non-TTY contexts fully buffer and output appears to hang)
+os.environ["PYTHONUNBUFFERED"] = "1"
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(line_buffering=True)
 
 # Add tools/rate_matching to path so its imports work
 _TOOLS_DIR = Path(__file__).resolve().parents[3] / "tools" / "rate_matching"

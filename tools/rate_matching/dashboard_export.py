@@ -43,8 +43,11 @@ def export_rate_matching_results(sweep_state: dict, output_dir: str) -> None:
             "pareto_rank", "config_name", "mode", "concurrency", "mtp_num",
             "mtp_accept_rate", "batch_size", "ratio_str",
             "interactivity", "tpot_ms", "avg_step_time_ms",
-            "output_tput_per_gpu", "gen_req_rate", "ctx_gen_inst_ratio",
+            "output_tput_per_gpu", "output_tput_per_gen_gpu",
+            "total_throughput", "total_tput_per_gpu",
+            "gen_req_rate", "ctx_gen_inst_ratio",
             "ctx_instances", "gen_instances", "total_gpus",
+            "estimate_e2e_latency_s",
         ])
 
     # SOL vs E2E JSON/CSV
