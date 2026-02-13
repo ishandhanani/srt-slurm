@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """
-Process GEN-only benchmark results from srt-slurm per-iteration logs.
+TRT-LLM GEN (decode) log parser for rate-matching.
 
-Aligned with the original rate-matching methodology in:
-  /data/users/nlevin/rate-matching/bench-trtllm-disagg/process_data/process_gen_iterlog_withctx.py
+Parses TRT-LLM per-iteration decode worker logs to extract GEN SOL metrics.
+Implements the GENLogParser interface from parser_base.py.
 
-ENGINE-SPECIFIC: TRT-LLM per-iteration log format.
+Usage (standalone CLI):
+    python process_gen_results.py -i /path/to/logs --concurrency 32 --mode tep
 
-Methodology (original, exactly replicated):
+Usage (pipeline):
+    from process_gen_results import TrtllmGENLogParser
+    parser = TrtllmGENLogParser()
+    log_file = parser.find_log(logs_dir)
+    data = parser.parse(log_file)
+    result = parser.process(data, concurrency=32, mode='tep', tp=8)
+
+Methodology:
     1. Parse per-iteration logs from decode worker (*_decode_w*.out or *_agg_w*.out)
     2. Filter for iterations where num_ctx_tokens == 0 (pure decode)
     3. Merge duplicate rows by (iter, global_rank) keeping last
@@ -24,10 +32,13 @@ Methodology (original, exactly replicated):
          tpot = elapsed_time_avg / mtp_accept_rate  (in seconds)
          output_throughput = throughput_per_user * concurrency
 
-MTP accept rates (hardcoded from original rate-matching repo measurements):
-    1k/1k random: {1: 1.8, 2: 2.28, 3: 2.56}
-    8k/1k random: {1: 1.84, 2: 2.38, 3: 2.76}
-    32k/1k random: {1: 1.97, 2: 2.39, 3: 2.56}
+MTP accept rates:
+    Must be provided explicitly via workload.mtp_accept_rates in the
+    sweep YAML when mtp_num > 0.  These are model- and ISL-dependent.
+    Reference values for DSR1 (random workload):
+      1k/1k: {1: 1.8, 2: 2.28, 3: 2.56}
+      8k/1k: {1: 1.84, 2: 2.38, 3: 2.76}
+      32k/1k: {1: 1.97, 2: 2.39, 3: 2.56}
 """
 
 from __future__ import annotations
@@ -41,7 +52,9 @@ from typing import Optional
 
 import pandas as pd
 
-# ENGINE-SPECIFIC: TRT-LLM per-iteration log format
+from parser_base import GENLogParser, GENResult
+
+# TRT-LLM per-iteration log format
 LOG_PATTERN = re.compile(
     r'iter = (\d+), global_rank = (\d+), rank = (\d+), '
     r'currank_total_requests = (\d+)/(\d+), '
@@ -52,26 +65,6 @@ LOG_PATTERN = re.compile(
     r"states = \{'num_ctx_requests': (\d+), 'num_ctx_tokens': (\d+), 'num_generation_tokens': (\d+)\}"
 )
 
-# ---------------------------------------------------------------------------
-# MTP accept rates from original rate-matching repo
-# These represent the effective tokens per decode step per user.
-# For STP (mtp=0), the rate is 1.0 (one token per step per user).
-# For MTP-3 at 1k/1k, the rate is 2.56 (each step produces ~2.56 tokens).
-# ---------------------------------------------------------------------------
-MTP_ACCEPT_RATES = {
-    # ISL -> {mtp_num -> effective_tokens_per_step}
-    1024: {0: 1.0, 1: 1.8, 2: 2.28, 3: 2.56},    # 1k/1k random
-    8192: {0: 1.0, 1: 1.84, 2: 2.38, 3: 2.76},    # 8k/1k random
-    32768: {0: 1.0, 1: 1.97, 2: 2.39, 3: 2.56},   # 32k/1k random
-}
-
-# Default fallback (uses 1k/1k values)
-_DEFAULT_ACCEPT_RATES = {0: 1.0, 1: 1.8, 2: 2.28, 3: 2.56}
-
-# Track which ISLs we've already warned about (avoid spam in loops)
-_WARNED_ISLS: set[int] = set()
-
-
 def get_mtp_accept_rate(
     isl: int,
     mtp_num: int,
@@ -81,36 +74,33 @@ def get_mtp_accept_rate(
 
     Returns the effective tokens per decode step per user.
     For STP (mtp_num=0), always returns 1.0.
-    For MTP, returns a value > 1 (e.g., 2.56 for MTP-3 at 1k/1k).
+    For MTP (mtp_num > 0), the caller must provide explicit accept rates
+    via the overrides dict (typically from workload.mtp_accept_rates in
+    the sweep YAML). This ensures users are always aware of the values
+    being used, since they are model- and ISL-dependent.
 
     Args:
-        isl: Input sequence length (used to select from hardcoded table).
+        isl: Input sequence length (for error messages).
         mtp_num: MTP level (0 = STP, 1+ = MTP).
-        overrides: Optional dict of {mtp_num: accept_rate} that takes
-            precedence over the hardcoded table.  Typically comes from
-            ``workload.mtp_accept_rates`` in the sweep YAML.
+        overrides: Dict of {mtp_num: accept_rate}. Required when
+            mtp_num > 0. Comes from workload.mtp_accept_rates in the
+            sweep YAML.
+
+    Raises:
+        ValueError: If mtp_num > 0 and no override is provided.
     """
     if mtp_num == 0:
         return 1.0
 
-    # Config overrides take precedence
-    if overrides is not None:
-        return overrides.get(mtp_num, 1.0)
+    if overrides is not None and mtp_num in overrides:
+        return overrides[mtp_num]
 
-    # Hardcoded table lookup
-    if isl in MTP_ACCEPT_RATES:
-        return MTP_ACCEPT_RATES[isl].get(mtp_num, 1.0)
-
-    # Unknown ISL -- warn once, fall back to defaults
-    if isl not in _WARNED_ISLS:
-        _WARNED_ISLS.add(isl)
-        print(
-            f"  WARNING: ISL {isl} not in MTP accept-rate table "
-            f"(known: {sorted(MTP_ACCEPT_RATES.keys())}). "
-            f"Falling back to 1k/1k defaults. Consider adding "
-            f"'mtp_accept_rates' to your sweep YAML workload config."
-        )
-    return _DEFAULT_ACCEPT_RATES.get(mtp_num, 1.0)
+    raise ValueError(
+        f"No MTP accept rate provided for mtp_num={mtp_num} (ISL={isl}). "
+        f"Set workload.mtp_accept_rates in your sweep YAML. "
+        f"These values are model- and ISL-dependent and must be measured "
+        f"or sourced from prior benchmarks."
+    )
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -156,8 +146,7 @@ def parse_log_file(log_file: Path, verbose: bool = False) -> list[dict]:
       - host_step_time_ms: milliseconds (as logged)
       - prev_device_step_time_ms: milliseconds (as logged)
 
-    The original rate-matching repo converts ms -> seconds during processing.
-    We do this conversion in process_gen_data().
+    The ms -> seconds conversion happens in process_gen_data().
     """
     data = []
     try:
@@ -206,10 +195,7 @@ def process_gen_data(
     verbose: bool = False,
     mtp_accept_rate_overrides: dict[int, float] | None = None,
 ) -> dict:
-    """Process GEN log data using the original rate-matching methodology.
-
-    CRITICAL: This function replicates the EXACT filtering and calculation
-    from process_gen_iterlog_withctx.py in the original rate-matching repo.
+    """Process GEN log data to extract SOL decode metrics.
 
     Steps:
         1. Filter num_ctx_tokens == 0 (pure decode)
@@ -226,8 +212,7 @@ def process_gen_data(
         mode: 'tep' or 'dep'
         tp: Tensor parallelism
         ep_rank: Expert parallel rank (for DEP). Defaults to tp.
-        mtp: MTP layers (0 = STP). Note: mtp_num in original code is the
-             number of MTP layers, and the accept rate lookup uses this.
+        mtp: MTP layers (0 = STP). The accept rate lookup uses this value.
         isl: Input sequence length (for MTP accept rate lookup)
         num_gpus: GPUs used for this decode worker
         verbose: Print debug info
@@ -259,14 +244,12 @@ def process_gen_data(
         return {'error': 'No pure decode iterations found'}
 
     # Step 2: Merge duplicate rows by (iter, global_rank) keeping last
-    # (aligned with original: df.groupby(['iter', 'global_rank']).last())
     df = df.sort_values(['iter', 'global_rank'])
     df = df.drop_duplicates(subset=['iter', 'global_rank'], keep='last').copy()
     if verbose:
         print(f"After dedup by (iter, global_rank): {len(df)} entries")
 
     # Step 3: Remove first 50 and last 10 iterations (warmup/cooldown)
-    # (aligned with original: df.iloc[50:-10])
     if len(df) > 60:
         df = df.iloc[50:-10].copy()
         if verbose:
@@ -284,7 +267,7 @@ def process_gen_data(
     # Step 4: Filter by exact concurrency match
     # This is the critical step that isolates iterations for a specific
     # concurrency when multiple concurrencies ran in the same job.
-    mtp_num = mtp  # mtp_num as used in original code
+    mtp_num = mtp
     if mode == 'tep':
         expected_scheduled = concurrency
         expected_gen_tokens = concurrency * (mtp_num + 1)
@@ -328,8 +311,8 @@ def process_gen_data(
     if len(df) < 5:
         return {'error': f'Insufficient data after outlier filtering: {len(df)} entries'}
 
-    # Step 6: Calculate metrics (aligned with original methodology)
-    # Original uses elapsed_time in SECONDS: prev_device_step_time (ms) / 1000
+    # Step 6: Calculate metrics
+    # elapsed_time in SECONDS: prev_device_step_time (ms) / 1000
     avg_step_time_ms = df['prev_device_step_time_ms'].mean()
     elapsed_time_avg = avg_step_time_ms / 1000.0  # Convert to seconds
 
@@ -405,6 +388,63 @@ def process_gen_data_all_concurrencies(
         )
         results[conc] = result
     return results
+
+
+# ---------------------------------------------------------------------------
+# Class-based interface for the pipeline
+# ---------------------------------------------------------------------------
+
+class TrtllmGENLogParser(GENLogParser):
+    """TRT-LLM implementation of the GEN log parser.
+
+    Parses TRT-LLM per-iteration decode worker logs (*_decode_w*.out)
+    and extracts step_time, TPOT, throughput, and interactivity metrics.
+
+    Handles multi-concurrency logs where sa-bench runs multiple concurrency
+    levels in a single job. The exact-match filter on num_scheduled_requests
+    naturally segments iterations by concurrency.
+    """
+
+    def find_log(self, logs_dir: Path) -> Optional[Path]:
+        return find_decode_log(logs_dir)
+
+    def parse(self, log_file: Path, verbose: bool = False) -> list[dict]:
+        return parse_log_file(log_file, verbose=verbose)
+
+    def process(
+        self,
+        data: list[dict],
+        concurrency: int,
+        mode: str,
+        *,
+        tp: int = 8,
+        ep_rank: Optional[int] = None,
+        mtp: int = 0,
+        isl: int = 1024,
+        num_gpus: int = 8,
+        verbose: bool = False,
+        mtp_accept_rate_overrides: dict[int, float] | None = None,
+    ) -> GENResult:
+        return process_gen_data(  # type: ignore[return-value]
+            data,
+            concurrency=concurrency,
+            mode=mode,
+            tp=tp,
+            ep_rank=ep_rank,
+            mtp=mtp,
+            isl=isl,
+            num_gpus=num_gpus,
+            verbose=verbose,
+            mtp_accept_rate_overrides=mtp_accept_rate_overrides,
+        )
+
+    def get_mtp_accept_rate(
+        self,
+        isl: int,
+        mtp_num: int,
+        overrides: dict[int, float] | None = None,
+    ) -> float:
+        return get_mtp_accept_rate(isl, mtp_num, overrides=overrides)
 
 
 def main():

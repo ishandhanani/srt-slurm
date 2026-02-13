@@ -1,28 +1,27 @@
 #!/usr/bin/env python3
 """
-Process CTX-only benchmark results from srt-slurm per-iteration logs.
+TRT-LLM CTX (prefill) log parser for rate-matching.
 
-This script parses prefill worker logs to extract CTX metrics using the same
-methodology as the original rate-matching repo (get_ctx_throughput.py).
+Parses TRT-LLM per-iteration prefill worker logs to extract CTX SOL metrics.
+Implements the CTXLogParser interface from parser_base.py.
 
-ENGINE-SPECIFIC: TRT-LLM
-This log parser is specific to TRT-LLM's per-iteration log format.
-For SGLang/vLLM support, either:
-1. Create engine-specific parsers (SGLangLogParser, VLLMLogParser)
-2. Fall back to SA-bench client-side metrics (request_throughput, median_ttft_ms)
-
-See WORKLOG.md "Engine-Agnostic Refactoring Plan" for details.
-
-Usage:
+Usage (standalone CLI):
     python process_ctx_results.py -i /path/to/job/logs
     python process_ctx_results.py -i outputs/11059/logs --isl 8192
     python process_ctx_results.py -i outputs/11059/logs --isl 1024 --max-batch-size 8
+
+Usage (pipeline):
+    from process_ctx_results import TrtllmCTXLogParser
+    parser = TrtllmCTXLogParser()
+    log_file = parser.find_log(logs_dir)
+    data = parser.parse(log_file)
+    result = parser.process(data, isl=1024, max_batch_size=8)
 
 Methodology:
     1. Parse per-iteration logs from prefill worker (*_prefill_w*.out or *_agg_w*.out)
     2. Filter for iterations where num_generation_tokens == 0 (pure prefill)
     3. Skip first 2 and last 2 iterations (warmup/cooldown)
-    4. Filter by num_ctx_requests >= threshold (2 for 8k ISL, 16 for 1k ISL)
+    4. Filter by num_ctx_requests >= max_batch_size (fully-packed batches only)
     5. Filter outliers using median ±20%
     6. Calculate: ctx_throughput = num_ctx_tokens / prev_device_step_time
     7. Calculate: request_rate = sum(num_ctx_requests) / sum(prev_device_step_time)
@@ -38,9 +37,9 @@ from typing import Optional
 
 import pandas as pd
 
+from parser_base import CTXLogParser, CTXResult
 
-# ENGINE-SPECIFIC: TRT-LLM per-iteration log format
-# SGLang/vLLM will have different formats - create separate parsers
+# TRT-LLM per-iteration log format
 LOG_PATTERN = re.compile(
     r'iter = (\d+), global_rank = (\d+), rank = (\d+), '
     r'currank_total_requests = (\d+)/(\d+), '
@@ -76,22 +75,20 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def get_threshold_for_isl(isl: int, max_batch_size: Optional[int] = None) -> int:
-    """Get minimum num_ctx_requests per iteration.
+def get_ctx_request_threshold(max_batch_size: Optional[int] = None) -> int:
+    """Get minimum num_ctx_requests to keep an iteration.
 
-    The original rate-matching methodology filters by
-    ``num_ctx_requests >= max_batch_size`` so that only *fully-packed*
-    prefill iterations contribute to the throughput measurement.
+    Only fully-packed prefill iterations (where num_ctx_requests >=
+    max_batch_size) should contribute to the throughput measurement.
 
-    When ``max_batch_size`` is provided (the normal orchestrator path),
-    it is used directly -- this is GPU-agnostic because the value comes
-    from the generated CTX SOL config, which already resolves any YAML
-    overrides and workload-specific defaults.
+    When ``max_batch_size`` is provided (the normal pipeline path),
+    it is used directly.  The value comes from the generated CTX SOL
+    config which already resolves YAML overrides and workload defaults,
+    so it is GPU- and ISL-agnostic.
 
     When ``max_batch_size`` is *not* provided (standalone CLI usage),
-    we fall back to threshold=1 (permissive) to avoid baking in
-    GPU-specific assumptions.  Users can pass ``--max-batch-size``
-    on the CLI if they need the stricter filter.
+    the threshold falls back to 1 (permissive).  Users can pass
+    ``--max-batch-size`` on the CLI for the stricter filter.
     """
     if max_batch_size is not None:
         return max_batch_size
@@ -225,8 +222,8 @@ def process_ctx_data(
         if verbose:
             print(f"Detected iter restart at index {last_restart_idx}, keeping last run: {len(df)} entries")
     
-    # Step 2: Get filtering threshold based on ISL / max_batch_size
-    threshold = get_threshold_for_isl(isl, max_batch_size=max_batch_size)
+    # Step 2: Get filtering threshold from max_batch_size
+    threshold = get_ctx_request_threshold(max_batch_size=max_batch_size)
     
     # Step 3: Filter by num_ctx_requests threshold
     df_filtered = df[df['num_ctx_requests'] >= threshold].copy()
@@ -298,6 +295,36 @@ def process_ctx_data(
         'isl': isl,
         'threshold_used': threshold,
     }
+
+
+# ---------------------------------------------------------------------------
+# Class-based interface for the pipeline
+# ---------------------------------------------------------------------------
+
+class TrtllmCTXLogParser(CTXLogParser):
+    """TRT-LLM implementation of the CTX log parser.
+
+    Parses TRT-LLM per-iteration prefill worker logs (*_prefill_w*.out)
+    and extracts request_rate, ctx_throughput, and device step time metrics.
+    """
+
+    def find_log(self, logs_dir: Path) -> Optional[Path]:
+        return find_prefill_log(logs_dir)
+
+    def parse(self, log_file: Path, verbose: bool = False) -> list[dict]:
+        return parse_log_file(log_file, verbose=verbose)
+
+    def process(
+        self,
+        data: list[dict],
+        isl: int,
+        *,
+        verbose: bool = False,
+        max_batch_size: Optional[int] = None,
+    ) -> CTXResult:
+        return process_ctx_data(  # type: ignore[return-value]
+            data, isl=isl, verbose=verbose, max_batch_size=max_batch_size,
+        )
 
 
 def main():

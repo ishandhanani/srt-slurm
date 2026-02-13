@@ -1,25 +1,21 @@
 # Rate-Matching Sweep: DSR1 1k/1k MTP-only on H200 (TP=8)
 #
-# Aligned with /data/users/nlevin/rate-matching gen_configs (r1_1k1k_sol.yaml).
 # Each job runs MULTIPLE concurrencies in a single sa-bench invocation.
 #
-# Original format: [ctx_inst, gen_inst, gen_tp, batch, max_tokens, attn_dp, gpu_mem, mtp, eplb, conc_list]
-#
-# TP=8 MTP configs from original:
+# TP=8 MTP configs:
 #   MTP3 TEP: batch=128, max_tokens=512, gpu_mem=0.9, conc=[1..128]
 #   MTP3 DEP: batch=256, max_tokens=1024, gpu_mem=0.7, conc=[64..1024]
 #   MTP2 DEP: batch=256, max_tokens=1024, gpu_mem=0.7, conc=[256..1024]
 #   MTP1 DEP: batch=512, max_tokens=1024, gpu_mem=0.7, conc=[512..4096]
 #
-# NOTE: TP=16/32 configs from the original repo require multi-node workers
-# (2 or 4 nodes per decode worker), which srt-slurm doesn't support natively.
-# Those would need the original submission system. Only TP=8 is included here.
+# NOTE: TP=16/32 configs require multi-node decode workers (2 or 4 nodes per
+# worker), which srt-slurm doesn't currently support. Only TP=8 is included.
 #
-# Estimated jobs: 1 CTX + 4 GEN + ~20 E2E = ~25 total
+# Estimated jobs: 1 CTX + 20 GEN + ~20 E2E = ~41 total
 #
 # Usage:
-#   python tools/rate_matching/cli.py run -c tools/rate_matching/h200_1k1k_mtp_sweep.yaml
-#   python tools/rate_matching/cli.py run -c tools/rate_matching/h200_1k1k_mtp_sweep.yaml --dry-run
+#   srtctl-rate-match dry-run -f tools/rate_matching/h200_1k1k_mtp_sweep.yaml
+#   srtctl-rate-match run -f tools/rate_matching/h200_1k1k_mtp_sweep.yaml
 
 name: dsr1_1k1k_mtp
 
@@ -31,7 +27,13 @@ model:
 workload:
   isl: 1024
   osl: 1024
-  random_ratio: 0.8  # Matches original r1_1k1k_sol.yaml (avg_random_ratio = 0.9)
+  random_ratio: 0.8  # avg_random_ratio = (0.8 + 1) / 2 = 0.9
+  # MTP accept rates: effective tokens per decode step per user.
+  # These are model- and ISL-dependent. Values below are for DSR1 at 1k ISL.
+  mtp_accept_rates:
+    1: 1.8
+    2: 2.28
+    3: 2.56
 
 resources:
   gpu_type: h200
@@ -44,14 +46,13 @@ ctx_config:
   benchmark_concurrency: 64
 
 # -----------------------------------------------------------------------
-# GEN sweep: aligned with original rate-matching r1_1k1k_sol.yaml
+# GEN sweep groups
 #
 # Each item runs multiple concurrencies in a single sa-bench job.
 # sa-bench sweeps through the concurrency list sequentially.
 # -----------------------------------------------------------------------
 gen_sweep:
   # --- MTP-3, TEP, batch=128, max_tokens=512, gpu_mem=0.9 ---
-  # Original: [1, 1, 8, 128, 512, false, '0.9', 3, 0, '1,2,4,8,16,32,64,128']
   mtp3_tep:
     expansion: zip
     parameters:
@@ -65,7 +66,6 @@ gen_sweep:
       mtp_num: 3
 
   # --- MTP-3, DEP, batch=256, max_tokens=1024, gpu_mem=0.7 ---
-  # Original: [1, 1, 8, 256, 1024, true, '0.7', 3, 0, '64,128,256,512,1024']
   mtp3_dep:
     expansion: zip
     parameters:
@@ -79,7 +79,6 @@ gen_sweep:
       mtp_num: 3
 
   # --- MTP-2, DEP, batch=256, max_tokens=1024, gpu_mem=0.7 ---
-  # Original: [1, 1, 8, 256, 1024, true, '0.7', 2, 0, '256,512,1024']
   mtp2_dep:
     expansion: zip
     parameters:
@@ -93,7 +92,6 @@ gen_sweep:
       mtp_num: 2
 
   # --- MTP-1, DEP, batch=512, max_tokens=1024, gpu_mem=0.7 ---
-  # Original: [1, 1, 8, 512, 1024, true, '0.7', 1, 0, '512,1024,2048,4096']
   mtp1_dep:
     expansion: zip
     parameters:

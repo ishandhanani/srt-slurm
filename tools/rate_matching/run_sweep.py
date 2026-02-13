@@ -47,15 +47,14 @@ from generate_configs import (
 )
 from metrics import compare_sol_vs_e2e, compute_rate_matching
 from pareto import extract_pareto_frontier
-from process_ctx_results import find_prefill_log, parse_log_file as parse_ctx_log, process_ctx_data
-from process_gen_results import (
-    find_decode_log,
-    get_mtp_accept_rate,
-    parse_log_file as parse_gen_log,
-    process_gen_data,
-    process_gen_data_all_concurrencies,
-)
+from parser_base import CTXLogParser, GENLogParser
+from process_ctx_results import TrtllmCTXLogParser
+from process_gen_results import TrtllmGENLogParser
 from schema import RateMatchingSweepConfig, load_sweep_config
+
+# Engine-specific parsers.  Swap these for vLLM/SGLang support.
+_ctx_parser: CTXLogParser = TrtllmCTXLogParser()
+_gen_parser: GENLogParser = TrtllmGENLogParser()
 
 
 # ---------------------------------------------------------------------------
@@ -352,21 +351,48 @@ def phase1_generate_configs(
         print(f"  CTX SOL config: {ctx_path}")
         print(f"  CTX max_batch_size (threshold): {ctx_max_batch_size}")
 
-    # GEN SOL -- one per sweep item
+    # GEN SOL -- one SLURM job per concurrency level.
+    #
+    # WHY: The TRT-LLM decode worker reads TLLM_BENCHMARK_REQ_QUEUES_SIZE
+    # once at startup to set the minimum number of requests queued before
+    # processing begins. This value CANNOT be changed without restarting
+    # the model. If multiple concurrencies share a single job, the queue
+    # depth is wrong for all but one, producing inaccurate step_time
+    # measurements and corrupting the SOL throughput calculation.
+    #
+    # By splitting into one job per concurrency we guarantee:
+    #   1. TLLM_BENCHMARK_REQ_QUEUES_SIZE == concurrency (exact match)
+    #   2. A clean model launch with no carry-over state between runs
+    #   3. Methodologically correct SOL measurements at every point
+    from schema import GenSweepItem as _GSI
+
     state.gen_jobs = []
     for i, gen_item in enumerate(cfg.gen_sweep):
-        conc_str = str(gen_item.concurrency) if isinstance(gen_item.concurrency, int) else "x".join(str(c) for c in gen_item.concurrency)
+        conc_list = gen_item.concurrency if isinstance(gen_item.concurrency, list) else [gen_item.concurrency]
         mtp_suffix = f"_mtp{gen_item.mtp_num}" if gen_item.mtp_num > 0 else ""
-        fname = f"gen_sol_{gen_item.mode}_c{conc_str}{mtp_suffix}.yaml"
-        gen_path = str(configs_dir / fname)
-        generate_gen_sol_config(cfg, gen_item, output_path=gen_path)
-        state.gen_jobs.append({
-            "config_path": gen_path,
-            "status": "pending",
-            "gen_item_index": i,
-        })
-        if verbose:
-            print(f"  GEN SOL config: {fname}")
+
+        for conc in conc_list:
+            single_item = _GSI(
+                mode=gen_item.mode,
+                batch_size=gen_item.batch_size,
+                concurrency=conc,
+                tp_size=gen_item.tp_size,
+                mtp_num=gen_item.mtp_num,
+                max_num_tokens=gen_item.max_num_tokens,
+                gpu_memory_fraction=gen_item.gpu_memory_fraction,
+                eplb_num_slots=gen_item.eplb_num_slots,
+            )
+            fname = f"gen_sol_{gen_item.mode}_c{conc}{mtp_suffix}.yaml"
+            gen_path = str(configs_dir / fname)
+            generate_gen_sol_config(cfg, single_item, output_path=gen_path)
+            state.gen_jobs.append({
+                "config_path": gen_path,
+                "status": "pending",
+                "gen_item_index": i,
+                "concurrency": conc,
+            })
+            if verbose:
+                print(f"  GEN SOL config: {fname}  (queue_size={conc})")
 
     if verbose:
         print(f"\n  Total: 1 CTX + {len(state.gen_jobs)} GEN = {1 + len(state.gen_jobs)} configs")
@@ -413,11 +439,11 @@ def phase2_ctx_sol(
     if verbose:
         print("  Processing CTX results...")
     logs_dir = Path(ctx_job["output_dir"]) / "logs"
-    log_file = find_prefill_log(logs_dir)
+    log_file = _ctx_parser.find_log(logs_dir)
     if log_file is None:
         raise RuntimeError(f"No prefill log found in {logs_dir}")
 
-    data = parse_ctx_log(log_file, verbose=False)
+    data = _ctx_parser.parse(log_file, verbose=False)
     if not data:
         raise RuntimeError(f"No data parsed from {log_file}")
 
@@ -425,7 +451,7 @@ def phase2_ctx_sol(
     # num_ctx_requests threshold matches the actual deployed batch size
     # (GPU-agnostic -- works for H200, GB200, etc.).
     ctx_mbs = ctx_job.get("max_batch_size")
-    ctx_result = process_ctx_data(
+    ctx_result = _ctx_parser.process(
         data, isl=cfg.workload.isl, verbose=False, max_batch_size=ctx_mbs,
     )
     if "error" in ctx_result:
@@ -543,15 +569,15 @@ def phase3_gen_sol(
 
     # Process results for all completed GEN jobs
     # METHODOLOGY: Always use decode worker logs (prev_device_step_time), NOT
-    # sa-bench client-side JSONs.  The original rate-matching repo processes
-    # per-iteration decode logs to get the true device step time, then applies
-    # hardcoded MTP accept rates.  sa-bench JSONs capture E2E client metrics
-    # (including network overhead) and are NOT used for GEN SOL.
+    # sa-bench client-side JSONs.  Decode logs give the true device step time,
+    # which combined with hardcoded MTP accept rates yields SOL throughput.
+    # sa-bench JSONs capture E2E client metrics (including network overhead)
+    # and are NOT used for GEN SOL.
     #
     # Multi-concurrency handling: when sa-bench runs concurrencies "8x32x64"
     # sequentially, the decode log is continuous.  The exact-match filter on
-    # num_scheduled_requests (Step 4 in the methodology) naturally segments
-    # iterations by concurrency.
+    # num_scheduled_requests (Step 4) naturally segments iterations by
+    # concurrency.
     state.gen_results = []
     isl = cfg.workload.isl
     mtp_overrides = getattr(cfg.workload, 'mtp_accept_rates', None)
@@ -562,18 +588,23 @@ def phase3_gen_sol(
             continue
 
         gen_item = cfg.gen_sweep[gj.get("gen_item_index", idx)]
-        conc_list = gen_item.concurrency if isinstance(gen_item.concurrency, list) else [gen_item.concurrency]
+        # If the job was split per-concurrency, use the stored single value.
+        # Otherwise, use the sweep item's full concurrency list.
+        if "concurrency" in gj:
+            conc_list = [gj["concurrency"]]
+        else:
+            conc_list = gen_item.concurrency if isinstance(gen_item.concurrency, list) else [gen_item.concurrency]
         num_gpus = cfg.resources.gen_gpus_per_instance
 
         # Always parse the decode worker log (not sa-bench JSONs)
         logs_dir = Path(gj.get("output_dir", "")) / "logs"
-        log_file = find_decode_log(logs_dir)
+        log_file = _gen_parser.find_log(logs_dir)
         if log_file is None:
             if verbose:
                 print(f"  WARNING: No decode log for job {gj.get('job_id', '?')}")
             continue
 
-        data = parse_gen_log(log_file, verbose=False)
+        data = _gen_parser.parse(log_file, verbose=False)
         if not data:
             if verbose:
                 print(f"  WARNING: No iteration data from {log_file}")
@@ -585,12 +616,13 @@ def phase3_gen_sol(
         # Determine ep_rank for DEP mode
         ep_rank = gen_item.tp_size  # ep_rank = rank_num = tp
 
-        # Process each concurrency from the continuous decode log
-        # The exact-match filter on num_scheduled_requests naturally isolates
-        # iterations for each concurrency level.
+        # Process each concurrency from the decode log.
+        # When split per-concurrency, there's exactly one.
+        # When multi-concurrency, the exact-match filter on
+        # num_scheduled_requests isolates each level.
         gj["results"] = []
         for conc in conc_list:
-            result = process_gen_data(
+            result = _gen_parser.process(
                 data,
                 concurrency=conc,
                 mode=gen_item.mode,
@@ -1130,16 +1162,16 @@ def reprocess_sweep(
     ctx_job = state.ctx_job
     if ctx_job.get("status") == "completed" and ctx_job.get("output_dir"):
         logs_dir = Path(ctx_job["output_dir"]) / "logs"
-        log_file = find_prefill_log(logs_dir)
+        log_file = _ctx_parser.find_log(logs_dir)
         if log_file is None:
             raise RuntimeError(f"No prefill log found in {logs_dir}")
 
-        data = parse_ctx_log(log_file, verbose=False)
+        data = _ctx_parser.parse(log_file, verbose=False)
         if not data:
             raise RuntimeError(f"No data parsed from {log_file}")
 
         ctx_mbs = ctx_job.get("max_batch_size")
-        ctx_result = process_ctx_data(
+        ctx_result = _ctx_parser.process(
             data, isl=cfg.workload.isl, verbose=False, max_batch_size=ctx_mbs,
         )
         if "error" in ctx_result:
@@ -1173,16 +1205,19 @@ def reprocess_sweep(
 
         # Re-read gen_item from config using the stored index
         gen_item = cfg.gen_sweep[gj.get("gen_item_index", idx)]
-        conc_list = gen_item.concurrency if isinstance(gen_item.concurrency, list) else [gen_item.concurrency]
+        if "concurrency" in gj:
+            conc_list = [gj["concurrency"]]
+        else:
+            conc_list = gen_item.concurrency if isinstance(gen_item.concurrency, list) else [gen_item.concurrency]
 
         logs_dir = Path(gj.get("output_dir", "")) / "logs"
-        log_file = find_decode_log(logs_dir)
+        log_file = _gen_parser.find_log(logs_dir)
         if log_file is None:
             if verbose:
                 print(f"  WARNING: No decode log in {logs_dir}, skipping GEN job {idx}")
             continue
 
-        data = parse_gen_log(log_file, verbose=False)
+        data = _gen_parser.parse(log_file, verbose=False)
         if not data:
             if verbose:
                 print(f"  WARNING: No data parsed from {log_file}")
@@ -1194,7 +1229,7 @@ def reprocess_sweep(
         ep_rank = gen_item.tp_size  # ep_rank = rank_num = tp
 
         for conc in conc_list:
-            result = process_gen_data(
+            result = _gen_parser.process(
                 data,
                 concurrency=conc,
                 mode=gen_item.mode,

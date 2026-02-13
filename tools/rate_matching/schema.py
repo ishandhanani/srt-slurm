@@ -46,11 +46,13 @@ class WorkloadConfig(BaseModel):
     mtp_accept_rates: Optional[dict[int, float]] = Field(
         default=None,
         description=(
-            "Override the hardcoded MTP accept-rate lookup table. "
-            "Key = mtp_num (1, 2, 3, ...), value = effective tokens per "
-            "decode step per user.  MTP-0 (STP) is always 1.0 and does "
-            "not need to be specified.  Example: {1: 1.82, 2: 2.30, 3: 2.60}. "
-            "When omitted, the built-in table (measured for ISL 1k/8k/32k) is used."
+            "MTP accept rates: effective tokens per decode step per user. "
+            "Required when any gen_sweep item uses mtp_num > 0. "
+            "Key = mtp_num (1, 2, 3), value = accept rate. "
+            "MTP-0 (STP) is always 1.0 and does not need to be specified. "
+            "Example: {1: 1.8, 2: 2.28, 3: 2.56}. "
+            "These values are model- and ISL-dependent and must be measured "
+            "or sourced from prior benchmarks."
         ),
     )
 
@@ -294,6 +296,55 @@ class RateMatchingSweepConfig(BaseModel):
             values["gen_sweep"] = expanded
 
         return values
+
+    @model_validator(mode="after")
+    def _validate_mtp_accept_rates(self) -> "RateMatchingSweepConfig":
+        """Require mtp_accept_rates when any GEN sweep item uses MTP."""
+        mtp_levels_used: set[int] = set()
+        for item in self.gen_sweep:
+            if item.mtp_num > 0:
+                mtp_levels_used.add(item.mtp_num)
+
+        if not mtp_levels_used:
+            return self
+
+        if self.workload.mtp_accept_rates is None:
+            # Known reference values to suggest (DSR1, random workloads)
+            known = {
+                1024: {1: 1.8, 2: 2.28, 3: 2.56},
+                8192: {1: 1.84, 2: 2.38, 3: 2.76},
+                32768: {1: 1.97, 2: 2.39, 3: 2.56},
+            }
+            isl = self.workload.isl
+            suggestion = known.get(isl, known[1024])
+            # Only include levels actually used
+            filtered = {k: v for k, v in suggestion.items() if k in mtp_levels_used}
+
+            raise ValueError(
+                f"workload.mtp_accept_rates is required when using MTP "
+                f"(gen_sweep uses mtp_num={sorted(mtp_levels_used)}).\n"
+                f"\n"
+                f"MTP accept rates are the effective tokens per decode step per user.\n"
+                f"They are model- and ISL-dependent. Measure them or use known values.\n"
+                f"\n"
+                f"Reference values for DSR1 (ISL={isl}, random workload):\n"
+                f"  mtp_accept_rates:\n"
+                + "".join(f"    {k}: {v}\n" for k, v in sorted(filtered.items()))
+                + f"\n"
+                f"Add this to your sweep YAML under 'workload:'."
+            )
+
+        # Validate that all used MTP levels have rates defined
+        missing = mtp_levels_used - set(self.workload.mtp_accept_rates.keys())
+        if missing:
+            raise ValueError(
+                f"workload.mtp_accept_rates is missing entries for "
+                f"mtp_num={sorted(missing)}. "
+                f"Your gen_sweep uses these MTP levels but no accept rate "
+                f"is defined for them."
+            )
+
+        return self
 
 
 # ---------------------------------------------------------------------------

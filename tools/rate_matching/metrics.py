@@ -1,10 +1,7 @@
 """
 Rate-matching metric calculations.
 
-Aligned with the original rate-matching methodology in:
-  /data/users/nlevin/rate-matching/bench-trtllm-disagg/process_data/process_gen_iterlog_withctx.py
-
-Core formulas (from original):
+Core formulas:
   gen_req_rate = output_throughput / (osl * avg_random_ratio)
   ctx_gen_inst_ratio = gen_req_rate / ctx_request_rate
   output_tput_per_gpu = output_throughput / (ctx_gpus * ctx_gen_inst_ratio + ep_rank)
@@ -37,8 +34,6 @@ def compute_rate_matching(
     isl: int = 0,
 ) -> dict:
     """Compute rate-matched allocation from CTX and GEN SOL results.
-
-    Aligned with original rate-matching methodology.
 
     Args:
         ctx_result: Output of process_ctx_results (needs 'request_rate_req_per_s',
@@ -85,7 +80,6 @@ def compute_rate_matching(
     # -----------------------------------------------------------------------
     # ctx_gen_inst_ratio: how many CTX instances per GEN instance are needed
     # to keep the GEN instance fully loaded.
-    # Original: ctx_gen_inst_ratio = gen_req_rate / ctx_request_rate
     # -----------------------------------------------------------------------
     if ctx_request_rate > 0 and gen_req_rate > 0:
         ctx_gen_inst_ratio = gen_req_rate / ctx_request_rate
@@ -94,7 +88,6 @@ def compute_rate_matching(
 
     # -----------------------------------------------------------------------
     # output_tput_per_gpu (SOL prediction for one GEN instance):
-    # Original: output_throughput / (ctx_gpus * ctx_gen_inst_ratio + ep_rank)
     # Denominator = GPUs supporting one GEN instance (its share of CTX + GEN)
     # -----------------------------------------------------------------------
     denom_per_gen = gpus_per_ctx_instance * ctx_gen_inst_ratio + ep_rank
@@ -102,7 +95,6 @@ def compute_rate_matching(
 
     # -----------------------------------------------------------------------
     # E2E ratio: find integer CTX:GEN allocation within GPU budget
-    # Aligned with calculate_e2e_ratio() from original.
     # -----------------------------------------------------------------------
     best = _find_best_allocation(
         ctx_gen_inst_ratio=ctx_gen_inst_ratio,
@@ -117,16 +109,15 @@ def compute_rate_matching(
     total_output_tput_per_gpu = total_output_throughput / best_total_gpus if best_total_gpus > 0 else 0
 
     # -----------------------------------------------------------------------
-    # Additional derived metrics (from original methodology)
+    # Additional derived metrics
     # -----------------------------------------------------------------------
 
     # output_tput_per_gen_gpu: throughput normalised by GEN GPUs only.
     # Useful for comparing GEN efficiency across modes independently of the
-    # CTX allocation.  (Original: output_throughput_per_gen_gpu)
+    # CTX allocation.
     output_tput_per_gen_gpu = gen_output_throughput / ep_rank if ep_rank > 0 else 0
 
     # total_throughput / total_tput_per_gpu: input + output token throughput.
-    # Original: total_throughput = output_throughput * (isl + osl) / osl
     if isl > 0 and osl > 0:
         io_ratio = (isl + osl) / osl
         total_throughput = gen_output_throughput * io_ratio
@@ -136,7 +127,7 @@ def compute_rate_matching(
         total_tput_per_gpu = output_tput_per_gpu
 
     # estimate_e2e_latency: TTFT + decode time for the expected output length.
-    # Original: e2e_latency = ctx_step_time + (osl * avg_random_ratio - 1) / throughput_per_user
+    # e2e_latency = ctx_step_time + (expected_output_tokens - 1) / throughput_per_user
     # ctx_step_time comes from CTX results (avg_prev_device_step_time in seconds).
     ctx_step_time_ms = ctx_result.get('avg_prev_device_step_time_ms')
     if ctx_step_time_ms is not None and gen_throughput_per_user > 0 and osl > 0:
@@ -187,10 +178,10 @@ def _find_best_allocation(
 ) -> dict:
     """Find optimal integer CTX:GEN allocation within GPU budget.
 
-    Aligned with calculate_e2e_ratio() from original rate-matching repo:
-      - Find ctx, gen such that ctx/gen >= ctx_gen_inst_ratio
-      - Subject to: gpus_per_ctx * ctx + gpus_per_gen * gen <= max_total_gpus
-      - Minimize excess ratio (find tightest fit)
+    Finds ctx, gen such that:
+      - ctx/gen >= ctx_gen_inst_ratio
+      - gpus_per_ctx * ctx + gpus_per_gen * gen <= max_total_gpus
+      - Excess ratio is minimized (tightest fit)
 
     Returns:
         Dict with ctx_instances, gen_instances, ctx_gpus, gen_gpus, total_gpus.
