@@ -31,11 +31,14 @@ model:
 workload:
   isl: 1024
   osl: 1024
+  random_ratio: 0.8  # Matches original r1_1k1k_sol.yaml (avg_random_ratio = 0.9)
 
 resources:
   gpu_type: h200
   gpus_per_node: 8
+  ctx_gpus_per_instance: 8
   gen_gpus_per_instance: 8
+  max_total_gpus: 64
 
 ctx_config:
   benchmark_concurrency: 64
