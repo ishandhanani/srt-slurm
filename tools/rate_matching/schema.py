@@ -35,15 +35,34 @@ class WorkloadConfig(BaseModel):
     """ISL / OSL workload definition."""
     isl: int = Field(..., description="Input sequence length")
     osl: int = Field(..., description="Output sequence length")
+    random_ratio: float = Field(
+        default=1.0,
+        description=(
+            "Random ratio for output token sampling. 1.0 = fully random, "
+            "0.0 = deterministic. Used in gen_req_rate calculation: "
+            "avg_random_ratio = (random_ratio + 1) / 2"
+        ),
+    )
 
 
 class ResourceConfig(BaseModel):
     """Hardware / GPU settings."""
     gpu_type: str = Field(default="h200", description="GPU type string")
     gpus_per_node: int = Field(default=8, description="GPUs per SLURM node")
+    ctx_gpus_per_instance: int = Field(
+        default=8,
+        description="GPUs per prefill worker (TP size). Typically 8 for DSR1.",
+    )
     gen_gpus_per_instance: int = Field(
         default=8,
         description="GPUs per decode worker (TP size). Typically 8 for DSR1.",
+    )
+    max_total_gpus: int = Field(
+        default=64,
+        description=(
+            "Maximum total GPU budget for rate-matching allocation search. "
+            "Constrains ctx_gpus*ctx_instances + gen_gpus*gen_instances."
+        ),
     )
 
 

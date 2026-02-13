@@ -42,7 +42,13 @@ from generate_configs import (
 from metrics import compare_sol_vs_e2e, compute_rate_matching
 from pareto import extract_pareto_frontier
 from process_ctx_results import find_prefill_log, parse_log_file as parse_ctx_log, process_ctx_data
-from process_gen_results import find_decode_log, parse_log_file as parse_gen_log, process_gen_data
+from process_gen_results import (
+    find_decode_log,
+    get_mtp_accept_rate,
+    parse_log_file as parse_gen_log,
+    process_gen_data,
+    process_gen_data_all_concurrencies,
+)
 from schema import RateMatchingSweepConfig, load_sweep_config
 
 
@@ -364,7 +370,18 @@ def phase3_gen_sol(
             state.save()
 
     # Process results for all completed GEN jobs
+    # METHODOLOGY: Always use decode worker logs (prev_device_step_time), NOT
+    # sa-bench client-side JSONs.  The original rate-matching repo processes
+    # per-iteration decode logs to get the true device step time, then applies
+    # hardcoded MTP accept rates.  sa-bench JSONs capture E2E client metrics
+    # (including network overhead) and are NOT used for GEN SOL.
+    #
+    # Multi-concurrency handling: when sa-bench runs concurrencies "8x32x64"
+    # sequentially, the decode log is continuous.  The exact-match filter on
+    # num_scheduled_requests (Step 4 in the methodology) naturally segments
+    # iterations by concurrency.
     state.gen_results = []
+    isl = cfg.workload.isl
     for idx, gj in enumerate(state.gen_jobs):
         if gj["status"] != "completed":
             if verbose:
@@ -372,9 +389,11 @@ def phase3_gen_sol(
             continue
 
         gen_item = cfg.gen_sweep[gj.get("gen_item_index", idx)]
-        conc = gen_item.concurrency if isinstance(gen_item.concurrency, int) else gen_item.concurrency[-1]
+        conc_list = gen_item.concurrency if isinstance(gen_item.concurrency, list) else [gen_item.concurrency]
+        num_gpus = cfg.resources.gen_gpus_per_instance
 
-        logs_dir = Path(gj["output_dir"]) / "logs"
+        # Always parse the decode worker log (not sa-bench JSONs)
+        logs_dir = Path(gj.get("output_dir", "")) / "logs"
         log_file = find_decode_log(logs_dir)
         if log_file is None:
             if verbose:
@@ -384,34 +403,53 @@ def phase3_gen_sol(
         data = parse_gen_log(log_file, verbose=False)
         if not data:
             if verbose:
-                print(f"  WARNING: No data from {log_file}")
+                print(f"  WARNING: No iteration data from {log_file}")
             continue
-
-        result = process_gen_data(
-            data,
-            concurrency=conc,
-            mode=gen_item.mode,
-            tp=gen_item.tp_size,
-            mtp=gen_item.mtp_num,
-            num_gpus=cfg.resources.gen_gpus_per_instance,
-            verbose=False,
-        )
-
-        if "error" in result:
-            if verbose:
-                print(f"  WARNING: GEN processing error: {result['error']}")
-            continue
-
-        # Store in gen_job for reference
-        gj["result"] = result
-        state.gen_results.append(result)
 
         if verbose:
-            print(
-                f"  {gen_item.mode.upper()} c{conc} mtp{gen_item.mtp_num}: "
-                f"TPOT={result['tpot_ms']:.2f}ms "
-                f"tput/gpu={result.get('throughput_per_gpu', 0):.1f}"
+            print(f"  Parsed {len(data)} iterations from {log_file.name}")
+
+        # Determine ep_rank for DEP mode
+        ep_rank = gen_item.tp_size  # ep_rank = rank_num = tp
+
+        # Process each concurrency from the continuous decode log
+        # The exact-match filter on num_scheduled_requests naturally isolates
+        # iterations for each concurrency level.
+        gj["results"] = []
+        for conc in conc_list:
+            result = process_gen_data(
+                data,
+                concurrency=conc,
+                mode=gen_item.mode,
+                tp=gen_item.tp_size,
+                ep_rank=ep_rank,
+                mtp=gen_item.mtp_num,
+                isl=isl,
+                num_gpus=num_gpus,
+                verbose=verbose,
             )
+            if "error" in result:
+                if verbose:
+                    print(f"  WARNING: GEN c{conc} processing error: {result['error']}")
+                continue
+
+            # Attach config metadata to result
+            result["batch_size"] = gen_item.batch_size
+            result["max_num_tokens"] = gen_item.max_num_tokens
+            result["gpu_memory_fraction"] = gen_item.gpu_memory_fraction
+            result["eplb_num_slots"] = gen_item.eplb_num_slots
+            result["tp_size"] = gen_item.tp_size
+
+            gj["results"].append(result)
+            state.gen_results.append(result)
+            if verbose:
+                print(
+                    f"  {gen_item.mode.upper()} c{conc} mtp{gen_item.mtp_num}: "
+                    f"step={result['avg_step_time_ms']:.2f}ms "
+                    f"TPOT={result['tpot_ms']:.2f}ms "
+                    f"tput/gpu={result.get('throughput_per_gpu', 0):.1f} "
+                    f"accept_rate={result['mtp_accept_rate']}"
+                )
 
     state.save()
 
@@ -434,22 +472,19 @@ def phase4_rate_matching(
         print(f"{'=' * 60}")
 
     osl = cfg.workload.osl
+    isl = cfg.workload.isl
+    random_ratio = getattr(cfg.workload, 'random_ratio', 1.0)
     state.rate_matching_results = []
 
     for gen_result in state.gen_results:
-        # Compute gen_req_rate using osl
-        conc = gen_result['concurrency']
-        output_tput = gen_result['output_throughput']
-        if output_tput > 0 and osl > 0:
-            gen_req_rate = output_tput / osl
-        else:
-            gen_req_rate = 0
-        gen_result['gen_req_rate'] = gen_req_rate
-
         rm = compute_rate_matching(
             ctx_result=state.ctx_result,
             gen_result=gen_result,
-            gpus_per_instance=cfg.resources.gen_gpus_per_instance,
+            osl=osl,
+            random_ratio=random_ratio,
+            gpus_per_ctx_instance=cfg.resources.ctx_gpus_per_instance,
+            gpus_per_gen_instance=cfg.resources.gen_gpus_per_instance,
+            max_total_gpus=getattr(cfg.resources, 'max_total_gpus', 64),
         )
 
         # Carry forward extra fields
@@ -463,8 +498,9 @@ def phase4_rate_matching(
             print(
                 f"  {rm['config_name']}: "
                 f"ratio={rm['ratio_str']} "
+                f"gen_req_rate={rm['gen_req_rate']:.2f} req/s "
                 f"tput/gpu={rm['output_tput_per_gpu']:.1f} "
-                f"eff={rm.get('efficiency_pct', 0):.1f}%"
+                f"ctx:gen={rm['ctx_instances']}:{rm['gen_instances']}"
             )
 
     state.phase = "pareto"
@@ -689,20 +725,20 @@ def _process_e2e_results(
 
 
 def _load_sa_bench_result(output_dir: str) -> dict | None:
-    """Load the sa-bench JSON result from a job output directory."""
+    """Load the sa-bench JSON result from a job output directory.
+
+    When multiple concurrencies were run, returns the last (highest) one.
+    """
     logs_dir = Path(output_dir) / "logs"
     if not logs_dir.exists():
         return None
 
-    # Find sa-bench result files
     result_files = list(logs_dir.glob("sa-bench_*/results_*.json"))
     if not result_files:
-        # Try alternate patterns
         result_files = list(logs_dir.glob("**/results_*.json"))
     if not result_files:
         return None
 
-    # Take the last result (highest concurrency or latest)
     result_files.sort()
     try:
         with open(result_files[-1]) as f:
@@ -739,9 +775,10 @@ def _export_results(
         import csv
         cols = [
             "config_name", "mode", "batch_size", "concurrency", "mtp_num",
+            "mtp_accept_rate", "avg_step_time_ms",
             "interactivity", "tpot_ms", "output_tput_per_gpu",
+            "gen_req_rate", "ctx_request_rate", "ctx_gen_inst_ratio",
             "ctx_instances", "gen_instances", "total_gpus", "ratio_str",
-            "efficiency_pct",
         ]
 
         for suffix, data in [("all", state.rate_matching_results), ("frontier", state.pareto_frontier)]:

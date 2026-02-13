@@ -112,8 +112,8 @@ def print_status(output_dir: str, live: bool = False) -> None:
     if pareto:
         print(f"\n  PARETO FRONTIER ({len(pareto)} points)")
         print(f"  {'Rank':<5} {'Config':<25} {'Mode':<5} {'PW Conc':<8} {'MTP':<4} "
-              f"{'Ratio':<8} {'Inter':<8} {'Tput/GPU':<10} {'GPUs':<6} {'Eff%'}")
-        print(f"  {'-' * 100}")
+              f"{'Accept':<7} {'Ratio':<8} {'Step(ms)':<10} {'Inter':<8} {'Tput/GPU':<10} {'GPUs':<6}")
+        print(f"  {'-' * 110}")
         for p in pareto:
             print(
                 f"  {p.get('pareto_rank', '?'):<5} "
@@ -121,11 +121,12 @@ def print_status(output_dir: str, live: bool = False) -> None:
                 f"{p.get('mode', '?'):<5} "
                 f"{str(p.get('concurrency', '?')):<8} "
                 f"{str(p.get('mtp_num', 0)):<4} "
+                f"{p.get('mtp_accept_rate', 1.0):<7.2f} "
                 f"{p.get('ratio_str', '?'):<8} "
+                f"{p.get('avg_step_time_ms', 0):<10.2f} "
                 f"{p.get('interactivity', 0):<8.1f} "
                 f"{p.get('output_tput_per_gpu', 0):<10.1f} "
-                f"{str(p.get('total_gpus', '?')):<6} "
-                f"{p.get('efficiency_pct', 0):.1f}"
+                f"{str(p.get('total_gpus', '?')):<6}"
             )
 
     # E2E Validation

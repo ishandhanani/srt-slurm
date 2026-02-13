@@ -41,8 +41,10 @@ def export_rate_matching_results(sweep_state: dict, output_dir: str) -> None:
             json.dump(pareto, f, indent=2)
         _write_csv(out / f"{name}_pareto.csv", pareto, [
             "pareto_rank", "config_name", "mode", "concurrency", "mtp_num",
-            "batch_size", "ratio_str", "interactivity", "tpot_ms",
-            "output_tput_per_gpu", "total_gpus", "efficiency_pct",
+            "mtp_accept_rate", "batch_size", "ratio_str",
+            "interactivity", "tpot_ms", "avg_step_time_ms",
+            "output_tput_per_gpu", "gen_req_rate", "ctx_gen_inst_ratio",
+            "ctx_instances", "gen_instances", "total_gpus",
         ])
 
     # SOL vs E2E JSON/CSV
@@ -308,6 +310,8 @@ def _build_comparison_table(sol_vs_e2e: list[dict], pareto_map: dict) -> str:
         ratio = pp.get("ratio_str", "?")
         mode = pp.get("mode", "?").upper()
         mtp = pp.get("mtp_num", 0)
+        accept_rate = pp.get("mtp_accept_rate", 1.0)
+        step_ms = pp.get("avg_step_time_ms", 0)
         ctx_i = pp.get("ctx_instances", "?")
         gen_i = pp.get("gen_instances", "?")
         total_gpus = pp.get("total_gpus", "?")
@@ -329,6 +333,8 @@ def _build_comparison_table(sol_vs_e2e: list[dict], pareto_map: dict) -> str:
             f'<td style="font-weight:bold">c{pw_conc}</td>'
             f"<td>{mult:.2f}x</td>"
             f"<td>{mode} MTP-{mtp}</td>"
+            f'<td style="text-align:right">{accept_rate:.2f}</td>'
+            f'<td style="text-align:right">{step_ms:.2f}</td>'
             f'<td style="text-align:center">{ratio}</td>'
             f'<td style="text-align:center">{ctx_i}</td>'
             f'<td style="text-align:center">{gen_i}</td>'
@@ -348,11 +354,17 @@ def _build_comparison_table(sol_vs_e2e: list[dict], pareto_map: dict) -> str:
     return f"""
 <div style="margin-top:20px; font-family:sans-serif;">
 <h3>Configuration Details</h3>
+<p style="font-size:12px; color:#666;">
+  <b>Step(ms)</b> = avg prev_device_step_time (device-side decode step).
+  <b>Accept Rate</b> = effective tokens per step per user (MTP lookup table).
+  <b>SOL TPOT</b> = Step(ms) / AcceptRate.
+  <b>SOL Tput/GPU</b> = output_throughput / (ctx_gpus * ctx:gen_ratio + gen_gpus).
+</p>
 <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; font-size:13px;">
 <thead style="background:#f0f0f0">
 <tr>
-<th>PW Conc</th><th>Variant</th><th>Mode</th><th>SOL Ratio</th>
-<th>CTX</th><th>GEN</th><th>GPUs</th><th>Sys Conc</th>
+<th>PW Conc</th><th>Variant</th><th>Mode</th><th>Accept</th><th>Step(ms)</th>
+<th>SOL Ratio</th><th>CTX</th><th>GEN</th><th>GPUs</th><th>Sys Conc</th>
 <th>SOL TPOT</th><th>E2E TPOT</th><th>Diff</th>
 <th>SOL Tput/GPU</th><th>E2E Tput/GPU</th><th>Diff</th>
 <th>TTFT(ms)</th><th>TTFT</th>

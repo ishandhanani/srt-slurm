@@ -111,7 +111,7 @@ def _workload_params(cfg: RateMatchingSweepConfig) -> dict:
 
 def _prefill_config(cfg: RateMatchingSweepConfig, wp: dict, mtp_num: int = 0) -> dict:
     """Build the prefill trtllm_config section."""
-    tp = cfg.resources.gen_gpus_per_instance
+    tp = cfg.resources.ctx_gpus_per_instance
     config = {
         "backend": "pytorch",
         "trust_remote_code": True,
