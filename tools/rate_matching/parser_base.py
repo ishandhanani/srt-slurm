@@ -11,6 +11,10 @@ TypedDicts below define those contracts.
 Implementations:
   - TRT-LLM: process_ctx_results.TrtllmCTXLogParser
              process_gen_results.TrtllmGENLogParser
+  - vLLM:    process_ctx_results_vllm.VllmCTXLogParser     (stub)
+             process_gen_results_vllm.VllmGENLogParser     (stub)
+  - SGLang:  process_ctx_results_sglang.SglangCTXLogParser (stub)
+             process_gen_results_sglang.SglangGENLogParser (stub)
 
 Adding a new engine parser
 --------------------------

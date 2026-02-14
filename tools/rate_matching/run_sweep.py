@@ -51,6 +51,10 @@ from parser_base import get_ctx_parser, get_gen_parser
 # Import parser modules so they self-register via decorators.
 import process_ctx_results as _ctx_mod  # noqa: F401
 import process_gen_results as _gen_mod  # noqa: F401
+import process_ctx_results_vllm as _vllm_ctx_mod  # noqa: F401
+import process_gen_results_vllm as _vllm_gen_mod  # noqa: F401
+import process_ctx_results_sglang as _sglang_ctx_mod  # noqa: F401
+import process_gen_results_sglang as _sglang_gen_mod  # noqa: F401
 from schema import RateMatchingSweepConfig, load_sweep_config
 from slurm_helpers import (
     _submit_and_poll,

@@ -503,20 +503,24 @@ Reprocess will re-read all logs from disk and reconstruct results. SLURM job IDs
 ## Module Architecture
 
 ```
-cli.py                  CLI entry point (argparse subcommands)
-schema.py               Pydantic config schema (YAML → Python objects)
-run_sweep.py            Main orchestrator (phases 1–7, add-e2e, reprocess)
-state.py                SweepState class (persistence, backup, job records)
-generate_configs.py     Config generation (CTX SOL, GEN SOL, E2E)
-slurm_helpers.py        SLURM interaction (submit, poll, retry)
-export.py               Result loading and CSV/JSON export
-parser_base.py          Abstract parser base classes + registry
-process_ctx_results.py  TRT-LLM CTX (prefill) log parser
-process_gen_results.py  TRT-LLM GEN (decode) log parser
-metrics.py              Rate-matching math, SOL vs E2E comparison
-pareto.py               Pareto frontier extraction
-dashboard_export.py     Plotly chart generation
-sweep_status.py         Status dashboard (reads sweep_state.json)
+cli.py                         CLI entry point (argparse subcommands)
+schema.py                      Pydantic config schema (YAML → Python objects)
+run_sweep.py                   Main orchestrator (phases 1–7, add-e2e, reprocess)
+state.py                       SweepState class (persistence, backup, job records)
+generate_configs.py            Config generation (CTX SOL, GEN SOL, E2E)
+slurm_helpers.py               SLURM interaction (submit, poll, retry)
+export.py                      Result loading and CSV/JSON export
+parser_base.py                 Abstract parser base classes + registry
+process_ctx_results.py         TRT-LLM CTX (prefill) log parser
+process_gen_results.py         TRT-LLM GEN (decode) log parser
+process_ctx_results_vllm.py    vLLM CTX log parser (stub)
+process_gen_results_vllm.py    vLLM GEN log parser (stub)
+process_ctx_results_sglang.py  SGLang CTX log parser (stub)
+process_gen_results_sglang.py  SGLang GEN log parser (stub)
+metrics.py                     Rate-matching math, SOL vs E2E comparison
+pareto.py                      Pareto frontier extraction
+dashboard_export.py            Plotly chart generation
+sweep_status.py                Status dashboard (reads sweep_state.json)
 ```
 
 ### Parser Registry
@@ -615,9 +619,19 @@ And in the sweep YAML:
 engine_type: vllm  # instead of trtllm
 ```
 
+## Supported Engines
+
+| Engine | Status | Parser Modules |
+|---|---|---|
+| **TRT-LLM** | Fully implemented | `process_ctx_results.py`, `process_gen_results.py` |
+| **vLLM** | Stub (registered, not yet implemented) | `process_ctx_results_vllm.py`, `process_gen_results_vllm.py` |
+| **SGLang** | Stub (registered, not yet implemented) | `process_ctx_results_sglang.py`, `process_gen_results_sglang.py` |
+
+The vLLM and SGLang parsers are scaffolded with the correct interfaces and registered in the parser registry. Setting `engine_type: vllm` or `engine_type: sglang` in a sweep config will resolve the correct parser, but `parse()` and `process()` raise `NotImplementedError` until the log format analysis and metric extraction are implemented. Each stub file contains detailed implementation guidance and TODO markers.
+
 ## Current Limitations
 
-- **TRT-LLM only**: Only the TRT-LLM engine has parser implementations. vLLM and SGLang parsers need to be written.
+- **TRT-LLM only in practice**: vLLM and SGLang parsers are registered but not yet implemented. Log format analysis is needed to complete them.
 - **TP=8 only in practice**: Multi-node decode workers (TP>8) require multiple nodes per worker, which srt-slurm doesn't currently support.
 - **Single-model sweeps**: Each sweep handles one model × one workload (ISL/OSL). Comparing across models requires separate sweeps.
 - **No automatic MTP accept rate measurement**: `mtp_accept_rates` must be provided in the config. A future enhancement could auto-measure these.
@@ -627,7 +641,7 @@ engine_type: vllm  # instead of trtllm
 
 ## Future Improvements
 
-- **vLLM / SGLang parsers**: Implement parser classes for additional inference engines using the existing registry pattern.
+- **vLLM / SGLang parser implementation**: The parser stubs are scaffolded and registered — implement `parse()` and `process()` once log formats are characterised.
 - **Multi-node TP support**: Enable TP>8 with multi-node decode workers when srt-slurm supports it.
 - **Auto MTP accept rate**: Benchmark MTP accept rates as a preliminary phase before the main sweep.
 - **Cross-sweep comparison**: Dashboard tool to overlay results from multiple sweeps (different models, ISL/OSL pairs).

@@ -49,6 +49,10 @@ State is tracked in `sweep_state.json` via `SweepState` (in `state.py`). Phase t
 | `parser_base.py` | Abstract base classes (`CTXLogParser`, `GENLogParser`) + decorator-based registry |
 | `process_ctx_results.py` | TRT-LLM CTX log parser. Registered as `@register_ctx_parser("trtllm")` |
 | `process_gen_results.py` | TRT-LLM GEN log parser. Registered as `@register_gen_parser("trtllm")` |
+| `process_ctx_results_vllm.py` | vLLM CTX parser **stub**. Registered, raises `NotImplementedError` |
+| `process_gen_results_vllm.py` | vLLM GEN parser **stub**. Registered, raises `NotImplementedError` |
+| `process_ctx_results_sglang.py` | SGLang CTX parser **stub**. Registered, raises `NotImplementedError` |
+| `process_gen_results_sglang.py` | SGLang GEN parser **stub**. Registered, raises `NotImplementedError` |
 | `metrics.py` | Rate-matching math (`compute_rate_matching`), SOL vs E2E comparison (`compare_sol_vs_e2e`) |
 | `pareto.py` | Pareto frontier extraction (`extract_pareto_frontier`) |
 | `export.py` | CSV/JSON export of results |
@@ -188,7 +192,16 @@ Always add tests for:
 
 ## Common Tasks
 
-### Adding a New Engine Parser
+### Implementing vLLM or SGLang Parsers
+
+The stubs are already scaffolded and registered. To implement:
+1. Open `process_ctx_results_vllm.py` (or `_sglang.py`) — follow the TODO markers
+2. Implement `parse()`: extract per-iteration entries from the engine's log format
+3. Implement `process()`: filter, aggregate, return `CTXResult` / `GENResult`
+4. Populate `VLLM_MTP_ACCEPT_RATES` / `SGLANG_MTP_ACCEPT_RATES` once measured
+5. Update tests in `test_rate_matching.py` (stub tests already verify registration)
+
+### Adding a Completely New Engine Parser
 
 1. Create `process_ctx_results_<engine>.py` with `@register_ctx_parser("<engine>")`
 2. Create `process_gen_results_<engine>.py` with `@register_gen_parser("<engine>")`

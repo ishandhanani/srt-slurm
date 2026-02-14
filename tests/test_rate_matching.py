@@ -1,8 +1,9 @@
 """Tests for the tools/rate_matching module.
 
 Covers: CTX processing, GEN processing, rate-matching math, Pareto frontier,
-schema validation, config generation, state management, and orchestrator
-resilience (signal handling, reconciliation, atomic saves, detach mode).
+schema validation, config generation, state management, orchestrator
+resilience (signal handling, reconciliation, atomic saves, detach mode),
+and engine parser registration (TRT-LLM, vLLM, SGLang).
 """
 
 from __future__ import annotations
@@ -21,6 +22,14 @@ import pytest
 _RATE_MATCHING_DIR = Path(__file__).resolve().parent.parent / "tools" / "rate_matching"
 if str(_RATE_MATCHING_DIR) not in sys.path:
     sys.path.insert(0, str(_RATE_MATCHING_DIR))
+
+# Import parser modules so they self-register via decorators (same as run_sweep.py)
+import process_ctx_results as _ctx_mod  # noqa: F401
+import process_gen_results as _gen_mod  # noqa: F401
+import process_ctx_results_vllm as _vllm_ctx_mod  # noqa: F401
+import process_gen_results_vllm as _vllm_gen_mod  # noqa: F401
+import process_ctx_results_sglang as _sglang_ctx_mod  # noqa: F401
+import process_gen_results_sglang as _sglang_gen_mod  # noqa: F401
 
 
 # =====================================================================
@@ -1391,3 +1400,193 @@ class TestAddE2E:
         # Should still have 4 (not 6)
         assert len(state.e2e_configs) == 4
         assert len(state.e2e_jobs) == 4
+
+
+# =====================================================================
+# Engine parser registration and stub tests
+# =====================================================================
+
+class TestParserRegistry:
+    """Verify all engine parsers are registered and have correct interfaces."""
+
+    def test_trtllm_ctx_parser_registered(self):
+        from parser_base import get_ctx_parser
+        parser = get_ctx_parser("trtllm")
+        assert parser is not None
+        assert hasattr(parser, "find_log")
+        assert hasattr(parser, "parse")
+        assert hasattr(parser, "process")
+
+    def test_trtllm_gen_parser_registered(self):
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("trtllm")
+        assert parser is not None
+        assert hasattr(parser, "find_log")
+        assert hasattr(parser, "parse")
+        assert hasattr(parser, "process")
+        assert hasattr(parser, "get_mtp_accept_rate")
+        assert hasattr(parser, "process_all_concurrencies")
+
+    def test_vllm_ctx_parser_registered(self):
+        from parser_base import get_ctx_parser
+        parser = get_ctx_parser("vllm")
+        assert parser is not None
+        assert hasattr(parser, "find_log")
+        assert hasattr(parser, "parse")
+        assert hasattr(parser, "process")
+
+    def test_vllm_gen_parser_registered(self):
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("vllm")
+        assert parser is not None
+        assert hasattr(parser, "find_log")
+        assert hasattr(parser, "parse")
+        assert hasattr(parser, "process")
+        assert hasattr(parser, "get_mtp_accept_rate")
+
+    def test_sglang_ctx_parser_registered(self):
+        from parser_base import get_ctx_parser
+        parser = get_ctx_parser("sglang")
+        assert parser is not None
+        assert hasattr(parser, "find_log")
+        assert hasattr(parser, "parse")
+        assert hasattr(parser, "process")
+
+    def test_sglang_gen_parser_registered(self):
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("sglang")
+        assert parser is not None
+        assert hasattr(parser, "find_log")
+        assert hasattr(parser, "parse")
+        assert hasattr(parser, "process")
+        assert hasattr(parser, "get_mtp_accept_rate")
+
+    def test_unknown_engine_raises(self):
+        from parser_base import get_ctx_parser, get_gen_parser
+        with pytest.raises(KeyError, match="No CTX parser registered"):
+            get_ctx_parser("nonexistent_engine")
+        with pytest.raises(KeyError, match="No GEN parser registered"):
+            get_gen_parser("nonexistent_engine")
+
+    def test_all_engines_listed(self):
+        """All three engines should be in the registry."""
+        from parser_base import _CTX_PARSERS, _GEN_PARSERS
+        for engine in ("trtllm", "vllm", "sglang"):
+            assert engine in _CTX_PARSERS, f"CTX parser missing for {engine}"
+            assert engine in _GEN_PARSERS, f"GEN parser missing for {engine}"
+
+
+class TestVllmParserStubs:
+    """Verify vLLM parser stubs raise NotImplementedError with helpful messages."""
+
+    def test_ctx_parse_raises(self, tmp_path):
+        from parser_base import get_ctx_parser
+        parser = get_ctx_parser("vllm")
+        with pytest.raises(NotImplementedError, match="vLLM CTX log parsing"):
+            parser.parse(tmp_path / "dummy.log")
+
+    def test_ctx_process_raises(self):
+        from parser_base import get_ctx_parser
+        parser = get_ctx_parser("vllm")
+        with pytest.raises(NotImplementedError, match="vLLM CTX result processing"):
+            parser.process([], isl=1024)
+
+    def test_gen_parse_raises(self, tmp_path):
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("vllm")
+        with pytest.raises(NotImplementedError, match="vLLM GEN log parsing"):
+            parser.parse(tmp_path / "dummy.log")
+
+    def test_gen_process_raises(self):
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("vllm")
+        with pytest.raises(NotImplementedError, match="vLLM GEN result processing"):
+            parser.process([], concurrency=32, mode="tep")
+
+    def test_ctx_find_log_returns_none_on_empty_dir(self, tmp_path):
+        from parser_base import get_ctx_parser
+        parser = get_ctx_parser("vllm")
+        assert parser.find_log(tmp_path) is None
+
+    def test_gen_find_log_returns_none_on_empty_dir(self, tmp_path):
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("vllm")
+        assert parser.find_log(tmp_path) is None
+
+    def test_gen_mtp_accept_rate_stp(self):
+        """STP (mtp_num=0) always returns 1.0."""
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("vllm")
+        assert parser.get_mtp_accept_rate(1024, 0) == 1.0
+
+    def test_gen_mtp_accept_rate_with_override(self):
+        """MTP accept rate uses overrides from sweep YAML."""
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("vllm")
+        rate = parser.get_mtp_accept_rate(1024, 3, overrides={3: 2.56})
+        assert rate == 2.56
+
+    def test_gen_mtp_accept_rate_no_data_raises(self):
+        """MTP without overrides or built-in data raises ValueError."""
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("vllm")
+        with pytest.raises(ValueError, match="No vLLM MTP accept rate"):
+            parser.get_mtp_accept_rate(1024, 3)
+
+
+class TestSglangParserStubs:
+    """Verify SGLang parser stubs raise NotImplementedError with helpful messages."""
+
+    def test_ctx_parse_raises(self, tmp_path):
+        from parser_base import get_ctx_parser
+        parser = get_ctx_parser("sglang")
+        with pytest.raises(NotImplementedError, match="SGLang CTX log parsing"):
+            parser.parse(tmp_path / "dummy.log")
+
+    def test_ctx_process_raises(self):
+        from parser_base import get_ctx_parser
+        parser = get_ctx_parser("sglang")
+        with pytest.raises(NotImplementedError, match="SGLang CTX result processing"):
+            parser.process([], isl=1024)
+
+    def test_gen_parse_raises(self, tmp_path):
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("sglang")
+        with pytest.raises(NotImplementedError, match="SGLang GEN log parsing"):
+            parser.parse(tmp_path / "dummy.log")
+
+    def test_gen_process_raises(self):
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("sglang")
+        with pytest.raises(NotImplementedError, match="SGLang GEN result processing"):
+            parser.process([], concurrency=32, mode="tep")
+
+    def test_ctx_find_log_returns_none_on_empty_dir(self, tmp_path):
+        from parser_base import get_ctx_parser
+        parser = get_ctx_parser("sglang")
+        assert parser.find_log(tmp_path) is None
+
+    def test_gen_find_log_returns_none_on_empty_dir(self, tmp_path):
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("sglang")
+        assert parser.find_log(tmp_path) is None
+
+    def test_gen_mtp_accept_rate_stp(self):
+        """STP (mtp_num=0) always returns 1.0."""
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("sglang")
+        assert parser.get_mtp_accept_rate(1024, 0) == 1.0
+
+    def test_gen_mtp_accept_rate_with_override(self):
+        """MTP accept rate uses overrides from sweep YAML."""
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("sglang")
+        rate = parser.get_mtp_accept_rate(1024, 3, overrides={3: 2.56})
+        assert rate == 2.56
+
+    def test_gen_mtp_accept_rate_no_data_raises(self):
+        """MTP without overrides or built-in data raises ValueError."""
+        from parser_base import get_gen_parser
+        parser = get_gen_parser("sglang")
+        with pytest.raises(ValueError, match="No SGLang MTP accept rate"):
+            parser.get_mtp_accept_rate(1024, 3)
