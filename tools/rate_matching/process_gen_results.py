@@ -48,11 +48,10 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 
-from parser_base import GENLogParser, GENResult
+from parser_base import GENLogParser, GENResult, register_gen_parser
 
 # TRT-LLM per-iteration log format
 LOG_PATTERN = re.compile(
@@ -126,7 +125,7 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def find_decode_log(logs_dir: Path) -> Optional[Path]:
+def find_decode_log(logs_dir: Path) -> Path | None:
     """Find decode worker log file in the logs directory."""
     patterns = [
         '*_decode_w*.out',  # Disaggregated decode worker
@@ -188,7 +187,7 @@ def process_gen_data(
     concurrency: int = 32,
     mode: str = 'tep',
     tp: int = 8,
-    ep_rank: Optional[int] = None,
+    ep_rank: int | None = None,
     mtp: int = 0,
     isl: int = 1024,
     num_gpus: int = 8,
@@ -355,7 +354,7 @@ def process_gen_data_all_concurrencies(
     concurrency_list: list[int],
     mode: str = 'tep',
     tp: int = 8,
-    ep_rank: Optional[int] = None,
+    ep_rank: int | None = None,
     mtp: int = 0,
     isl: int = 1024,
     num_gpus: int = 8,
@@ -394,6 +393,7 @@ def process_gen_data_all_concurrencies(
 # Class-based interface for the pipeline
 # ---------------------------------------------------------------------------
 
+@register_gen_parser("trtllm")
 class TrtllmGENLogParser(GENLogParser):
     """TRT-LLM implementation of the GEN log parser.
 
@@ -405,7 +405,7 @@ class TrtllmGENLogParser(GENLogParser):
     naturally segments iterations by concurrency.
     """
 
-    def find_log(self, logs_dir: Path) -> Optional[Path]:
+    def find_log(self, logs_dir: Path) -> Path | None:
         return find_decode_log(logs_dir)
 
     def parse(self, log_file: Path, verbose: bool = False) -> list[dict]:
@@ -418,7 +418,7 @@ class TrtllmGENLogParser(GENLogParser):
         mode: str,
         *,
         tp: int = 8,
-        ep_rank: Optional[int] = None,
+        ep_rank: int | None = None,
         mtp: int = 0,
         isl: int = 1024,
         num_gpus: int = 8,

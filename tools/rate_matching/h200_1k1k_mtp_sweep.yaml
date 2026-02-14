@@ -111,7 +111,7 @@ settings:
   parallel_submissions: true
 
   e2e_validation:
-    concurrency_multipliers: [1.0, 1.05]
+    concurrency_multipliers: [0.95, 1.0, 1.05]
     tpot_tolerance_pct: 15.0
     throughput_tolerance_pct: 20.0
     ttft_constraint_ms: 5000.0

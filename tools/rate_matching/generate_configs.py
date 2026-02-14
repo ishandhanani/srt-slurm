@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -224,7 +224,7 @@ def _format_concurrency(conc) -> str:
 
 def generate_ctx_sol_config(
     cfg: RateMatchingSweepConfig,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
 ) -> dict:
     """Generate CTX-only SOL benchmark config.
 
@@ -298,6 +298,7 @@ def generate_ctx_sol_config(
             "osl": 1,  # CTX-only: minimal output
             "concurrencies": str(cfg.ctx_config.benchmark_concurrency),
             "req_rate": "inf",
+            "random_range_ratio": 1.0,  # CTX-only: use exact ISL, no variance
         },
         "frontend": {
             "type": "dynamo",
@@ -318,7 +319,7 @@ def generate_ctx_sol_config(
 def generate_gen_sol_config(
     cfg: RateMatchingSweepConfig,
     gen_item: GenSweepItem,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
 ) -> dict:
     """Generate GEN-only SOL benchmark config.
 
@@ -423,7 +424,7 @@ def generate_e2e_config(
     cfg: RateMatchingSweepConfig,
     pareto_point: dict,
     concurrency_multiplier: float = 1.0,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
 ) -> dict:
     """Generate E2E validation config from a Pareto optimal point.
 

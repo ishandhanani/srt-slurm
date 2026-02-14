@@ -11,7 +11,7 @@ matching srt-slurm's native sweep semantics.
 from __future__ import annotations
 
 import itertools
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Union
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
@@ -43,7 +43,7 @@ class WorkloadConfig(BaseModel):
             "avg_random_ratio = (random_ratio + 1) / 2"
         ),
     )
-    mtp_accept_rates: Optional[dict[int, float]] = Field(
+    mtp_accept_rates: dict[int, float] | None = Field(
         default=None,
         description=(
             "MTP accept rates: effective tokens per decode step per user. "
@@ -84,9 +84,9 @@ class CTXConfig(BaseModel):
         default=32,
         description="sa-bench concurrency for CTX-only run (high enough to saturate prefill).",
     )
-    max_batch_size: Optional[int] = Field(default=None, description="Override prefill max_batch_size")
-    max_num_tokens: Optional[int] = Field(default=None, description="Override prefill max_num_tokens")
-    free_gpu_memory_fraction: Optional[float] = Field(default=None, description="Override prefill KV cache fraction")
+    max_batch_size: int | None = Field(default=None, description="Override prefill max_batch_size")
+    max_num_tokens: int | None = Field(default=None, description="Override prefill max_num_tokens")
+    free_gpu_memory_fraction: float | None = Field(default=None, description="Override prefill KV cache fraction")
 
 
 # ---------------------------------------------------------------------------
@@ -111,11 +111,11 @@ class GenSweepItem(BaseModel):
     )
     tp_size: int = Field(default=8, description="Tensor parallelism size")
     mtp_num: int = Field(default=0, description="MTP layers (0 = STP, 1+ = MTP)")
-    max_num_tokens: Optional[int] = Field(
+    max_num_tokens: int | None = Field(
         default=None,
         description="Decode max_num_tokens. Defaults to batch_size if not set.",
     )
-    gpu_memory_fraction: Optional[float] = Field(
+    gpu_memory_fraction: float | None = Field(
         default=None,
         description="Decode KV cache GPU memory fraction. Default depends on workload.",
     )
@@ -202,7 +202,7 @@ class E2EValidationSettings(BaseModel):
         default=20.0,
         description="Throughput diff %% threshold for pass/fail.",
     )
-    ttft_constraint_ms: Optional[float] = Field(
+    ttft_constraint_ms: float | None = Field(
         default=5000.0,
         description=(
             "Soft TTFT constraint in ms. Pareto points exceeding this are flagged. "
@@ -228,6 +228,10 @@ class SweepSettings(BaseModel):
             "Parallel is faster on large clusters."
         ),
     )
+    max_poll_time: int = Field(
+        default=14400,
+        description="Maximum seconds to poll a single job before treating it as failed (default 4h)",
+    )
     e2e_validation: E2EValidationSettings = Field(
         default_factory=E2EValidationSettings,
         description="E2E validation parameters",
@@ -244,10 +248,10 @@ class BackendConfig(BaseModel):
     If not provided, generate_configs.py derives sensible defaults from
     the workload, mode, and existing H200 recipes.
     """
-    prefill_environment: Optional[dict[str, str]] = None
-    decode_environment: Optional[dict[str, str]] = None
-    trtllm_prefill_overrides: Optional[dict[str, Any]] = None
-    trtllm_decode_overrides: Optional[dict[str, Any]] = None
+    prefill_environment: dict[str, str] | None = None
+    decode_environment: dict[str, str] | None = None
+    trtllm_prefill_overrides: dict[str, Any] | None = None
+    trtllm_decode_overrides: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

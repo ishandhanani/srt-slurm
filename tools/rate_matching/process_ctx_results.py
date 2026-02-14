@@ -27,17 +27,17 @@ Methodology:
     7. Calculate: request_rate = sum(num_ctx_requests) / sum(prev_device_step_time)
 """
 
+from __future__ import annotations
+
 import argparse
-import glob
 import json
 import re
 import sys
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 
-from parser_base import CTXLogParser, CTXResult
+from parser_base import CTXLogParser, CTXResult, register_ctx_parser
 
 # TRT-LLM per-iteration log format
 LOG_PATTERN = re.compile(
@@ -75,7 +75,7 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def get_ctx_request_threshold(max_batch_size: Optional[int] = None) -> int:
+def get_ctx_request_threshold(max_batch_size: int | None = None) -> int:
     """Get minimum num_ctx_requests to keep an iteration.
 
     Only fully-packed prefill iterations (where num_ctx_requests >=
@@ -95,7 +95,7 @@ def get_ctx_request_threshold(max_batch_size: Optional[int] = None) -> int:
     return 1
 
 
-def find_prefill_log(logs_dir: Path) -> Optional[Path]:
+def find_prefill_log(logs_dir: Path) -> Path | None:
     """Find prefill worker log file in the logs directory."""
     # Try different patterns
     patterns = [
@@ -172,7 +172,7 @@ def process_ctx_data(
     isl: int,
     ctx_dep: bool = True,
     verbose: bool = False,
-    max_batch_size: Optional[int] = None,
+    max_batch_size: int | None = None,
 ) -> dict:
     """Process CTX log data using the rate-matching methodology.
 
@@ -237,8 +237,8 @@ def process_ctx_data(
         if verbose:
             print(f"After removing first 2 and last 2 iterations: {len(df_filtered)} entries")
     
-    if df_filtered.empty or len(df_filtered) < 5:
-        return {'error': f'Insufficient data after filtering: {len(df_filtered)} entries'}
+    if df_filtered.empty or len(df_filtered) < 15:
+        return {'error': f'Insufficient data after filtering: {len(df_filtered)} entries (minimum 15 required)'}
     
     # Step 5: Filter outliers using median ±20%
     prev_device_step_time_median = df_filtered['prev_device_step_time_ms'].median()
@@ -256,8 +256,8 @@ def process_ctx_data(
         print(f"Filtered {before_count - after_count} outliers (median ±20%)")
         print(f"Final dataset: {len(df_filtered)} entries")
     
-    if df_filtered.empty or len(df_filtered) < 5:
-        return {'error': f'Insufficient data after outlier filtering: {len(df_filtered)} entries'}
+    if df_filtered.empty or len(df_filtered) < 15:
+        return {'error': f'Insufficient data after outlier filtering: {len(df_filtered)} entries (minimum 15 required)'}
     
     # Step 6: Calculate metrics
     # Convert ms to seconds for calculations
@@ -301,6 +301,7 @@ def process_ctx_data(
 # Class-based interface for the pipeline
 # ---------------------------------------------------------------------------
 
+@register_ctx_parser("trtllm")
 class TrtllmCTXLogParser(CTXLogParser):
     """TRT-LLM implementation of the CTX log parser.
 
@@ -308,7 +309,7 @@ class TrtllmCTXLogParser(CTXLogParser):
     and extracts request_rate, ctx_throughput, and device step time metrics.
     """
 
-    def find_log(self, logs_dir: Path) -> Optional[Path]:
+    def find_log(self, logs_dir: Path) -> Path | None:
         return find_prefill_log(logs_dir)
 
     def parse(self, log_file: Path, verbose: bool = False) -> list[dict]:
@@ -320,7 +321,7 @@ class TrtllmCTXLogParser(CTXLogParser):
         isl: int,
         *,
         verbose: bool = False,
-        max_batch_size: Optional[int] = None,
+        max_batch_size: int | None = None,
     ) -> CTXResult:
         return process_ctx_data(  # type: ignore[return-value]
             data, isl=isl, verbose=verbose, max_batch_size=max_batch_size,

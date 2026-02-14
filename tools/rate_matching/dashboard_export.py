@@ -1,5 +1,4 @@
-"""
-Dashboard export: CSV/JSON data + interactive Plotly HTML charts.
+"""Dashboard export: CSV/JSON data + interactive Plotly HTML charts.
 
 Charts:
   1. Pareto frontier: Interactivity vs Throughput/GPU (all configs + frontier)
@@ -15,7 +14,6 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Optional
 
 
 def export_rate_matching_results(sweep_state: dict, output_dir: str) -> None:
@@ -88,7 +86,7 @@ def _write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
 def generate_charts(
     sweep_state: dict,
     output_dir: str,
-    sweep_name: Optional[str] = None,
+    sweep_name: str | None = None,
 ) -> list[str]:
     """Generate interactive HTML charts from sweep results.
 

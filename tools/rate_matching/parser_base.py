@@ -1,5 +1,4 @@
-"""
-Abstract base classes for engine-specific log parsers.
+"""Abstract base classes and registry for engine-specific log parsers.
 
 The rate-matching pipeline needs two parsers per engine:
   - CTXLogParser: extracts prefill SOL metrics from worker logs
@@ -12,13 +11,33 @@ TypedDicts below define those contracts.
 Implementations:
   - TRT-LLM: process_ctx_results.TrtllmCTXLogParser
              process_gen_results.TrtllmGENLogParser
+
+Adding a new engine parser
+--------------------------
+1. Create a new module, e.g. ``process_ctx_results_vllm.py``.
+2. Subclass ``CTXLogParser`` and/or ``GENLogParser``.
+3. Decorate each class with the appropriate registry decorator::
+
+       from parser_base import CTXLogParser, CTXResult, register_ctx_parser
+
+       @register_ctx_parser("vllm")
+       class VllmCTXLogParser(CTXLogParser):
+           def find_log(self, logs_dir): ...
+           def parse(self, log_file, verbose=False): ...
+           def process(self, data, isl, *, verbose=False, max_batch_size=None): ...
+
+4. Import the new module in ``run_sweep.py`` (alongside the existing
+   ``import process_ctx_results``) so the decorator runs at startup.
+5. Set ``engine_type: "vllm"`` in the sweep YAML.  The orchestrator calls
+   ``get_ctx_parser(cfg.engine_type)`` / ``get_gen_parser(cfg.engine_type)``
+   to obtain the correct parser at runtime.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +107,7 @@ class CTXLogParser(ABC):
     """
 
     @abstractmethod
-    def find_log(self, logs_dir: Path) -> Optional[Path]:
+    def find_log(self, logs_dir: Path) -> Path | None:
         """Locate the CTX worker log file within a job's logs directory.
 
         Returns None if no matching log is found.
@@ -110,7 +129,7 @@ class CTXLogParser(ABC):
         isl: int,
         *,
         verbose: bool = False,
-        max_batch_size: Optional[int] = None,
+        max_batch_size: int | None = None,
     ) -> CTXResult:
         """Process parsed CTX log entries into SOL metrics.
 
@@ -141,7 +160,7 @@ class GENLogParser(ABC):
     """
 
     @abstractmethod
-    def find_log(self, logs_dir: Path) -> Optional[Path]:
+    def find_log(self, logs_dir: Path) -> Path | None:
         """Locate the decode worker log file within a job's logs directory.
 
         Returns None if no matching log is found.
@@ -164,7 +183,7 @@ class GENLogParser(ABC):
         mode: str,
         *,
         tp: int = 8,
-        ep_rank: Optional[int] = None,
+        ep_rank: int | None = None,
         mtp: int = 0,
         isl: int = 1024,
         num_gpus: int = 8,
@@ -210,7 +229,7 @@ class GENLogParser(ABC):
         mode: str,
         *,
         tp: int = 8,
-        ep_rank: Optional[int] = None,
+        ep_rank: int | None = None,
         mtp: int = 0,
         isl: int = 1024,
         num_gpus: int = 8,
@@ -240,3 +259,51 @@ class GENLogParser(ABC):
                 mtp_accept_rate_overrides=mtp_accept_rate_overrides,
             )
         return results
+
+
+# ---------------------------------------------------------------------------
+# Parser registry
+# ---------------------------------------------------------------------------
+
+_CTX_PARSERS: dict[str, type[CTXLogParser]] = {}
+_GEN_PARSERS: dict[str, type[GENLogParser]] = {}
+
+
+def register_ctx_parser(engine: str):
+    """Class decorator: register a CTXLogParser implementation for *engine*."""
+    def decorator(cls: type[CTXLogParser]) -> type[CTXLogParser]:
+        _CTX_PARSERS[engine] = cls
+        return cls
+    return decorator
+
+
+def register_gen_parser(engine: str):
+    """Class decorator: register a GENLogParser implementation for *engine*."""
+    def decorator(cls: type[GENLogParser]) -> type[GENLogParser]:
+        _GEN_PARSERS[engine] = cls
+        return cls
+    return decorator
+
+
+def get_ctx_parser(engine: str) -> CTXLogParser:
+    """Instantiate the registered CTXLogParser for *engine*.
+
+    Raises ``KeyError`` if no parser is registered for that engine.
+    """
+    try:
+        return _CTX_PARSERS[engine]()
+    except KeyError:
+        available = ", ".join(sorted(_CTX_PARSERS)) or "(none)"
+        raise KeyError(f"No CTX parser registered for engine '{engine}'. Available: {available}") from None
+
+
+def get_gen_parser(engine: str) -> GENLogParser:
+    """Instantiate the registered GENLogParser for *engine*.
+
+    Raises ``KeyError`` if no parser is registered for that engine.
+    """
+    try:
+        return _GEN_PARSERS[engine]()
+    except KeyError:
+        available = ", ".join(sorted(_GEN_PARSERS)) or "(none)"
+        raise KeyError(f"No GEN parser registered for engine '{engine}'. Available: {available}") from None

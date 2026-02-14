@@ -21,13 +21,10 @@ Usage (via CLI):
 from __future__ import annotations
 
 import json
-import os
-import subprocess
+import signal
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
 
 # Force line-buffered stdout so output appears immediately in non-TTY contexts
 if hasattr(sys.stdout, "reconfigure"):
@@ -40,278 +37,162 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+from export import _export_results, _load_sa_bench_result
 from generate_configs import (
     generate_ctx_sol_config,
+    generate_e2e_config,
     generate_e2e_configs_from_pareto,
     generate_gen_sol_config,
+    get_recipe_filename,
 )
 from metrics import compare_sol_vs_e2e, compute_rate_matching
 from pareto import extract_pareto_frontier
-from parser_base import CTXLogParser, GENLogParser
-from process_ctx_results import TrtllmCTXLogParser
-from process_gen_results import TrtllmGENLogParser
+from parser_base import get_ctx_parser, get_gen_parser
+# Import parser modules so they self-register via decorators.
+import process_ctx_results as _ctx_mod  # noqa: F401
+import process_gen_results as _gen_mod  # noqa: F401
 from schema import RateMatchingSweepConfig, load_sweep_config
+from slurm_helpers import (
+    _submit_and_poll,
+    _submit_poll_parallel,
+    get_job_output_dir,
+)
+from state import SweepState
 
-# Engine-specific parsers.  Swap these for vLLM/SGLang support.
-_ctx_parser: CTXLogParser = TrtllmCTXLogParser()
-_gen_parser: GENLogParser = TrtllmGENLogParser()
 
-
-# ---------------------------------------------------------------------------
-# State management
-# ---------------------------------------------------------------------------
-
-class SweepState:
-    """Mutable sweep state, serialised to JSON after each phase."""
-
-    def __init__(self):
-        self.sweep_name: str = ""
-        self.sweep_config_path: str = ""
-        self.output_dir: str = ""
-        self.created_at: str = ""
-        self.last_updated: str = ""
-        self.phase: str = "init"  # init, ctx, gen, rate_match, pareto, e2e, complete
-
-        # Job tracking
-        self.ctx_job: dict = {}
-        self.gen_jobs: list[dict] = []
-        self.ctx_result: dict = {}
-        self.gen_results: list[dict] = []
-
-        # Analysis
-        self.rate_matching_results: list[dict] = []
-        self.pareto_frontier: list[dict] = []
-
-        # E2E
-        self.e2e_configs: list[dict] = []  # list of {config_path, pareto_rank, multiplier, ...}
-        self.e2e_jobs: list[dict] = []
-        self.e2e_results: list[dict] = []
-        self.sol_vs_e2e: list[dict] = []
-
-    def save(self, path: str | None = None):
-        target = path or str(Path(self.output_dir) / "sweep_state.json")
-        self.last_updated = datetime.now().isoformat()
-        with open(target, "w") as f:
-            json.dump(self.__dict__, f, indent=2, default=str)
-
-    @classmethod
-    def load(cls, path: str) -> "SweepState":
-        state = cls()
-        with open(path) as f:
-            data = json.load(f)
-        for k, v in data.items():
-            if hasattr(state, k):
-                setattr(state, k, v)
-        return state
+def _get_parsers(cfg: RateMatchingSweepConfig):
+    """Return (ctx_parser, gen_parser) for the configured engine."""
+    return get_ctx_parser(cfg.engine_type), get_gen_parser(cfg.engine_type)
 
 
 # ---------------------------------------------------------------------------
-# SLURM helpers (uses srtctl apply)
+# Signal handling — save state on SIGHUP / SIGTERM / SIGINT
 # ---------------------------------------------------------------------------
 
-def submit_job(config_path: str, verbose: bool = True) -> str:
-    """Submit a job via `srtctl apply -f <config>` and return the SLURM job ID."""
-    cmd = ["srtctl", "apply", "-f", config_path]
-    if verbose:
-        print(f"  Submitting: srtctl apply -f {config_path}")
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    stdout = result.stdout.strip()
-    stderr = result.stderr.strip()
-
-    if verbose and stdout:
-        # Print the srtctl output (includes tracking commands)
-        for line in stdout.split("\n"):
-            print(f"    {line}")
-
-    # Parse job ID from sbatch output embedded in srtctl output
-    # srtctl prints "Job XXXXX submitted!" or similar
-    job_id = None
-    for line in stdout.split("\n"):
-        # Look for "Job NNNNN submitted" pattern
-        if "job" in line.lower() and "submitted" in line.lower():
-            for word in line.split():
-                if word.isdigit():
-                    job_id = word
-                    break
-        # Also check raw sbatch output "Submitted batch job NNNNN"
-        if "submitted batch job" in line.lower():
-            parts = line.strip().split()
-            if parts:
-                job_id = parts[-1]
-
-    if job_id is None:
-        raise RuntimeError(
-            f"Failed to parse job ID from srtctl output.\n"
-            f"stdout: {stdout}\nstderr: {stderr}"
-        )
-
-    return job_id
+# Module-level reference set by run_sweep() so signal handlers can save state.
+_active_state: SweepState | None = None
 
 
-def poll_job(job_id: str, poll_interval: int = 300, verbose: bool = True) -> str:
-    """Poll SLURM job until completion. Returns final status."""
-    while True:
+def _graceful_shutdown(signum: int, frame) -> None:  # noqa: ANN001
+    """Save sweep state and exit cleanly on termination signals.
+
+    SIGHUP is sent when an SSH session disconnects.  SIGTERM is the default
+    ``kill`` signal.  SIGINT is Ctrl-C.  In all cases we persist the current
+    state so ``--resume`` can pick up where we left off.
+    """
+    sig_name = signal.Signals(signum).name
+    state = _active_state
+    if state is not None:
         try:
-            result = subprocess.run(
-                ["squeue", "--job", job_id, "--noheader", "--format=%T"],
-                capture_output=True, text=True,
+            state.save()
+            print(
+                f"\n[{sig_name}] State saved to {state.output_dir}/sweep_state.json",
+                file=sys.stderr,
             )
-            status = result.stdout.strip()
-        except Exception:
-            status = ""
+        except Exception as exc:
+            print(f"\n[{sig_name}] Failed to save state: {exc}", file=sys.stderr)
+    else:
+        print(f"\n[{sig_name}] No active state to save.", file=sys.stderr)
 
-        if not status:
-            # Job no longer in queue -- check sacct for final status
-            try:
-                result = subprocess.run(
-                    ["sacct", "-j", job_id, "--format=State", "--noheader", "--parsable2"],
-                    capture_output=True, text=True,
-                )
-                lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
-                if lines:
-                    status = lines[0]
-                else:
-                    status = "COMPLETED"
-            except Exception:
-                status = "COMPLETED"
-            break
-
-        if status in ("COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL"):
-            break
-
-        if verbose:
-            print(f"  Job {job_id}: {status} (next check in {poll_interval}s)")
-        time.sleep(poll_interval)
-
-    if verbose:
-        print(f"  Job {job_id}: {status}")
-    return status
+    print(
+        f"[{sig_name}] Orchestrator interrupted.  SLURM jobs already submitted "
+        "will continue running.\nResume with:  srtctl-rate-match run --resume "
+        "-o <output_dir>",
+        file=sys.stderr,
+    )
+    sys.exit(128 + signum)
 
 
-def get_job_output_dir(job_id: str) -> str:
-    """Get the output directory for a SLURM job."""
-    # srt-slurm stores outputs in <srtctl_root>/outputs/<job_id>/
-    srtctl_root = Path(__file__).resolve().parent.parent.parent
-    output_dir = srtctl_root / "outputs" / str(job_id)
-    return str(output_dir)
+def _install_signal_handlers() -> None:
+    """Register graceful shutdown handlers for common termination signals."""
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, _graceful_shutdown)
+    # SIGHUP is not available on Windows
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, _graceful_shutdown)
 
 
-def _submit_and_poll(
-    job_dict: dict,
-    config_path: str,
-    poll_interval: int,
-    max_retries: int,
-    state: "SweepState",
+# ---------------------------------------------------------------------------
+# Stale-job reconciliation
+# ---------------------------------------------------------------------------
+
+_STALE_STATUSES = ("running", "submitted", "pending")
+
+
+def _reconcile_stale_jobs(
+    state: SweepState,
+    ctx_parser=None,
+    gen_parser=None,
     verbose: bool = True,
-) -> str:
-    """Submit a SLURM job, poll to completion, and retry on failure.
+) -> int:
+    """Reconcile jobs stuck at stale statuses by checking for results on disk.
 
-    This is the common submit -> poll -> retry loop used by CTX, GEN, and
-    E2E phases.  On failure the job is resubmitted up to *max_retries* times
-    (total attempts = 1 + max_retries).  Each attempt's metadata is appended
-    to ``job_dict["retry_history"]``.
+    When the orchestrator is interrupted (e.g. SSH disconnect), SLURM jobs
+    continue running and produce results, but ``sweep_state.json`` still shows
+    them as ``"running"``.  This function checks the output directory of each
+    stale job and promotes it to ``"completed"`` if results exist on disk.
 
     Args:
-        job_dict: Mutable dict from ``state.ctx_job``, ``state.gen_jobs[i]``,
-            or ``state.e2e_jobs[i]``.  Updated in-place with ``job_id``,
-            ``status``, ``output_dir``, timestamps, and ``retry_history``.
-        config_path: Path to the srt-slurm YAML config to submit.
-        poll_interval: Seconds between ``squeue`` polls.
-        max_retries: Maximum number of *retries* (not including the first
-            attempt).
-        state: The parent ``SweepState`` -- ``state.save()`` is called after
-            each status change so progress is durable.
-        verbose: Print progress.
+        state: The ``SweepState`` to reconcile — mutated in place.
+        ctx_parser: CTX log parser (needed to verify CTX logs exist).
+        gen_parser: GEN log parser (needed to verify GEN logs exist).
+        verbose: Print reconciliation details.
 
     Returns:
-        Final SLURM status string (e.g. ``"COMPLETED"``).
-
-    Raises:
-        RuntimeError: If the job fails after all retries are exhausted.
+        Number of jobs reconciled.
     """
-    if "retry_history" not in job_dict:
-        job_dict["retry_history"] = []
+    reconciled = 0
 
-    attempts = 0
-    max_attempts = 1 + max_retries
-
-    while attempts < max_attempts:
-        attempts += 1
-        attempt_label = f"(attempt {attempts}/{max_attempts})" if max_attempts > 1 else ""
-
-        # Submit (skip if already running from a prior resume)
-        if not job_dict.get("job_id") or job_dict.get("status") in ("failed", "pending"):
-            try:
-                job_id = submit_job(config_path, verbose=verbose)
-            except RuntimeError as exc:
-                if verbose:
-                    print(f"  Submit failed {attempt_label}: {exc}")
-                job_dict["retry_history"].append({
-                    "attempt": attempts,
-                    "event": "submit_failed",
-                    "error": str(exc),
-                    "time": datetime.now().isoformat(),
-                })
-                state.save()
-                if attempts < max_attempts:
-                    if verbose:
-                        print(f"  Retrying in {poll_interval}s...")
-                    time.sleep(poll_interval)
-                    continue
-                raise RuntimeError(
-                    f"Job submission failed after {attempts} attempt(s): {exc}"
-                ) from exc
-
-            job_dict["job_id"] = int(job_id)
-            job_dict["submit_time"] = datetime.now().isoformat()
-            job_dict["status"] = "running"
-            job_dict["output_dir"] = get_job_output_dir(job_id)
-            job_dict["retry_history"].append({
-                "attempt": attempts,
-                "event": "submitted",
-                "job_id": int(job_id),
-                "time": datetime.now().isoformat(),
-            })
-            state.save()
-
-        # Poll
-        status = poll_job(str(job_dict["job_id"]), poll_interval, verbose=verbose)
-        is_success = "COMPLETED" in status.upper()
-        job_dict["status"] = "completed" if is_success else "failed"
-        job_dict["complete_time"] = datetime.now().isoformat()
-
-        job_dict["retry_history"].append({
-            "attempt": attempts,
-            "event": "completed" if is_success else "failed",
-            "job_id": job_dict["job_id"],
-            "slurm_status": status,
-            "time": datetime.now().isoformat(),
-        })
-        state.save()
-
-        if is_success:
-            return status
-
-        # Failed -- retry?
-        if attempts < max_attempts:
+    # --- CTX job ---
+    ctx = state.ctx_job
+    if ctx.get("status") in _STALE_STATUSES and ctx.get("job_id"):
+        out_dir = ctx.get(
+            "output_dir",
+            get_job_output_dir(str(ctx["job_id"]), srtctl_root=state.srtctl_root),
+        )
+        logs_dir = Path(out_dir) / "logs"
+        has_log = ctx_parser and ctx_parser.find_log(logs_dir) is not None
+        if has_log:
+            ctx["status"] = "completed"
+            ctx["output_dir"] = out_dir
+            reconciled += 1
             if verbose:
-                print(
-                    f"  Job {job_dict['job_id']} failed ({status}) {attempt_label}. "
-                    f"Retrying..."
-                )
-            # Clear job_id so the next iteration submits a fresh job
-            job_dict["job_id"] = None
-            job_dict["status"] = "pending"
-            state.save()
-        else:
-            raise RuntimeError(
-                f"Job failed with status {status} after {attempts} attempt(s). "
-                f"Config: {config_path}"
-            )
+                print(f"  Reconciled CTX job {ctx['job_id']} (logs found on disk)")
 
-    # Should not reach here, but just in case
-    return status  # type: ignore[possibly-undefined]
+    # --- GEN jobs ---
+    for gj in state.gen_jobs:
+        if gj.get("status") in _STALE_STATUSES and gj.get("job_id"):
+            out_dir = gj.get(
+                "output_dir",
+                get_job_output_dir(str(gj["job_id"]), srtctl_root=state.srtctl_root),
+            )
+            logs_dir = Path(out_dir) / "logs"
+            has_log = gen_parser and gen_parser.find_log(logs_dir) is not None
+            if has_log:
+                gj["status"] = "completed"
+                gj["output_dir"] = out_dir
+                reconciled += 1
+                if verbose:
+                    print(f"  Reconciled GEN job {gj['job_id']} (logs found on disk)")
+
+    # --- E2E jobs ---
+    for ej in state.e2e_jobs:
+        if ej.get("status") in _STALE_STATUSES and ej.get("job_id"):
+            out_dir = ej.get(
+                "output_dir",
+                get_job_output_dir(str(ej["job_id"]), srtctl_root=state.srtctl_root),
+            )
+            sa_result = _load_sa_bench_result(out_dir)
+            if sa_result is not None:
+                ej["status"] = "completed"
+                ej["output_dir"] = out_dir
+                reconciled += 1
+                if verbose:
+                    print(f"  Reconciled E2E job {ej['job_id']} (results found on disk)")
+
+    if reconciled:
+        state.save()
+    return reconciled
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +289,8 @@ def phase2_ctx_sol(
     verbose: bool = True,
 ) -> None:
     """Phase 2: Submit CTX-only SOL, poll, process results."""
+    ctx_parser, _ = _get_parsers(cfg)
+
     if verbose:
         print("\n" + "=" * 60)
         print("PHASE 2: Running CTX-only SOL benchmark")
@@ -433,17 +316,18 @@ def phase2_ctx_sol(
         max_retries=cfg.settings.max_retries,
         state=state,
         verbose=verbose,
+        max_poll_time=cfg.settings.max_poll_time,
     )
 
     # Process results
     if verbose:
         print("  Processing CTX results...")
     logs_dir = Path(ctx_job["output_dir"]) / "logs"
-    log_file = _ctx_parser.find_log(logs_dir)
+    log_file = ctx_parser.find_log(logs_dir)
     if log_file is None:
         raise RuntimeError(f"No prefill log found in {logs_dir}")
 
-    data = _ctx_parser.parse(log_file, verbose=False)
+    data = ctx_parser.parse(log_file, verbose=False)
     if not data:
         raise RuntimeError(f"No data parsed from {log_file}")
 
@@ -451,7 +335,7 @@ def phase2_ctx_sol(
     # num_ctx_requests threshold matches the actual deployed batch size
     # (GPU-agnostic -- works for H200, GB200, etc.).
     ctx_mbs = ctx_job.get("max_batch_size")
-    ctx_result = _ctx_parser.process(
+    ctx_result = ctx_parser.process(
         data, isl=cfg.workload.isl, verbose=False, max_batch_size=ctx_mbs,
     )
     if "error" in ctx_result:
@@ -474,6 +358,8 @@ def phase3_gen_sol(
     verbose: bool = True,
 ) -> None:
     """Phase 3: Submit GEN-only SOL jobs, poll, process results."""
+    _, gen_parser = _get_parsers(cfg)
+
     if verbose:
         parallel = cfg.settings.parallel_submissions
         mode = "parallel" if parallel else "serialised"
@@ -499,57 +385,15 @@ def phase3_gen_sol(
     max_retries = cfg.settings.max_retries
 
     if cfg.settings.parallel_submissions:
-        # Parallel: submit all at once, poll all, then retry failures
-        for attempt_round in range(1 + max_retries):
-            to_submit = [gj for gj in pending if gj.get("status") not in ("completed",)]
-            if not to_submit:
-                break
-            if attempt_round > 0 and verbose:
-                print(f"  Retry round {attempt_round}/{max_retries} for {len(to_submit)} failed job(s)")
-
-            for gj in to_submit:
-                if not gj.get("job_id") or gj.get("status") in ("failed", "pending"):
-                    try:
-                        job_id = submit_job(gj["config_path"], verbose=verbose)
-                        gj["job_id"] = int(job_id)
-                        gj["submit_time"] = datetime.now().isoformat()
-                        gj["status"] = "running"
-                        gj["output_dir"] = get_job_output_dir(job_id)
-                        gj.setdefault("retry_history", []).append({
-                            "attempt": attempt_round + 1,
-                            "event": "submitted",
-                            "job_id": int(job_id),
-                            "time": datetime.now().isoformat(),
-                        })
-                    except RuntimeError as exc:
-                        if verbose:
-                            print(f"  Submit failed: {exc}")
-                        gj.setdefault("retry_history", []).append({
-                            "attempt": attempt_round + 1,
-                            "event": "submit_failed",
-                            "error": str(exc),
-                            "time": datetime.now().isoformat(),
-                        })
-                        gj["status"] = "failed"
-            state.save()
-
-            for gj in to_submit:
-                if gj.get("status") != "running":
-                    continue
-                status = poll_job(str(gj["job_id"]), cfg.settings.poll_interval, verbose=verbose)
-                is_ok = "COMPLETED" in status.upper()
-                gj["status"] = "completed" if is_ok else "failed"
-                gj["complete_time"] = datetime.now().isoformat()
-                gj.setdefault("retry_history", []).append({
-                    "attempt": attempt_round + 1,
-                    "event": "completed" if is_ok else "failed",
-                    "job_id": gj["job_id"],
-                    "slurm_status": status,
-                    "time": datetime.now().isoformat(),
-                })
-                if not is_ok:
-                    gj["job_id"] = None  # clear so next round resubmits
-                state.save()
+        _submit_poll_parallel(
+            job_dicts=pending,
+            poll_interval=cfg.settings.poll_interval,
+            max_retries=max_retries,
+            max_poll_time=cfg.settings.max_poll_time,
+            state=state,
+            verbose=verbose,
+            label="GEN",
+        )
     else:
         # Serial: submit, poll, retry per job
         for gj in pending:
@@ -561,6 +405,7 @@ def phase3_gen_sol(
                     max_retries=max_retries,
                     state=state,
                     verbose=verbose,
+                    max_poll_time=cfg.settings.max_poll_time,
                 )
             except RuntimeError as exc:
                 if verbose:
@@ -598,13 +443,13 @@ def phase3_gen_sol(
 
         # Always parse the decode worker log (not sa-bench JSONs)
         logs_dir = Path(gj.get("output_dir", "")) / "logs"
-        log_file = _gen_parser.find_log(logs_dir)
+        log_file = gen_parser.find_log(logs_dir)
         if log_file is None:
             if verbose:
                 print(f"  WARNING: No decode log for job {gj.get('job_id', '?')}")
             continue
 
-        data = _gen_parser.parse(log_file, verbose=False)
+        data = gen_parser.parse(log_file, verbose=False)
         if not data:
             if verbose:
                 print(f"  WARNING: No iteration data from {log_file}")
@@ -622,7 +467,7 @@ def phase3_gen_sol(
         # num_scheduled_requests isolates each level.
         gj["results"] = []
         for conc in conc_list:
-            result = _gen_parser.process(
+            result = gen_parser.process(
                 data,
                 concurrency=conc,
                 mode=gen_item.mode,
@@ -803,57 +648,15 @@ def phase6_e2e_validation(
     max_retries = cfg.settings.max_retries
 
     if cfg.settings.parallel_submissions:
-        # Parallel: submit all, poll all, retry failures
-        for attempt_round in range(1 + max_retries):
-            to_submit = [ej for ej in pending if ej.get("status") not in ("completed",)]
-            if not to_submit:
-                break
-            if attempt_round > 0 and verbose:
-                print(f"  Retry round {attempt_round}/{max_retries} for {len(to_submit)} failed E2E job(s)")
-
-            for ej in to_submit:
-                if not ej.get("job_id") or ej.get("status") in ("failed", "pending"):
-                    try:
-                        job_id = submit_job(ej["config_path"], verbose=verbose)
-                        ej["job_id"] = int(job_id)
-                        ej["submit_time"] = datetime.now().isoformat()
-                        ej["status"] = "running"
-                        ej["output_dir"] = get_job_output_dir(job_id)
-                        ej.setdefault("retry_history", []).append({
-                            "attempt": attempt_round + 1,
-                            "event": "submitted",
-                            "job_id": int(job_id),
-                            "time": datetime.now().isoformat(),
-                        })
-                    except RuntimeError as exc:
-                        if verbose:
-                            print(f"  E2E submit failed: {exc}")
-                        ej.setdefault("retry_history", []).append({
-                            "attempt": attempt_round + 1,
-                            "event": "submit_failed",
-                            "error": str(exc),
-                            "time": datetime.now().isoformat(),
-                        })
-                        ej["status"] = "failed"
-            state.save()
-
-            for ej in to_submit:
-                if ej.get("status") != "running":
-                    continue
-                status = poll_job(str(ej["job_id"]), cfg.settings.poll_interval, verbose=verbose)
-                is_ok = "COMPLETED" in status.upper()
-                ej["status"] = "completed" if is_ok else "failed"
-                ej["complete_time"] = datetime.now().isoformat()
-                ej.setdefault("retry_history", []).append({
-                    "attempt": attempt_round + 1,
-                    "event": "completed" if is_ok else "failed",
-                    "job_id": ej["job_id"],
-                    "slurm_status": status,
-                    "time": datetime.now().isoformat(),
-                })
-                if not is_ok:
-                    ej["job_id"] = None  # clear so next round resubmits
-                state.save()
+        _submit_poll_parallel(
+            job_dicts=pending,
+            poll_interval=cfg.settings.poll_interval,
+            max_retries=max_retries,
+            max_poll_time=cfg.settings.max_poll_time,
+            state=state,
+            verbose=verbose,
+            label="E2E",
+        )
     else:
         # Serial: submit, poll, retry per job
         for ej in pending:
@@ -865,6 +668,7 @@ def phase6_e2e_validation(
                     max_retries=max_retries,
                     state=state,
                     verbose=verbose,
+                    max_poll_time=cfg.settings.max_poll_time,
                 )
             except RuntimeError as exc:
                 if verbose:
@@ -902,7 +706,7 @@ def _process_e2e_results(
 
         if not ej.get("result"):
             # Load sa-bench result from output dir
-            output_dir = ej.get("output_dir", get_job_output_dir(ej.get("job_id", "")))
+            output_dir = ej.get("output_dir", get_job_output_dir(ej.get("job_id", ""), srtctl_root=state.srtctl_root))
             sa_result = _load_sa_bench_result(output_dir)
             if sa_result is None:
                 if verbose:
@@ -944,7 +748,7 @@ def _process_e2e_results(
             e2e_ttft_ms = ttft_percentiles.get("p50", 0)
         ttft_pass = True
         if ttft_constraint is not None and e2e_ttft_ms > 0:
-            ttft_pass = e2e_ttft_ms <= ttft_constraint
+            ttft_pass = bool(e2e_ttft_ms <= ttft_constraint)
 
         entry = {
             "pareto_rank": pareto_rank,
@@ -970,76 +774,6 @@ def _process_e2e_results(
     state.save()
 
 
-def _load_sa_bench_result(output_dir: str) -> dict | None:
-    """Load the sa-bench JSON result from a job output directory.
-
-    When multiple concurrencies were run, returns the last (highest) one.
-    """
-    logs_dir = Path(output_dir) / "logs"
-    if not logs_dir.exists():
-        return None
-
-    result_files = list(logs_dir.glob("sa-bench_*/results_*.json"))
-    if not result_files:
-        result_files = list(logs_dir.glob("**/results_*.json"))
-    if not result_files:
-        return None
-
-    result_files.sort()
-    try:
-        with open(result_files[-1]) as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Export helpers
-# ---------------------------------------------------------------------------
-
-def _export_results(
-    cfg: RateMatchingSweepConfig,
-    state: SweepState,
-    verbose: bool = True,
-) -> None:
-    """Export rate-matching results and Pareto frontier to CSV/JSON."""
-    results_dir = Path(state.output_dir) / "results"
-    results_dir.mkdir(parents=True, exist_ok=True)
-
-    prefix = state.sweep_name
-
-    # All results JSON
-    with open(results_dir / f"{prefix}_all.json", "w") as f:
-        json.dump(state.rate_matching_results, f, indent=2)
-
-    # Frontier JSON
-    with open(results_dir / f"{prefix}_frontier.json", "w") as f:
-        json.dump(state.pareto_frontier, f, indent=2)
-
-    # CSV exports
-    try:
-        import csv
-        cols = [
-            "config_name", "mode", "batch_size", "concurrency", "mtp_num",
-            "mtp_accept_rate", "avg_step_time_ms",
-            "interactivity", "tpot_ms", "output_tput_per_gpu",
-            "output_tput_per_gen_gpu", "total_throughput", "total_tput_per_gpu",
-            "gen_req_rate", "ctx_request_rate", "ctx_gen_inst_ratio",
-            "ctx_instances", "gen_instances", "total_gpus", "ratio_str",
-            "estimate_e2e_latency_s",
-        ]
-
-        for suffix, data in [("all", state.rate_matching_results), ("frontier", state.pareto_frontier)]:
-            with open(results_dir / f"{prefix}_{suffix}.csv", "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
-                writer.writeheader()
-                writer.writerows(data)
-    except Exception as e:
-        if verbose:
-            print(f"  CSV export warning: {e}")
-
-    if verbose:
-        print(f"  Results exported to: {results_dir}")
 
 
 # ---------------------------------------------------------------------------
@@ -1102,6 +836,207 @@ def phase7_summary(
 # Reprocess (re-derive everything from existing logs, no SLURM submission)
 # ---------------------------------------------------------------------------
 
+def add_e2e_jobs(
+    output_dir: str,
+    multipliers: list[float],
+    config_path: str | None = None,
+    dry_run: bool = False,
+    verbose: bool = True,
+) -> SweepState:
+    """Add new E2E validation jobs to a completed sweep.
+
+    Generates and submits E2E configs for new ``(pareto_rank, multiplier)``
+    pairs that don't already exist in the sweep state.  Existing results are
+    preserved — this is a purely additive operation.
+
+    Typical usage::
+
+        srtctl-rate-match add-e2e -o ./sweeps/my_sweep --multipliers 0.95
+        srtctl-rate-match add-e2e -o ./sweeps/my_sweep --multipliers 0.90 0.95 1.10
+
+    Args:
+        output_dir: Sweep output directory containing sweep_state.json.
+        multipliers: New concurrency multipliers to add.
+        config_path: Optional path to an updated sweep YAML config.  If None,
+            the original config from the sweep state is used.
+        dry_run: If True, show what would be added without submitting.
+        verbose: Print progress.
+
+    Returns:
+        Updated SweepState.
+
+    Raises:
+        FileNotFoundError: If the sweep state or config is missing.
+        RuntimeError: If the sweep has not reached the Pareto phase yet.
+    """
+    global _active_state  # noqa: PLW0603
+
+    # --- Load state ---
+    state_path = Path(output_dir) / "sweep_state.json"
+    if not state_path.exists():
+        raise FileNotFoundError(f"No sweep state found at {state_path}")
+    state = SweepState.load(str(state_path))
+
+    # Must have a Pareto frontier to generate E2E configs against
+    if not state.pareto_frontier:
+        raise RuntimeError(
+            "Cannot add E2E jobs: sweep has no Pareto frontier yet.  "
+            "Run the sweep through at least Phase 5 (Pareto extraction) first."
+        )
+
+    # --- Load config ---
+    cfg_path = config_path or state.sweep_config_path
+    if not Path(cfg_path).exists():
+        raise FileNotFoundError(f"Sweep config not found: {cfg_path}")
+    cfg = load_sweep_config(cfg_path)
+
+    # --- Back up state before mutation ---
+    backup_path = state.save_backup()
+    if verbose:
+        print(f"State backed up to: {backup_path}")
+
+    # --- Install signal handlers ---
+    _active_state = state
+    if not dry_run:
+        _install_signal_handlers()
+
+    # --- Determine which (pareto_rank, multiplier) pairs already exist ---
+    existing_pairs: set[tuple[int, float]] = set()
+    for ec in state.e2e_configs:
+        existing_pairs.add((ec["pareto_rank"], ec["multiplier"]))
+    for ej in state.e2e_jobs:
+        existing_pairs.add((ej["pareto_rank"], ej["multiplier"]))
+
+    # Compute new pairs
+    new_multipliers = []
+    for m in multipliers:
+        # Check if ALL Pareto points already have this multiplier
+        all_exist = all(
+            (pp.get("pareto_rank", 0), m) in existing_pairs
+            for pp in state.pareto_frontier
+        )
+        if not all_exist:
+            new_multipliers.append(m)
+
+    if not new_multipliers:
+        if verbose:
+            print("All requested multipliers already exist in the sweep. Nothing to add.")
+        return state
+
+    if verbose:
+        print(f"\n{'=' * 60}")
+        print(f"ADD E2E: {state.sweep_name}")
+        print(f"{'=' * 60}")
+        print(f"  Output dir:           {output_dir}")
+        print(f"  Pareto points:        {len(state.pareto_frontier)}")
+        print(f"  Existing multipliers: {sorted({m for _, m in existing_pairs})}")
+        print(f"  New multipliers:      {new_multipliers}")
+        n_new = sum(
+            1 for pp in state.pareto_frontier for m in new_multipliers
+            if (pp.get("pareto_rank", 0), m) not in existing_pairs
+        )
+        print(f"  New E2E jobs:         {n_new}")
+
+    # --- Generate new E2E configs ---
+    e2e_dir = Path(state.output_dir) / "e2e_pareto_configs"
+    new_configs = []
+    for pp in state.pareto_frontier:
+        for m in new_multipliers:
+            pair = (pp.get("pareto_rank", 0), m)
+            if pair in existing_pairs:
+                continue
+            recipe_name = get_recipe_filename(
+                pp["concurrency"], pp["ctx_instances"], pp["gen_instances"],
+                pp["mode"], pp.get("tp_size", cfg.resources.gen_gpus_per_instance),
+                pp["batch_size"], pp.get("mtp_num", 0),
+                pp.get("eplb_num_slots", 0), multiplier=m,
+            )
+            config_path_e2e = str(e2e_dir / f"{recipe_name}.yaml")
+            generate_e2e_config(
+                cfg, pp, concurrency_multiplier=m, output_path=config_path_e2e,
+            )
+            gen_instances = pp["gen_instances"]
+            pw_conc = pp["concurrency"]
+            sys_conc = int(pw_conc * gen_instances * m)
+
+            ec = {
+                "config_path": config_path_e2e,
+                "pareto_rank": pp.get("pareto_rank", 0),
+                "multiplier": m,
+                "per_worker_concurrency": pw_conc,
+                "system_concurrency": sys_conc,
+                "config_name": recipe_name,
+            }
+            new_configs.append(ec)
+            existing_pairs.add(pair)  # prevent duplicates within this call
+            if verbose:
+                print(f"  Config: {recipe_name}.yaml "
+                      f"(rank {ec['pareto_rank']}, {m}x, sys_conc={sys_conc})")
+
+    # Append to state
+    state.e2e_configs.extend(new_configs)
+
+    new_jobs = [
+        {"config_path": ec["config_path"], "status": "pending",
+         "pareto_rank": ec["pareto_rank"], "multiplier": ec["multiplier"],
+         "per_worker_concurrency": ec["per_worker_concurrency"],
+         "system_concurrency": ec["system_concurrency"],
+         "config_name": ec["config_name"]}
+        for ec in new_configs
+    ]
+    state.e2e_jobs.extend(new_jobs)
+    state.save()
+
+    if dry_run:
+        if verbose:
+            print(f"\n  [DRY-RUN] Would submit {len(new_jobs)} new E2E jobs")
+        return state
+
+    # --- Submit new jobs ---
+    if verbose:
+        print(f"\nSubmitting {len(new_jobs)} new E2E jobs...")
+
+    if cfg.settings.parallel_submissions:
+        _submit_poll_parallel(
+            job_dicts=new_jobs,
+            poll_interval=cfg.settings.poll_interval,
+            max_retries=cfg.settings.max_retries,
+            max_poll_time=cfg.settings.max_poll_time,
+            state=state,
+            verbose=verbose,
+            label="E2E",
+        )
+    else:
+        for ej in new_jobs:
+            try:
+                _submit_and_poll(
+                    job_dict=ej,
+                    config_path=ej["config_path"],
+                    poll_interval=cfg.settings.poll_interval,
+                    max_retries=cfg.settings.max_retries,
+                    state=state,
+                    verbose=verbose,
+                    max_poll_time=cfg.settings.max_poll_time,
+                )
+            except RuntimeError as exc:
+                if verbose:
+                    print(f"  ERROR: E2E job exhausted retries: {exc}")
+
+    # --- Re-process ALL E2E results (old + new) and regenerate dashboard ---
+    _process_e2e_results(cfg, state, verbose=verbose)
+
+    state.phase = "complete"
+    state.save()
+
+    phase7_summary(cfg, state, verbose=verbose)
+
+    if verbose:
+        print(f"\nAdd-E2E complete. {len(new_jobs)} new jobs added.")
+        print(f"Results in: {state.output_dir}")
+
+    return state
+
+
 def reprocess_sweep(
     output_dir: str,
     config_path: str | None = None,
@@ -1143,6 +1078,7 @@ def reprocess_sweep(
     if not Path(cfg_path).exists():
         raise FileNotFoundError(f"Sweep config not found: {cfg_path}")
     cfg = load_sweep_config(cfg_path)
+    ctx_parser, gen_parser = _get_parsers(cfg)
 
     if verbose:
         print(f"{'=' * 60}")
@@ -1153,6 +1089,13 @@ def reprocess_sweep(
         if config_path:
             print(f"  (using updated config)")
 
+    # Reconcile stale jobs (orchestrator may have been interrupted)
+    n = _reconcile_stale_jobs(
+        state, ctx_parser=ctx_parser, gen_parser=gen_parser, verbose=verbose,
+    )
+    if n and verbose:
+        print(f"  Total reconciled: {n} job(s)")
+
     # --- Re-run Phase 2: CTX processing (no submission) ---
     if verbose:
         print(f"\n{'=' * 60}")
@@ -1162,16 +1105,16 @@ def reprocess_sweep(
     ctx_job = state.ctx_job
     if ctx_job.get("status") == "completed" and ctx_job.get("output_dir"):
         logs_dir = Path(ctx_job["output_dir"]) / "logs"
-        log_file = _ctx_parser.find_log(logs_dir)
+        log_file = ctx_parser.find_log(logs_dir)
         if log_file is None:
             raise RuntimeError(f"No prefill log found in {logs_dir}")
 
-        data = _ctx_parser.parse(log_file, verbose=False)
+        data = ctx_parser.parse(log_file, verbose=False)
         if not data:
             raise RuntimeError(f"No data parsed from {log_file}")
 
         ctx_mbs = ctx_job.get("max_batch_size")
-        ctx_result = _ctx_parser.process(
+        ctx_result = ctx_parser.process(
             data, isl=cfg.workload.isl, verbose=False, max_batch_size=ctx_mbs,
         )
         if "error" in ctx_result:
@@ -1203,21 +1146,50 @@ def reprocess_sweep(
                 print(f"  WARNING: GEN job {gj.get('job_id', '?')} not completed, skipping.")
             continue
 
-        # Re-read gen_item from config using the stored index
-        gen_item = cfg.gen_sweep[gj.get("gen_item_index", idx)]
+        # Determine concurrency list: prefer job-level overrides, then config
         if "concurrency" in gj:
             conc_list = [gj["concurrency"]]
+        elif "concurrencies" in gj:
+            conc_list = gj["concurrencies"]
         else:
-            conc_list = gen_item.concurrency if isinstance(gen_item.concurrency, list) else [gen_item.concurrency]
+            gi_idx = gj.get("gen_item_index", idx)
+            if gi_idx < len(cfg.gen_sweep):
+                gi = cfg.gen_sweep[gi_idx]
+                conc_list = gi.concurrency if isinstance(gi.concurrency, list) else [gi.concurrency]
+            else:
+                if verbose:
+                    print(f"  WARNING: gen_item_index {gi_idx} out of range, skipping GEN job {idx}")
+                continue
+
+        # Resolve mode/mtp/batch/tp from job dict first, then fall back to config
+        gi_idx = gj.get("gen_item_index", idx)
+        if gi_idx < len(cfg.gen_sweep):
+            gen_item = cfg.gen_sweep[gi_idx]
+            mode = gj.get("mode", gen_item.mode)
+            tp_size = gj.get("tp_size", gen_item.tp_size)
+            mtp_num = gj.get("mtp_num", gen_item.mtp_num)
+            batch_size = gj.get("batch_size", gen_item.batch_size)
+            max_num_tokens = gj.get("max_num_tokens", gen_item.max_num_tokens)
+            gpu_mem_frac = gj.get("gpu_memory_fraction", gen_item.gpu_memory_fraction)
+            eplb_slots = gj.get("eplb_num_slots", gen_item.eplb_num_slots)
+        else:
+            # Config gen_sweep doesn't match (e.g., after refactor) - use job dict
+            mode = gj.get("mode", "tep")
+            tp_size = gj.get("tp_size", 8)
+            mtp_num = gj.get("mtp_num", 0)
+            batch_size = gj.get("batch_size", 128)
+            max_num_tokens = gj.get("max_num_tokens", 512)
+            gpu_mem_frac = gj.get("gpu_memory_fraction", 0.9)
+            eplb_slots = gj.get("eplb_num_slots", 0)
 
         logs_dir = Path(gj.get("output_dir", "")) / "logs"
-        log_file = _gen_parser.find_log(logs_dir)
+        log_file = gen_parser.find_log(logs_dir)
         if log_file is None:
             if verbose:
                 print(f"  WARNING: No decode log in {logs_dir}, skipping GEN job {idx}")
             continue
 
-        data = _gen_parser.parse(log_file, verbose=False)
+        data = gen_parser.parse(log_file, verbose=False)
         if not data:
             if verbose:
                 print(f"  WARNING: No data parsed from {log_file}")
@@ -1226,16 +1198,16 @@ def reprocess_sweep(
         if verbose:
             print(f"  Parsed {len(data)} iterations from {log_file.name}")
 
-        ep_rank = gen_item.tp_size  # ep_rank = rank_num = tp
+        ep_rank = tp_size  # ep_rank = rank_num = tp
 
         for conc in conc_list:
-            result = _gen_parser.process(
+            result = gen_parser.process(
                 data,
                 concurrency=conc,
-                mode=gen_item.mode,
-                tp=gen_item.tp_size,
+                mode=mode,
+                tp=tp_size,
                 ep_rank=ep_rank,
-                mtp=gen_item.mtp_num,
+                mtp=mtp_num,
                 isl=isl,
                 num_gpus=num_gpus,
                 verbose=False,
@@ -1246,16 +1218,16 @@ def reprocess_sweep(
                     print(f"  WARNING: GEN c{conc} processing error: {result['error']}")
                 continue
 
-            result["batch_size"] = gen_item.batch_size
-            result["max_num_tokens"] = gen_item.max_num_tokens
-            result["gpu_memory_fraction"] = gen_item.gpu_memory_fraction
-            result["eplb_num_slots"] = gen_item.eplb_num_slots
-            result["tp_size"] = gen_item.tp_size
+            result["batch_size"] = batch_size
+            result["max_num_tokens"] = max_num_tokens
+            result["gpu_memory_fraction"] = gpu_mem_frac
+            result["eplb_num_slots"] = eplb_slots
+            result["tp_size"] = tp_size
 
             state.gen_results.append(result)
             if verbose:
                 print(
-                    f"  {gen_item.mode.upper()} c{conc} mtp{gen_item.mtp_num}: "
+                    f"  {mode.upper()} c{conc} mtp{mtp_num}: "
                     f"step={result['avg_step_time_ms']:.2f}ms "
                     f"TPOT={result['tpot_ms']:.2f}ms "
                     f"tput/gpu={result.get('throughput_per_gpu', 0):.1f} "
@@ -1282,6 +1254,7 @@ def reprocess_sweep(
 
     # --- Re-run Phase 6: E2E comparison (from existing results, no submission) ---
     if not skip_e2e and state.e2e_jobs:
+        # Stale E2E jobs were already reconciled by _reconcile_stale_jobs above.
         completed_e2e = [ej for ej in state.e2e_jobs if ej.get("status") == "completed"]
         if completed_e2e:
             if verbose:
@@ -1327,6 +1300,8 @@ def run_sweep(
     Returns:
         Final SweepState
     """
+    global _active_state  # noqa: PLW0603
+
     # Load config
     cfg = load_sweep_config(config_path)
 
@@ -1336,6 +1311,14 @@ def run_sweep(
         state = SweepState.load(str(state_path))
         if verbose:
             print(f"Resuming sweep from phase: {state.phase}")
+    elif state_path.exists() and not dry_run:
+        raise RuntimeError(
+            f"Sweep state already exists at {state_path}.\n"
+            "  To continue an interrupted sweep:  --resume\n"
+            "  To add E2E multipliers:            srtctl-rate-match add-e2e\n"
+            "  To re-derive metrics from logs:    srtctl-rate-match reprocess\n"
+            "  To start fresh, choose a different -o directory."
+        )
     else:
         state = SweepState()
         state.sweep_name = cfg.name
@@ -1344,6 +1327,20 @@ def run_sweep(
         state.created_at = datetime.now().isoformat()
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # Install signal handlers so state is saved on SIGHUP / SIGTERM / SIGINT
+    _active_state = state
+    if not dry_run:
+        _install_signal_handlers()
+
+    # On resume, reconcile jobs that completed while the orchestrator was down
+    if resume and not dry_run:
+        ctx_parser, gen_parser = _get_parsers(cfg)
+        n = _reconcile_stale_jobs(
+            state, ctx_parser=ctx_parser, gen_parser=gen_parser, verbose=verbose,
+        )
+        if n and verbose:
+            print(f"  Reconciled {n} stale job(s) from previous run")
 
     # Run phases in order, skipping completed ones
     if state.phase in ("init", "ctx"):

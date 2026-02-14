@@ -7,6 +7,7 @@ Entry point for the srtctl-rate-match command. Can be invoked as:
     srtctl-rate-match dry-run -f sweep.yaml
     srtctl-rate-match status -o ./sweeps/my_sweep
     srtctl-rate-match cancel -o ./sweeps/my_sweep
+    srtctl-rate-match add-e2e -o ./sweeps/my_sweep --multipliers 0.95
     srtctl-rate-match reprocess -o ./sweeps/my_sweep
     srtctl-rate-match reprocess -o ./sweeps/my_sweep -f updated.yaml
 """
@@ -14,6 +15,8 @@ Entry point for the srtctl-rate-match command. Can be invoked as:
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +25,38 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
+
+
+def _inside_multiplexer() -> bool:
+    """Return True if the process is running inside tmux, screen, or nohup."""
+    if os.environ.get("TMUX"):
+        return True
+    if os.environ.get("STY"):          # GNU screen session
+        return True
+    # nohup typically closes stdin; a non-tty stdin is a rough proxy
+    if not sys.stdin.isatty():
+        return True
+    return False
+
+
+_SESSION_WARNING = """\
+WARNING: This sweep may run for many hours.  If your SSH session drops,
+the orchestrator will be killed and in-flight SLURM jobs will be orphaned.
+
+Recommended: run inside tmux or screen so the process survives disconnects:
+
+    tmux new -s sweep
+    srtctl-rate-match run -f sweep.yaml
+    # Ctrl-b d  to detach;  tmux attach -t sweep  to reattach
+
+Alternatively, use --detach to background the orchestrator:
+
+    srtctl-rate-match run -f sweep.yaml --detach
+
+If interrupted, resume with:
+
+    srtctl-rate-match run -f sweep.yaml --resume -o <output_dir>
+"""
 
 
 def _resolve_output_dir(config_path: str, output: str | None) -> str:
@@ -34,9 +69,55 @@ def _resolve_output_dir(config_path: str, output: str | None) -> str:
     return str(Path(_HERE) / "sweeps" / f"{cfg.name}_{timestamp}")
 
 
+def _run_detached(args: argparse.Namespace) -> None:
+    """Re-exec the current command in the background with nohup semantics.
+
+    Spawns a child process with stdout/stderr redirected to a log file in
+    the output directory and writes a PID file for monitoring.
+    """
+    output_dir = _resolve_output_dir(args.config, args.output)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    log_path = Path(output_dir) / "orchestrator.log"
+    pid_path = Path(output_dir) / "orchestrator.pid"
+
+    # Rebuild argv without --detach so the child runs in foreground
+    child_argv = [sys.executable, str(Path(__file__).resolve())]
+    child_argv += ["run", "-f", args.config, "-o", output_dir]
+    if args.resume:
+        child_argv.append("--resume")
+    if args.skip_e2e:
+        child_argv.append("--skip-e2e")
+
+    log_fh = open(log_path, "a")
+    proc = subprocess.Popen(
+        child_argv,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,  # detach from controlling terminal
+    )
+    pid_path.write_text(str(proc.pid))
+
+    print(f"Sweep running in background (PID {proc.pid})")
+    print(f"  Log:    {log_path}")
+    print(f"  PID:    {pid_path}")
+    print(f"\nMonitor with:")
+    print(f"  srtctl-rate-match status -o {output_dir} --live")
+    print(f"  tail -f {log_path}")
+    print(f"\nIf needed, kill with:  kill {proc.pid}")
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     """Run a rate-matching sweep (submit to SLURM)."""
+    if getattr(args, "detach", False):
+        _run_detached(args)
+        return
+
     from run_sweep import run_sweep
+
+    if not _inside_multiplexer():
+        print(_SESSION_WARNING, file=sys.stderr)
 
     output_dir = _resolve_output_dir(args.config, args.output)
 
@@ -82,7 +163,6 @@ def cmd_status(args: argparse.Namespace) -> None:
 def cmd_cancel(args: argparse.Namespace) -> None:
     """Cancel all SLURM jobs associated with a sweep."""
     import json
-    import subprocess
 
     state_path = Path(args.output) / "sweep_state.json"
     if not state_path.exists():
@@ -152,6 +232,35 @@ def cmd_cancel(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def cmd_add_e2e(args: argparse.Namespace) -> None:
+    """Add new E2E validation jobs to an existing sweep."""
+    from run_sweep import add_e2e_jobs
+
+    # Multipliers come from --multipliers or from the YAML config
+    multipliers = args.multipliers
+    if not multipliers and args.config:
+        from schema import load_sweep_config
+        cfg = load_sweep_config(args.config)
+        multipliers = cfg.settings.e2e_validation.concurrency_multipliers
+        print(f"Using multipliers from config: {multipliers}")
+    if not multipliers:
+        print("Error: provide --multipliers or -f with multipliers in the YAML.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    state = add_e2e_jobs(
+        output_dir=args.output,
+        multipliers=multipliers,
+        config_path=args.config,
+        dry_run=args.dry_run,
+        verbose=True,
+    )
+
+    print(f"\nTo check status:")
+    print(f"  srtctl-rate-match status -o {state.output_dir}")
+    print(f"  srtctl-rate-match status -o {state.output_dir} --live")
+
+
 def cmd_reprocess(args: argparse.Namespace) -> None:
     """Re-process an existing sweep from log files (no SLURM submission)."""
     from run_sweep import reprocess_sweep
@@ -170,7 +279,18 @@ def main() -> None:
         prog="srtctl-rate-match",
         description="Rate-matching sweep automation for srt-slurm",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""Examples:
+        epilog="""NOTE: Sweeps are long-running (often many hours).  Always run inside tmux
+or screen to survive SSH disconnects:
+
+    tmux new -s sweep
+    %(prog)s run -f sweep.yaml
+    # Ctrl-b d  to detach;  tmux attach -t sweep  to reattach
+
+If interrupted, use --resume to continue from the last saved checkpoint:
+
+    %(prog)s run -f sweep.yaml --resume -o ./sweeps/my_sweep
+
+Examples:
   # Run a sweep
   %(prog)s run -f sweep.yaml
   %(prog)s run -f sweep.yaml -o ./sweeps/my_sweep
@@ -185,9 +305,17 @@ def main() -> None:
   %(prog)s cancel -o ./sweeps/my_sweep
   %(prog)s cancel -o ./sweeps/my_sweep -y
 
+  # Add E2E multipliers to a completed sweep
+  %(prog)s add-e2e -o ./sweeps/my_sweep --multipliers 0.95
+  %(prog)s add-e2e -o ./sweeps/my_sweep --multipliers 0.90 0.95 1.10
+  %(prog)s add-e2e -o ./sweeps/my_sweep -f updated.yaml  # reads multipliers from YAML
+
   # Re-process results from existing logs
   %(prog)s reprocess -o ./sweeps/my_sweep
   %(prog)s reprocess -o ./sweeps/my_sweep -f updated_sweep.yaml
+
+Sweep config format:
+  See tools/rate_matching/h200_1k1k_mtp_sweep.yaml for an example sweep config.
 """,
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -198,6 +326,11 @@ def main() -> None:
     run_parser.add_argument("-o", "--output", default=None, help="Output directory (auto-generated if omitted)")
     run_parser.add_argument("--resume", action="store_true", help="Resume from saved state")
     run_parser.add_argument("--skip-e2e", action="store_true", help="Skip E2E validation phase")
+    run_parser.add_argument(
+        "--detach", action="store_true",
+        help="Run the orchestrator in the background (nohup-style). "
+             "Output is redirected to <output_dir>/orchestrator.log",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # dry-run - validate and generate configs only (mirrors: srtctl dry-run)
@@ -217,6 +350,30 @@ def main() -> None:
     cancel_parser.add_argument("-o", "--output", required=True, help="Sweep output directory")
     cancel_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     cancel_parser.set_defaults(func=cmd_cancel)
+
+    # add-e2e - add new multipliers to a completed sweep
+    add_e2e_parser = subparsers.add_parser(
+        "add-e2e",
+        help="Add new E2E validation jobs to a completed sweep",
+        description=(
+            "Generate and submit E2E configs for new concurrency multipliers "
+            "against an existing Pareto frontier.  Existing results are preserved."
+        ),
+    )
+    add_e2e_parser.add_argument("-o", "--output", required=True, help="Sweep output directory")
+    add_e2e_parser.add_argument(
+        "--multipliers", type=float, nargs="+", default=None,
+        help="Concurrency multipliers to add (e.g. 0.95 1.10)",
+    )
+    add_e2e_parser.add_argument(
+        "-f", "--file", default=None, dest="config",
+        help="Sweep config YAML (optional; reads multipliers from e2e_validation section)",
+    )
+    add_e2e_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would be added without submitting",
+    )
+    add_e2e_parser.set_defaults(func=cmd_add_e2e)
 
     # reprocess
     reprocess_parser = subparsers.add_parser(

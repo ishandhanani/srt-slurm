@@ -298,33 +298,33 @@ def compare_sol_vs_e2e(
     tput_diff = _pct_diff(sol_total_output_throughput, e2e_output_throughput)
     tput_gpu_diff = _pct_diff(sol_total_tput_per_gpu, e2e_tput_per_gpu)
 
-    # Pass/fail
-    tpot_pass = abs(tpot_diff) <= tolerances["tpot_tolerance_pct"]
-    tput_pass = abs(tput_gpu_diff) <= tolerances["throughput_tolerance_pct"]
+    # Pass/fail (bool() ensures native Python bool, not numpy.bool_)
+    tpot_pass = bool(abs(tpot_diff) <= tolerances["tpot_tolerance_pct"])
+    tput_pass = bool(abs(tput_gpu_diff) <= tolerances["throughput_tolerance_pct"])
 
     return {
         "sol": {
-            "tpot_ms": sol_tpot,
-            "interactivity": sol_interactivity,
-            "output_throughput": sol_total_output_throughput,
-            "output_tput_per_gpu": sol_total_tput_per_gpu,
+            "tpot_ms": float(sol_tpot),
+            "interactivity": float(sol_interactivity),
+            "output_throughput": float(sol_total_output_throughput),
+            "output_tput_per_gpu": float(sol_total_tput_per_gpu),
         },
         "e2e": {
-            "tpot_ms": e2e_median_tpot,
-            "interactivity": e2e_interactivity,
-            "output_throughput": e2e_output_throughput,
-            "output_tput_per_gpu": e2e_tput_per_gpu,
+            "tpot_ms": float(e2e_median_tpot),
+            "interactivity": float(e2e_interactivity),
+            "output_throughput": float(e2e_output_throughput),
+            "output_tput_per_gpu": float(e2e_tput_per_gpu),
         },
         "diff_pct": {
-            "tpot": round(tpot_diff, 2),
-            "interactivity": round(inter_diff, 2),
-            "output_throughput": round(tput_diff, 2),
-            "output_tput_per_gpu": round(tput_gpu_diff, 2),
+            "tpot": round(float(tpot_diff), 2),
+            "interactivity": round(float(inter_diff), 2),
+            "output_throughput": round(float(tput_diff), 2),
+            "output_tput_per_gpu": round(float(tput_gpu_diff), 2),
         },
         "pass": {
             "tpot": tpot_pass,
             "throughput": tput_pass,
             "overall": tpot_pass and tput_pass,
         },
-        "total_gpus": total_gpus,
+        "total_gpus": int(total_gpus),
     }
