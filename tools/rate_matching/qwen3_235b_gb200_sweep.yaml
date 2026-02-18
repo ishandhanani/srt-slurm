@@ -1,0 +1,207 @@
+# Rate-Matching Sweep: Qwen3-235B-A22B 8k/1k on GB200
+#
+# This config tells the rate-matching tool WHAT to benchmark.
+# The tool then figures out the optimal CTX:GEN ratio for each GEN config.
+#
+# Structure:
+#   name      → identifies the sweep (used for output directory)
+#   model     → which model and container
+#   workload  → ISL/OSL (what kind of requests)
+#   resources → GPU hardware info + budget cap
+#   ctx_config → prefill benchmark settings (same for all, override defaults to match recipes)
+#   gen_sweep  → groups of decode configs to sweep (each group = 1 mode + TP size)
+#   settings   → automation knobs
+#
+# GEN groups to sweep (from your 10 configs):
+#   TEP TP=2:  c=[1, 4],              batch=[1, 4]
+#   TEP TP=4:  c=[1, 4, 16, 32, 64],  batch=[1, 4, 16, 32, 64]
+#   DEP TP=8:  c=[512, 1024],          batch=[64, 128]
+#   DEP TP=16: c=[512],                batch=[32]
+#
+# Total jobs: 1 CTX + 10 GEN + E2E Pareto validation ≈ 20-30 jobs
+#
+# Usage:
+#   cd /lustre/fsw/infra_rd_gsw/users/yeswanthk/srt-slurm/ratematching
+#   .venv/bin/srtctl-rate-match dry-run -f tools/rate_matching/qwen3_235b_gb200_sweep.yaml
+#   .venv/bin/srtctl-rate-match run -f tools/rate_matching/qwen3_235b_gb200_sweep.yaml
+
+name: qwen3_235b_8k1k
+
+# ── MODEL ────────────────────────────────────────────────────────────────────
+# Same across all your configs
+model:
+  path: qwen3-235b                                                  # alias from srtslurm.yaml
+  container: "nvcr.io#nvidia/ai-dynamo/tensorrtllm-runtime:0.8.1.post3"
+  precision: fp4
+
+# ── WORKLOAD ─────────────────────────────────────────────────────────────────
+# ISL=8192, OSL=1024 (from your recipes)
+workload:
+  isl: 8192
+  osl: 1024
+  random_ratio: 1.0      # 1.0 = fully random (avg_random_ratio = 1.0)
+
+# ── RESOURCES ────────────────────────────────────────────────────────────────
+# GB200 cluster: 4 GPUs per node
+# ctx_gpus_per_instance = 1 (CTX always uses TP=1 → 1 GPU per prefill worker)
+# gen_gpus_per_instance = 4 (default for the CTX SOL decode stub; actual GEN TP
+#                            comes from each gen_sweep item's tp_size)
+# max_total_gpus = 64 (budget cap for the rate-matching allocation search)
+resources:
+  gpu_type: gb200
+  gpus_per_node: 4
+  ctx_gpus_per_instance: 1    # TP=1 for prefill (all your recipes use 1 GPU per CTX)
+  gen_gpus_per_instance: 4    # default TP for decode stub in CTX SOL job
+  max_total_gpus: 64          # upper bound: tool won't suggest allocations > 64 GPUs
+
+# ── CTX CONFIG ───────────────────────────────────────────────────────────────
+# Overrides for the prefill SOL benchmark.
+# These match YOUR recipes (not the tool's H200 defaults):
+#   max_batch_size: 4         (tool default for ISL>2048 is 2)
+#   max_num_tokens: 32768     (tool default is 16896)
+#   free_gpu_memory_fraction: 0.6  (tool default is 0.85)
+ctx_config:
+  benchmark_concurrency: 32   # flood the prefill worker with concurrent requests
+  max_batch_size: 4           # same across all your 3 recipe files
+  max_num_tokens: 32768       # same across all your 3 recipe files
+  free_gpu_memory_fraction: 0.6  # same across all your 3 recipe files
+
+# ── GEN SWEEP ────────────────────────────────────────────────────────────────
+# Each group defines ONE decode mode + TP size, swept across concurrencies.
+#
+# expansion: zip → pairs concurrency[i] with batch_size[i] one-to-one
+#   So concurrency=[1, 4] + batch_size=[1, 4] produces:
+#     Job 1: c=1, batch=1
+#     Job 2: c=4, batch=4
+#
+# For each job, the tool runs 1 decode worker in isolation (GEN SOL),
+# measures output throughput and TPOT, then computes the optimal CTX:GEN ratio.
+#
+# max_num_tokens defaults to batch_size when mtp=0 (no MTP), so we don't
+# need to set it explicitly.
+
+gen_sweep:
+
+  # ── TEP TP=2 (2 GPUs per decode worker, fits on 1 node) ──────────────────
+  # From: ctx1dep1_gen5tep2_batch1 (c=1), ctx1dep1_gen5tep2_batch4 (c=4)
+  tep2:
+    expansion: zip
+    parameters:
+      concurrency: [1, 4]
+      batch_size:  [1, 4]
+      gpu_memory_fraction: [0.9, 0.9]
+    defaults:
+      mode: tep
+      tp_size: 2
+    # TEP at small batch → TRTLLM MoE backend is optimal (lower kernel overhead)
+    decode_overrides:
+      moe_config:
+        backend: TRTLLM
+
+  # ── TEP TP=4 (4 GPUs per decode worker, 1 full node) ─────────────────────
+  # From: ctx1dep1_gen5tep4_batch1 (c=1), ctx1dep1_gen5tep4_batch4 (c=4),
+  #       ctx1dep1_gen3tep4_batch16 (c=16), ctx3dep1_gen5tep4_batch32 (c=32),
+  #       ctx1dep1_gen1tep4_batch64 (c=64)
+  tep4:
+    expansion: zip
+    parameters:
+      concurrency: [1, 4, 16, 32, 64]
+      batch_size:  [1, 4, 16, 32, 64]
+      gpu_memory_fraction: [0.9, 0.9, 0.9, 0.9, 0.9]
+    defaults:
+      mode: tep
+      tp_size: 4
+    # TEP at small batch → TRTLLM MoE backend is optimal (lower kernel overhead)
+    decode_overrides:
+      moe_config:
+        backend: TRTLLM
+
+  # ── DEP TP=8 (8 GPUs per decode worker, needs 2 nodes) ───────────────────
+  # From: ctx5dep1_gen1dep8_batch64 (c=512),
+  #       ctx13dep1_gen2dep8_batch128 (c=1024)
+  # NOTE: TP=8 with 4 GPUs/node needs 2 nodes per decode worker.
+  dep8:
+    expansion: zip
+    parameters:
+      concurrency: [512, 1024]
+      batch_size:  [64, 128]
+      gpu_memory_fraction: [0.8, 0.8]
+    defaults:
+      mode: dep
+      tp_size: 8
+    # DEP at large batch → CUTEDSL MoE backend is optimal (higher throughput)
+    decode_overrides:
+      moe_config:
+        backend: CUTEDSL
+        use_low_precision_moe_combine: true
+
+  # ── DEP TP=16 (16 GPUs per decode worker, needs 4 nodes) ─────────────────
+  # From: ctx6dep1_gen1dep16_batch32 (c=512)
+  # NOTE: TP=16 with 4 GPUs/node needs 4 nodes per decode worker.
+  dep16:
+    expansion: zip
+    parameters:
+      concurrency: [512]
+      batch_size:  [32]
+      gpu_memory_fraction: [0.7]
+    defaults:
+      mode: dep
+      tp_size: 16
+    # DEP at large batch → CUTEDSL MoE backend is optimal (higher throughput)
+    decode_overrides:
+      moe_config:
+        backend: CUTEDSL
+        use_low_precision_moe_combine: true
+
+# ── BACKEND ──────────────────────────────────────────────────────────────────
+# Environment vars and trtllm_config overrides to match your actual recipes.
+# Without these, the tool uses H200 defaults (CUTLASS, no nvfp4_gemm_config, etc.)
+# which would give different perf numbers than your production configs.
+backend:
+  prefill_environment:
+    TRTLLM_SERVER_DISABLE_GC: "1"
+    TRTLLM_WORKER_DISABLE_GC: "1"
+    TRTLLM_ENABLE_PDL: "1"
+    ENROOT_ALLOW_DEV: "1"
+    NCCL_GRAPH_MIXING_SUPPORT: "0"
+  decode_environment:
+    TRTLLM_SERVER_DISABLE_GC: "1"
+    TRTLLM_WORKER_DISABLE_GC: "1"
+    TRTLLM_ENABLE_PDL: "1"
+    ENROOT_ALLOW_DEV: "1"
+    NCCL_GRAPH_MIXING_SUPPORT: "0"
+
+  # Overrides applied ON TOP of generated prefill trtllm_config
+  # (matches your recipes/trtllm/qwen3-235b/*.yaml prefill section)
+  trtllm_prefill_overrides:
+    moe_config:
+      backend: TRTLLM
+    nvfp4_gemm_config:
+      allowed_backends: [cutlass, cublaslt, cutedsl, cuda_core]
+    cache_transceiver_config:
+      max_tokens_in_buffer: 16384
+
+  # GLOBAL decode overrides — applied to ALL gen groups, then per-group
+  # decode_overrides are merged on top (per-group wins over global).
+  #
+  # Common settings shared by TEP and DEP:
+  #   nvfp4_gemm_config, enable_lm_head_tp_in_adp
+  # Mode-specific settings (moe_config.backend) are in per-group overrides above.
+  trtllm_decode_overrides:
+    nvfp4_gemm_config:
+      allowed_backends: [cutlass, cublaslt, cutedsl, cuda_core]
+    enable_lm_head_tp_in_adp: false
+
+# ── SETTINGS ─────────────────────────────────────────────────────────────────
+settings:
+  poll_interval: 180            # check SLURM job status every 3 min
+  max_retries: 2                # retry failed jobs up to 2 times
+  max_poll_time: 14400          # timeout per job: 4 hours
+  run_e2e_validation: true      # after finding Pareto points, run real E2E benchmarks
+  parallel_submissions: true    # submit all GEN SOL jobs at once (faster on large clusters)
+
+  e2e_validation:
+    concurrency_multipliers: [0.95, 1.0, 1.05]  # test at 95%, 100%, 105% of computed concurrency
+    tpot_tolerance_pct: 15.0        # E2E TPOT within 15% of SOL prediction = pass
+    throughput_tolerance_pct: 20.0  # E2E throughput within 20% of SOL prediction = pass
+    ttft_constraint_ms: 5000.0      # flag if TTFT > 5 seconds

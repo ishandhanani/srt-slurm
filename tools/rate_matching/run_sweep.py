@@ -266,8 +266,10 @@ def phase1_generate_configs(
                 max_num_tokens=gen_item.max_num_tokens,
                 gpu_memory_fraction=gen_item.gpu_memory_fraction,
                 eplb_num_slots=gen_item.eplb_num_slots,
+                decode_overrides=gen_item.decode_overrides,
+                prefill_overrides=gen_item.prefill_overrides,
             )
-            fname = f"gen_sol_{gen_item.mode}_c{conc}{mtp_suffix}.yaml"
+            fname = f"gen_sol_{gen_item.mode}{gen_item.tp_size}_c{conc}{mtp_suffix}.yaml"
             gen_path = str(configs_dir / fname)
             generate_gen_sol_config(cfg, single_item, output_path=gen_path)
             state.gen_jobs.append({
@@ -494,6 +496,11 @@ def phase3_gen_sol(
             result["gpu_memory_fraction"] = gen_item.gpu_memory_fraction
             result["eplb_num_slots"] = gen_item.eplb_num_slots
             result["tp_size"] = gen_item.tp_size
+            # Carry per-item overrides so E2E configs use the same backend settings
+            if gen_item.decode_overrides:
+                result["decode_overrides"] = gen_item.decode_overrides
+            if gen_item.prefill_overrides:
+                result["prefill_overrides"] = gen_item.prefill_overrides
 
             gj["results"].append(result)
             state.gen_results.append(result)
@@ -547,6 +554,11 @@ def phase4_rate_matching(
         rm["max_num_tokens"] = gen_result.get("max_num_tokens")
         rm["gpu_memory_fraction"] = gen_result.get("gpu_memory_fraction")
         rm["eplb_num_slots"] = gen_result.get("eplb_num_slots", 0)
+        # Per-item overrides flow through to E2E config generation
+        if gen_result.get("decode_overrides"):
+            rm["decode_overrides"] = gen_result["decode_overrides"]
+        if gen_result.get("prefill_overrides"):
+            rm["prefill_overrides"] = gen_result["prefill_overrides"]
 
         state.rate_matching_results.append(rm)
 

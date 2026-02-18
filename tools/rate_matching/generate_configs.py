@@ -109,8 +109,31 @@ def _workload_params(cfg: RateMatchingSweepConfig) -> dict:
     }
 
 
-def _prefill_config(cfg: RateMatchingSweepConfig, wp: dict, mtp_num: int = 0) -> dict:
-    """Build the prefill trtllm_config section."""
+def _deep_merge(base: dict, overrides: dict) -> dict:
+    """Deep merge overrides into base dict (overrides win at leaf level)."""
+    result = dict(base)
+    for key, val in overrides.items():
+        if key in result and isinstance(result[key], dict) and isinstance(val, dict):
+            result[key] = _deep_merge(result[key], val)
+        else:
+            result[key] = val
+    return result
+
+
+def _prefill_config(
+    cfg: RateMatchingSweepConfig,
+    wp: dict,
+    mtp_num: int = 0,
+    *,
+    item_prefill_overrides: dict | None = None,
+) -> dict:
+    """Build the prefill trtllm_config section.
+
+    Merge priority (highest wins):
+      1. item_prefill_overrides  (per-group / per-item from gen_sweep)
+      2. cfg.backend.trtllm_prefill_overrides  (global from sweep YAML)
+      3. Tool defaults (this function's base config)
+    """
     tp = cfg.resources.ctx_gpus_per_instance
     config = {
         "backend": "pytorch",
@@ -144,6 +167,15 @@ def _prefill_config(cfg: RateMatchingSweepConfig, wp: dict, mtp_num: int = 0) ->
             "decoding_type": "MTP",
             "num_nextn_predict_layers": mtp_num,
         }
+
+    # Layer 1: global overrides from sweep YAML backend.trtllm_prefill_overrides
+    if cfg.backend.trtllm_prefill_overrides:
+        config = _deep_merge(config, cfg.backend.trtllm_prefill_overrides)
+
+    # Layer 2: per-item / per-group overrides (highest priority)
+    if item_prefill_overrides:
+        config = _deep_merge(config, item_prefill_overrides)
+
     return config
 
 
@@ -154,7 +186,16 @@ def _decode_config(
     *,
     for_gen_sol: bool = False,
 ) -> dict:
-    """Build the decode trtllm_config section."""
+    """Build the decode trtllm_config section.
+
+    Merge priority (highest wins):
+      1. gen_item.decode_overrides  (per-group / per-item from gen_sweep)
+      2. cfg.backend.trtllm_decode_overrides  (global from sweep YAML)
+      3. Tool defaults (this function's base config)
+
+    This allows e.g. TEP groups to use moe_config.backend=TRTLLM while
+    DEP groups use CUTEDSL, without duplicating the entire config.
+    """
     tp = gen_item.tp_size
     batch_size = gen_item.batch_size
     max_num_tokens = gen_item.max_num_tokens or batch_size
@@ -208,7 +249,20 @@ def _decode_config(
             "num_nextn_predict_layers": gen_item.mtp_num,
         }
 
+    # Layer 1: global overrides from sweep YAML backend.trtllm_decode_overrides
+    if cfg.backend.trtllm_decode_overrides:
+        config = _deep_merge(config, cfg.backend.trtllm_decode_overrides)
+
+    # Layer 2: per-item / per-group overrides (highest priority)
+    if gen_item.decode_overrides:
+        config = _deep_merge(config, gen_item.decode_overrides)
+
     return config
+
+
+def _nodes_for_tp(tp_size: int, gpus_per_node: int) -> int:
+    """Compute number of nodes needed for a given TP size."""
+    return math.ceil(tp_size / gpus_per_node)
 
 
 def _format_concurrency(conc) -> str:
@@ -218,46 +272,14 @@ def _format_concurrency(conc) -> str:
     return str(conc)
 
 
-# ---------------------------------------------------------------------------
-# CTX-only SOL config
-# ---------------------------------------------------------------------------
+def _ctx_sol_decode_stub(cfg: RateMatchingSweepConfig, wp: dict) -> dict:
+    """Build a minimal decode config for the CTX SOL benchmark.
 
-def generate_ctx_sol_config(
-    cfg: RateMatchingSweepConfig,
-    output_path: str | None = None,
-) -> dict:
-    """Generate CTX-only SOL benchmark config.
-
-    Runs with ISL/<osl=1> to measure pure prefill throughput.
-    Single prefill node, single decode node (needed for disagg setup).
+    The decode worker is a stub (CTX SOL uses osl=1, so decode barely runs),
+    but it still needs to load the model.  Apply trtllm_decode_overrides so
+    FP4-critical settings like nvfp4_gemm_config are present.
     """
-    wp = _workload_params(cfg)
-    prefill_env = cfg.backend.prefill_environment or dict(_DEFAULT_PREFILL_ENV)
-    decode_env = cfg.backend.decode_environment or dict(_DEFAULT_DECODE_ENV)
-
-    config = {
-        "name": f"ctx_sol_{cfg.workload.isl // 1000}k{cfg.workload.osl // 1000}k",
-        "model": {
-            "path": cfg.model.path,
-            "container": cfg.model.container,
-            "precision": cfg.model.precision,
-        },
-        "sbatch_directives": {"cpus-per-gpu": "16"},
-        "resources": {
-            "gpu_type": cfg.resources.gpu_type,
-            "prefill_nodes": 1,
-            "prefill_workers": 1,
-            "decode_nodes": 1,
-            "decode_workers": 1,
-            "gpus_per_node": cfg.resources.gpus_per_node,
-        },
-        "backend": {
-            "type": cfg.engine_type,
-            "prefill_environment": prefill_env,
-            "decode_environment": decode_env,
-            "trtllm_config": {
-                "prefill": _prefill_config(cfg, wp),
-                "decode": {
+    stub = {
                     "backend": "pytorch",
                     "trust_remote_code": True,
                     "tensor_parallel_size": cfg.resources.gen_gpus_per_instance,
@@ -289,7 +311,59 @@ def generate_ctx_sol_config(
                     "print_iter_log": True,
                     "stream_interval": 100,
                     "num_postprocess_workers": 4,
-                },
+    }
+    # Apply user overrides (e.g. nvfp4_gemm_config, moe_config.backend)
+    if cfg.backend.trtllm_decode_overrides:
+        stub = _deep_merge(stub, cfg.backend.trtllm_decode_overrides)
+    return stub
+
+
+# ---------------------------------------------------------------------------
+# CTX-only SOL config
+# ---------------------------------------------------------------------------
+
+def generate_ctx_sol_config(
+    cfg: RateMatchingSweepConfig,
+    output_path: str | None = None,
+) -> dict:
+    """Generate CTX-only SOL benchmark config.
+
+    Runs with ISL/<osl=1> to measure pure prefill throughput.
+    Single prefill node, single decode node (needed for disagg setup).
+    """
+    wp = _workload_params(cfg)
+    prefill_env = cfg.backend.prefill_environment or dict(_DEFAULT_PREFILL_ENV)
+    decode_env = cfg.backend.decode_environment or dict(_DEFAULT_DECODE_ENV)
+
+    # The decode stub in CTX SOL uses gen_gpus_per_instance for TP.
+    # On GB200 (4 GPUs/node), TP=8 would require 2 nodes.
+    ctx_decode_nodes = _nodes_for_tp(cfg.resources.gen_gpus_per_instance, cfg.resources.gpus_per_node)
+
+    config = {
+        "name": f"ctx_sol_{cfg.workload.isl // 1000}k{cfg.workload.osl // 1000}k",
+        "model": {
+            "path": cfg.model.path,
+            "container": cfg.model.container,
+            "precision": cfg.model.precision,
+        },
+        "sbatch_directives": {},
+        "resources": {
+            "gpu_type": cfg.resources.gpu_type,
+            "prefill_nodes": 1,
+            "prefill_workers": 1,
+            "gpus_per_prefill": cfg.resources.ctx_gpus_per_instance,
+            "decode_nodes": ctx_decode_nodes,
+            "decode_workers": 1,
+            "gpus_per_decode": cfg.resources.gen_gpus_per_instance,
+            "gpus_per_node": cfg.resources.gpus_per_node,
+        },
+        "backend": {
+            "type": cfg.engine_type,
+            "prefill_environment": prefill_env,
+            "decode_environment": decode_env,
+            "trtllm_config": {
+                "prefill": _prefill_config(cfg, wp),
+                "decode": _ctx_sol_decode_stub(cfg, wp),
             },
         },
         "benchmark": {
@@ -346,6 +420,10 @@ def generate_gen_sol_config(
     conc_str = _format_concurrency(gen_item.concurrency)
     name = f"gen_sol_{cfg.workload.isl // 1000}k{cfg.workload.osl // 1000}k_{gen_item.mode}_c{conc_str}{mtp_suffix}"
 
+    # Multi-node decode: when TP > GPUs per node, the decode worker spans
+    # multiple nodes.  GEN SOL always runs exactly 1 decode worker.
+    decode_nodes_per_worker = _nodes_for_tp(gen_item.tp_size, cfg.resources.gpus_per_node)
+
     config = {
         "name": name,
         "model": {
@@ -353,13 +431,15 @@ def generate_gen_sol_config(
             "container": cfg.model.container,
             "precision": cfg.model.precision,
         },
-        "sbatch_directives": {"cpus-per-gpu": "16"},
+        "sbatch_directives": {},
         "resources": {
             "gpu_type": cfg.resources.gpu_type,
             "prefill_nodes": 1,
             "prefill_workers": 1,
-            "decode_nodes": 1,
+            "gpus_per_prefill": cfg.resources.ctx_gpus_per_instance,
+            "decode_nodes": decode_nodes_per_worker,
             "decode_workers": 1,
+            "gpus_per_decode": gen_item.tp_size,
             "gpus_per_node": cfg.resources.gpus_per_node,
         },
         "backend": {
@@ -367,7 +447,10 @@ def generate_gen_sol_config(
             "prefill_environment": prefill_env,
             "decode_environment": decode_env,
             "trtllm_config": {
-                "prefill": _prefill_config(cfg, wp, mtp_num=gen_item.mtp_num),
+                "prefill": _prefill_config(
+                    cfg, wp, mtp_num=gen_item.mtp_num,
+                    item_prefill_overrides=gen_item.prefill_overrides,
+                ),
                 "decode": _decode_config(cfg, wp, gen_item, for_gen_sol=True),
             },
         },
@@ -464,6 +547,10 @@ def generate_e2e_config(
         multiplier=concurrency_multiplier,
     )
 
+    # Per-item overrides carried through from the original GenSweepItem
+    item_decode_overrides = pareto_point.get("decode_overrides")
+    item_prefill_overrides = pareto_point.get("prefill_overrides")
+
     # Build a synthetic GenSweepItem for decode config generation
     gen_item = GenSweepItem(
         mode=mode,
@@ -474,6 +561,8 @@ def generate_e2e_config(
         max_num_tokens=max_num_tokens,
         gpu_memory_fraction=gpu_memory_fraction,
         eplb_num_slots=eplb_num_slots,
+        decode_overrides=item_decode_overrides,
+        prefill_overrides=item_prefill_overrides,
     )
 
     ratio_str = pareto_point.get("ratio_str", f"{ctx_instances}:{gen_instances}")
@@ -505,6 +594,10 @@ def generate_e2e_config(
         f"# Run with: srtctl apply -f {recipe_name}.yaml\n"
     )
 
+    # Multi-node decode: each decode worker may span multiple nodes when
+    # TP > GPUs per node.  decode_nodes = gen_instances * nodes_per_worker.
+    decode_nodes_per_worker = _nodes_for_tp(tp_size, cfg.resources.gpus_per_node)
+
     config = {
         "name": recipe_name,
         "model": {
@@ -512,13 +605,15 @@ def generate_e2e_config(
             "container": cfg.model.container,
             "precision": cfg.model.precision,
         },
-        "sbatch_directives": {"cpus-per-gpu": "16"},
+        "sbatch_directives": {},
         "resources": {
             "gpu_type": cfg.resources.gpu_type,
             "prefill_nodes": ctx_instances,
             "prefill_workers": ctx_instances,
-            "decode_nodes": gen_instances,
+            "gpus_per_prefill": cfg.resources.ctx_gpus_per_instance,
+            "decode_nodes": gen_instances * decode_nodes_per_worker,
             "decode_workers": gen_instances,
+            "gpus_per_decode": tp_size,
             "gpus_per_node": cfg.resources.gpus_per_node,
         },
         "backend": {
@@ -526,7 +621,10 @@ def generate_e2e_config(
             "prefill_environment": prefill_env,
             "decode_environment": decode_env,
             "trtllm_config": {
-                "prefill": _prefill_config(cfg, wp, mtp_num=mtp_num),
+                "prefill": _prefill_config(
+                    cfg, wp, mtp_num=mtp_num,
+                    item_prefill_overrides=item_prefill_overrides,
+                ),
                 "decode": _decode_config(cfg, wp, gen_item, for_gen_sol=False),
             },
         },

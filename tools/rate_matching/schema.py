@@ -99,6 +99,14 @@ class GenSweepItem(BaseModel):
     Each item becomes one GEN-only SOL job. Fields map to the decode worker
     config (batch_size, max_num_tokens, attention_dp, etc.) and the sa-bench
     concurrency.
+
+    Per-item overrides (decode_overrides / prefill_overrides) are deep-merged
+    ON TOP of the global backend.trtllm_decode_overrides / trtllm_prefill_overrides.
+    Merge priority: per-item → global → tool defaults.
+
+    This allows different MoE backends, GEMM configs, etc. per decode mode:
+        TEP groups → moe_config.backend: TRTLLM  (lower latency at small batch)
+        DEP groups → moe_config.backend: CUTEDSL  (higher throughput at large batch)
     """
     mode: Literal["tep", "dep"] = Field(..., description="TEP or DEP parallelism")
     batch_size: int = Field(..., description="Decode max_batch_size")
@@ -121,6 +129,24 @@ class GenSweepItem(BaseModel):
     )
     eplb_num_slots: int = Field(default=0, description="Expert Load Balancer slots (0 = disabled)")
 
+    # Per-item TRT-LLM config overrides (merged on top of global overrides)
+    decode_overrides: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Per-group TRT-LLM decode config overrides. Deep-merged on top of "
+            "backend.trtllm_decode_overrides (global). Use this to set different "
+            "MoE backends, GEMM configs, etc. per decode mode/group."
+        ),
+    )
+    prefill_overrides: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Per-group TRT-LLM prefill config overrides. Deep-merged on top of "
+            "backend.trtllm_prefill_overrides (global). Rarely needed — most "
+            "prefill configs are the same across groups."
+        ),
+    )
+
     @model_validator(mode="after")
     def _set_defaults(self):
         if self.max_num_tokens is None:
@@ -139,15 +165,35 @@ class GenSweepGroup(BaseModel):
       - zip: pairs parameters by index (like Python zip)
       - grid: Cartesian product of all parameter values
 
+    Per-group overrides (decode_overrides / prefill_overrides) are injected
+    into every expanded GenSweepItem. This enables different TRT-LLM backend
+    settings per decode mode — e.g. TRTLLM MoE backend for TEP groups and
+    CUTEDSL for DEP groups.
+
     Example YAML:
-      tep_mtp1:
-        mode: zip
+      tep4:
+        expansion: zip
         parameters:
-          concurrency: [8, 16, 32, 64]
-          batch_size: [128, 128, 256, 256]
+          concurrency: [1, 4, 16, 32, 64]
+          batch_size: [1, 4, 16, 32, 64]
         defaults:
           mode: tep
-          mtp_num: 1
+          tp_size: 4
+        decode_overrides:            # ← per-group override
+          moe_config:
+            backend: TRTLLM          # optimal for TEP (small batch)
+      dep8:
+        expansion: zip
+        parameters:
+          concurrency: [512, 1024]
+          batch_size: [64, 128]
+        defaults:
+          mode: dep
+          tp_size: 8
+        decode_overrides:            # ← per-group override
+          moe_config:
+            backend: CUTEDSL         # optimal for DEP (large batch)
+            use_low_precision_moe_combine: true
     """
     expansion: Literal["zip", "grid"] = Field(
         default="zip", description="How to combine parameter lists",
@@ -159,9 +205,30 @@ class GenSweepGroup(BaseModel):
         default_factory=dict,
         description="Default values applied to every expanded item",
     )
+    decode_overrides: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Per-group TRT-LLM decode config overrides. Applied to every item "
+            "expanded from this group, merged on top of global "
+            "backend.trtllm_decode_overrides."
+        ),
+    )
+    prefill_overrides: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Per-group TRT-LLM prefill config overrides. Applied to every item "
+            "expanded from this group, merged on top of global "
+            "backend.trtllm_prefill_overrides."
+        ),
+    )
 
     def expand(self) -> list[GenSweepItem]:
-        """Expand group into concrete GenSweepItem list."""
+        """Expand group into concrete GenSweepItem list.
+
+        Group-level decode_overrides / prefill_overrides are injected into
+        every expanded item (unless the item itself already defines overrides
+        via the parameters dict, in which case the item-level value wins).
+        """
         param_names = list(self.parameters.keys())
         param_lists = list(self.parameters.values())
 
@@ -173,6 +240,12 @@ class GenSweepGroup(BaseModel):
         items = []
         for values in combos:
             merged = {**self.defaults, **dict(zip(param_names, values))}
+            # Inject group-level overrides only if the item doesn't already
+            # have its own (item-level overrides take priority).
+            if self.decode_overrides and "decode_overrides" not in merged:
+                merged["decode_overrides"] = self.decode_overrides
+            if self.prefill_overrides and "prefill_overrides" not in merged:
+                merged["prefill_overrides"] = self.prefill_overrides
             items.append(GenSweepItem(**merged))
         return items
 

@@ -75,18 +75,11 @@ mkdir -p "${SRTCTL_INSTALL_DIR}"
 export SRTCTL_SOURCE_DIR="${SRTCTL_SOURCE}"
 
 echo ""
-echo "Installing srtctl dependencies..."
-
-# Install uv if not present (single binary, no dependencies)
-if ! command -v uv &> /dev/null; then
-    echo "Installing uv package manager..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
-fi
-
-# Use uv to install srtctl (handles native extensions properly)
-echo "Using uv to install srtctl..."
-uv pip install --quiet --target="${SRTCTL_INSTALL_DIR}" "${SRTCTL_SOURCE}"
+echo "Installing srtctl dependencies via container..."
+srun --nodes=1 --ntasks=1 --nodelist="${HEAD_NODE}" \
+    --container-image="{{ container_image }}" \
+    --container-mounts="${SRTCTL_SOURCE}:/srtctl-src,${SRTCTL_INSTALL_DIR}:/srtctl-install" \
+    pip install --quiet --target=/srtctl-install /srtctl-src
 
 export PYTHONPATH="${SRTCTL_INSTALL_DIR}:${PYTHONPATH}"
 echo "Installed to ${SRTCTL_INSTALL_DIR}"
@@ -98,6 +91,13 @@ export SRTCTL_SETUP_SCRIPT="{{ setup_script }}"
 
 echo "Running orchestrator on host (with srun access)..."
 echo ""
+
+# Strip virtualenv paths from PATH to avoid architecture mismatch.
+# The venv may have been created on a login node with a different arch
+# (e.g. x86_64 login → aarch64 GB200 compute nodes).
+# We use the system Python which matches the compute node's architecture.
+export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v '\.venv' | tr '\n' ':' | sed 's/:$//')
+echo "Using python3: $(command -v python3)"
 
 # Run orchestrator on the HOST (not in container) so it has access to srun
 # The orchestrator will spawn containerized workers
