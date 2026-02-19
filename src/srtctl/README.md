@@ -136,6 +136,28 @@ srtctl supports GPU profiling with NVIDIA Nsight Systems (nsys) and PyTorch Prof
 The recommended approach is **CLI flags** -- layer profiling on top of any existing recipe
 without modifying YAML files.
 
+### Support Matrix
+
+| Feature | TRT-LLM | SGLang |
+|---------|---------|--------|
+| **nsys profiling** | Yes | Yes |
+| **PyTorch profiler** | No | Yes |
+| **Profiling alongside benchmark** | Yes (validated) | Yes (infrastructure ready) |
+| **Dedicated profiling runner** | Yes | Yes |
+| **Disaggregated (prefill + decode)** | Yes (multi-worker) | Yes (1P+1D with NIXL) |
+| **Aggregated (single worker type)** | Yes | Yes (multi-worker via sglang_router) |
+| **Multi-node workers (TP across nodes)** | Yes | Yes |
+| **Per-phase profiling windows** | Yes (prefill/decode separate) | Yes (prefill/decode separate) |
+| **Profiler activation** | `TLLM_PROFILE_START_STOP` env var | `/start_profile` HTTP API |
+| **nsys capture mode** | `cudaProfilerApi` | `cudaProfilerApi` |
+| **Profile output** | `.nsys-rep` per worker | `.nsys-rep` per worker |
+| **CLI flags** | `--nsys`, `--profile-start/stop` | `--nsys`, `--torch-profile`, `--profile-start/stop` |
+
+**Note on SGLang multi-worker:** SGLang supports multiple workers in aggregated mode
+(e.g., 8 TP2 workers via sglang_router). In disaggregated (P+D) mode with NIXL transfer,
+current tested configurations use 1 prefill + 1 decode. Multi-P+D with NIXL is an
+SGLang-level limitation, not an srtctl limitation.
+
 <details>
 <summary><b>Quick Start: CLI Profiling (Recommended)</b></summary>
 

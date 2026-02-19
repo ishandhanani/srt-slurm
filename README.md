@@ -42,3 +42,25 @@ srtctl dry-run -f config.yaml
 # Launch analysis dashboard
 uv run streamlit run analysis/dashboard/app.py
 ```
+
+## Profiling
+
+Add `--nsys` to any recipe to capture GPU profiles alongside your benchmark:
+
+```bash
+srtctl apply -f recipes/my-benchmark.yaml --nsys --profile-start 100 --profile-stop 105
+```
+
+### Support Matrix
+
+| Feature | TRT-LLM | SGLang |
+|---------|---------|--------|
+| nsys profiling | Yes | Yes |
+| PyTorch profiler | -- | Yes |
+| Alongside real benchmark | Yes | Yes |
+| Disaggregated (P+D) | Yes (multi-worker) | Yes (1P+1D with NIXL) |
+| Aggregated | Yes | Yes (multi-worker) |
+| Multi-node TP | Yes | Yes |
+| Per-phase windows (prefill vs decode) | Yes | Yes |
+
+See [src/srtctl/README.md](src/srtctl/README.md#profiling-support) for full CLI reference, YAML config, backend details, and analysis tips.
