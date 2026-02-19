@@ -764,6 +764,26 @@ def main():
             raw_config = {}
         profiling_overrides = build_profiling_overrides(args, raw_config)
 
+    # Validate nsys mount path exists before submitting
+    if getattr(args, "nsys", False) and getattr(args, "nsys_mount", None) != "none":
+        nsys_mount = getattr(args, "nsys_mount", None) or get_srtslurm_setting(
+            "nsys_mount_path", "/opt/nvidia/nsight-systems"
+        )
+        if not Path(nsys_mount).exists():
+            console.print()
+            console.print(
+                f"[bold red]Error:[/] Nsight Systems not found at [yellow]{nsys_mount}[/]\n\n"
+                "The --nsys flag requires nsight-systems to be installed on the cluster host\n"
+                "so it can be mounted into the container.\n\n"
+                "[bold]To fix this, choose one of:[/]\n"
+                "  1. Install nsight-systems:  [cyan]apt install nsight-systems-cli[/]\n"
+                f"  2. Point to correct path:  [cyan]--nsys-mount /path/to/nsight-systems[/]\n"
+                "  3. Skip mount (if nsys is already in your container):  [cyan]--nsys-mount none[/]\n"
+                "  4. Set cluster default in srtslurm.yaml:  [cyan]nsys_mount_path: \"/path/to/nsight-systems\"[/]\n\n"
+                "See the README 'Prerequisites: Nsight Systems Setup' section for full instructions."
+            )
+            sys.exit(1)
+
     try:
         setup_script = getattr(args, "setup_script", None)
         output_dir = getattr(args, "output_dir", None)

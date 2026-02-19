@@ -315,6 +315,10 @@ srtctl apply -f recipe.yaml --nsys --nsys-mount none
 <details>
 <summary><b>Quick Start: CLI Profiling (Recommended)</b></summary>
 
+> **First time using `--nsys`?** Make sure nsight-systems is installed on your cluster
+> nodes -- see the **Prerequisites** section above. srtctl will check this automatically
+> and tell you if it's missing.
+
 ### Profile any recipe with `--nsys`
 
 ```bash
