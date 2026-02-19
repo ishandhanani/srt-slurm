@@ -98,13 +98,18 @@ def build_profiling_overrides(args: argparse.Namespace, config_data: dict) -> di
 
     overrides: dict = {"profiling": profiling}
 
-    # Auto-inject nsight-systems container mount when using --nsys
-    # (needed for nsys binary to be available inside the container)
-    if nsys:
+    # Auto-inject nsight-systems container mount when using --nsys.
+    # Some containers (e.g. TRT-LLM runtime) bundle nsys, so the mount is
+    # only needed for containers that don't (e.g. SGLang).  Users can:
+    #   - Set nsys_mount_path in srtslurm.yaml to their cluster's nsys location
+    #   - Pass --nsys-mount /path/on/host to override
+    #   - Pass --nsys-mount none to skip the mount entirely
+    nsys_mount = getattr(args, "nsys_mount", None)
+    if nsys and nsys_mount != "none":
+        mount_path = nsys_mount or get_srtslurm_setting("nsys_mount_path", "/opt/nvidia/nsight-systems")
         existing_mounts = config_data.get("container_mounts", {})
-        nsys_mount_path = "/opt/nvidia/nsight-systems"
-        if nsys_mount_path not in existing_mounts:
-            overrides["container_mounts"] = {nsys_mount_path: nsys_mount_path}
+        if mount_path not in existing_mounts:
+            overrides["container_mounts"] = {mount_path: mount_path}
 
     return overrides
 
@@ -726,6 +731,12 @@ def main():
             "--profile-opt", action="append", default=[], metavar="KEY=VALUE",
             help="Extra profiling options as key=value (repeatable). "
             "e.g., --profile-opt gpu_metrics=true --profile-opt num_prompts=512",
+        )
+        prof.add_argument(
+            "--nsys-mount", type=str, default=None, metavar="PATH",
+            help="Host path to nsight-systems for container mount. "
+            "Use 'none' to skip (e.g. if nsys is bundled in the container). "
+            "Default: /opt/nvidia/nsight-systems or nsys_mount_path from srtslurm.yaml",
         )
 
     add_profiling_args(apply_parser)

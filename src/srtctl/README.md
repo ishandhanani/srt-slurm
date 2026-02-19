@@ -192,6 +192,125 @@ entire process lifetime.
 | `--profile-start-decode N` | Yes | Yes | Start step for decode workers (defaults to `--profile-start`) |
 | `--profile-stop-decode N` | Yes | Yes | Stop step for decode workers (defaults to `--profile-stop`) |
 | `--profile-opt KEY=VALUE` | Yes | Yes | Extra profiling config (repeatable), e.g. `gpu_metrics=true` |
+| `--nsys-mount PATH` | Yes | Yes | Host path to nsight-systems, or `none` to skip mount |
+
+<details>
+<summary><b>Prerequisites: Nsight Systems Setup</b></summary>
+
+### Nsight Systems must be available on the host
+
+The `--nsys` flag mounts nsight-systems from the **host** into the container at runtime.
+Most inference containers (TRT-LLM, SGLang) do **not** bundle nsys, so it must be
+installed on the bare-metal cluster nodes.
+
+### Step 1: Check if nsys is already installed
+
+SSH to a compute node and run:
+
+```bash
+# Check the default install location
+ls /opt/nvidia/nsight-systems/
+# Expected: a version directory like 2025.1.3/
+
+# Or check if nsys is in PATH
+which nsys && nsys --version
+```
+
+On DGX/HGX systems nsight-systems is typically pre-installed at `/opt/nvidia/nsight-systems/`.
+If it's already there, skip to Step 3.
+
+### Step 2: Install nsight-systems (if not present)
+
+**Option A: apt (Ubuntu/Debian) -- recommended for cluster nodes**
+
+```bash
+# Add NVIDIA devtools repo (run on each compute node, or via SLURM prolog)
+apt update
+apt install -y --no-install-recommends gnupg
+echo "deb http://developer.download.nvidia.com/devtools/repos/ubuntu$(source /etc/lsb-release; echo "$DISTRIB_RELEASE" | tr -d .)/$(dpkg --print-architecture) /" \
+  | tee /etc/apt/sources.list.d/nvidia-devtools.list
+apt-key adv --fetch-keys http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub
+apt update
+
+# Install CLI only (no GUI needed on cluster nodes)
+apt install -y nsight-systems-cli
+```
+
+After install, verify:
+
+```bash
+ls /opt/nvidia/nsight-systems/
+nsys --version
+```
+
+**Option B: Download the .run installer (no root required)**
+
+Download from https://developer.nvidia.com/nsight-systems/get-started and run:
+
+```bash
+chmod +x NsightSystems-linux-public-*.run
+./NsightSystems-linux-public-*.run --accept --target /opt/nvidia/nsight-systems/
+```
+
+**Option C: Already available via CUDA Toolkit**
+
+If CUDA Toolkit is installed on the host, nsys may already be at
+`/usr/local/cuda/nsight-systems/` or `/opt/nvidia/nsight-systems/`.
+
+### Step 3: Configure the mount path
+
+srtctl auto-mounts `/opt/nvidia/nsight-systems` from the host into the container when
+you use `--nsys`. If your install is at the default path, no configuration is needed.
+
+**If nsys is at a non-default path**, set it in `srtslurm.yaml`:
+
+```yaml
+# srtslurm.yaml
+nsys_mount_path: "/usr/local/cuda/nsight-systems"
+```
+
+Or pass it per-job:
+
+```bash
+srtctl apply -f recipe.yaml --nsys --nsys-mount /usr/local/cuda/nsight-systems
+```
+
+**If nsys is already bundled in your container**, skip the mount entirely:
+
+```bash
+srtctl apply -f recipe.yaml --nsys --nsys-mount none
+```
+
+### Step 4: Verify with dry-run
+
+```bash
+srtctl dry-run -f recipe.yaml --nsys
+```
+
+The profiling summary table will show the nsys mount status:
+- `nsys mount: /opt/nvidia/nsight-systems present` -- mount configured
+- `nsys mount: MISSING` -- fix with steps above
+
+### Quick reference
+
+```bash
+# Verify nsys is available
+ls /opt/nvidia/nsight-systems/ && echo "OK: nsys found"
+
+# Test profiling without submitting
+srtctl dry-run -f recipe.yaml --nsys
+
+# Submit with profiling
+srtctl apply -f recipe.yaml --nsys --profile-start 100 --profile-stop 105
+
+# If nsys is elsewhere
+srtctl apply -f recipe.yaml --nsys --nsys-mount /path/to/nsight-systems
+
+# If nsys is inside the container
+srtctl apply -f recipe.yaml --nsys --nsys-mount none
+```
+
+</details>
 
 <details>
 <summary><b>Quick Start: CLI Profiling (Recommended)</b></summary>
@@ -380,6 +499,18 @@ Without this, you'll see: `ERR_NVGPUCTRPERM: Insufficient privilege`
 
 <details>
 <summary><b>Common Issues and Solutions</b></summary>
+
+### "enroot-mount: failed to mount ... nsight-systems: No such file or directory"
+
+**Cause:** Nsight Systems is not installed on the cluster host at the expected path
+(`/opt/nvidia/nsight-systems`). The `--nsys` flag auto-mounts this directory into the
+container so nsys is available at runtime.
+
+**Fix:** See the **Prerequisites: Nsight Systems Setup** section above. Options:
+- Install nsight-systems on cluster nodes (ask admin)
+- Point to the correct path: `--nsys-mount /actual/path/to/nsight-systems`
+- Skip the mount if nsys is in the container: `--nsys-mount none`
+- Set `nsys_mount_path` in `srtslurm.yaml` for cluster-wide config
 
 ### "No reports were generated" / empty `.nsys-rep` files
 
