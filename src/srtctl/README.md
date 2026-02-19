@@ -376,6 +376,87 @@ Without this, you'll see: `ERR_NVGPUCTRPERM: Insufficient privilege`
 
 </details>
 
+## Profiling Troubleshooting
+
+<details>
+<summary><b>Common Issues and Solutions</b></summary>
+
+### "No reports were generated" / empty `.nsys-rep` files
+
+**Cause:** `cudaProfilerStart()` was never called -- the worker exited or was killed before
+reaching the profiling window.
+
+**Fix:** Make sure `--profile-start` is set to a step the worker will actually reach.
+If using "alongside benchmark" mode, the benchmark must generate enough traffic to reach
+that iteration count. Start with a low value like `--profile-start 5 --profile-stop 10`
+for validation.
+
+### SGLang: "Scheduler watchdog timeout"
+
+**Cause:** Large models (e.g., DeepSeek R1 FP8) have very long startup times due to
+DeepGEMM warmup and JIT compilation. The default SGLang watchdog (300s) fires before
+the model is ready.
+
+**Fix:** Add `watchdog-timeout: 1800` (or higher) to your `sglang_config` for both
+prefill and decode workers. Also increase `health_check.max_attempts` in your recipe
+if startup exceeds 30 minutes:
+
+```yaml
+health_check:
+  max_attempts: 360   # 60 minutes at 10s intervals
+  interval_seconds: 10
+```
+
+### SGLang: "NIXL KVReceiver Exception"
+
+**Cause:** The NIXL KV transfer between prefill and decode nodes failed. This is typically
+a cluster RDMA/UCX networking issue, not a profiling issue.
+
+**Fix:** Verify that InfiniBand / RoCE is properly configured between the nodes. For
+profiling validation, consider using an aggregated (non-disaggregated) recipe to bypass
+NIXL entirely.
+
+### How to choose `--profile-start` and `--profile-stop` values
+
+The profiling window should capture steady-state behavior, not warmup:
+
+- **TRT-LLM:** The executor counts iterations internally. Start after the model has
+  processed enough requests to fill its batching pipeline. For sa-bench with concurrency 128,
+  `--profile-start 100 --profile-stop 110` typically works well.
+- **SGLang:** The `/start_profile` API triggers at the specified iteration. Same guidance
+  applies. For disaggregated mode, decode workers often need a higher start value since
+  they process requests after prefill: `--profile-start-decode 500 --profile-stop-decode 510`.
+
+A good rule of thumb: set the start step to ~2x your concurrency to ensure the pipeline
+is fully loaded.
+
+### `--torch-profile` with TRT-LLM
+
+This combination is not supported. TRT-LLM does not expose PyTorch profiler hooks.
+Use `--nsys` instead for TRT-LLM profiling.
+
+### Profile files are very large
+
+nsys profiles can be 1-10 GB per worker depending on the capture window length and
+trace options. To reduce size:
+
+- Keep the profiling window short (5-10 steps is usually sufficient)
+- Avoid `--profile-opt gpu_metrics=true` unless you specifically need hardware counters
+
+</details>
+
+## Future Improvements
+
+Planned enhancements for the profiling experience:
+
+- **`srtctl profiles <job-id>`** -- List, download, and summarize profile files from a completed job
+- **Auto-detect profile window** -- Automatically set start/stop based on benchmark duration and concurrency
+- **Profile comparison** -- Compare two profiling runs side-by-side (e.g., before/after an optimization)
+- **Submit-time validation** -- Warn at submit time if `--torch-profile` is used with an unsupported backend
+- **Aggregated SGLang profiling recipe** -- Pre-built recipe for single-node profiling that avoids NIXL/disagg complexity
+- **Profile size estimation** -- Show estimated disk usage in dry-run output based on worker count and window size
+- **SGLang multi-P+D profiling** -- Track SGLang NIXL improvements to support N prefill + M decode profiling
+
 ## Files Overview
 
 | File                 | Purpose                                  |

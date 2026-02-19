@@ -193,6 +193,64 @@ def generate_minimal_sbatch_script(
     return rendered
 
 
+def _print_profiling_summary(console: Console, config: SrtConfig, via_cli: bool = False) -> None:
+    """Print a detailed profiling configuration summary for dry-run output."""
+    p = config.profiling
+    source = "CLI flags" if via_cli else "YAML config"
+
+    prof_table = Table(title=f"Profiling Configuration (from {source})", border_style="magenta", show_lines=True)
+    prof_table.add_column("Setting", style="bold")
+    prof_table.add_column("Value", style="green")
+
+    prof_table.add_row("Profiler type", p.type)
+    prof_table.add_row("Backend", config.backend.type if hasattr(config.backend, "type") else "unknown")
+
+    # Phase windows
+    r = config.resources
+    is_disagg = r.num_prefill > 0 or r.num_decode > 0
+
+    if is_disagg:
+        if p.prefill:
+            prof_table.add_row("Prefill window", f"steps {p.prefill.start_step} - {p.prefill.stop_step}")
+        if p.decode:
+            prof_table.add_row("Decode window", f"steps {p.decode.start_step} - {p.decode.stop_step}")
+    else:
+        if p.aggregated:
+            prof_table.add_row("Profiling window", f"steps {p.aggregated.start_step} - {p.aggregated.stop_step}")
+
+    # Worker topology
+    if is_disagg:
+        prof_table.add_row("Workers profiled", f"{r.num_prefill}P + {r.num_decode}D")
+    else:
+        prof_table.add_row("Workers profiled", f"{r.num_agg} aggregated")
+
+    # Output info
+    prof_table.add_row("Output pattern", "<job_dir>/logs/<node>_<role>_w<N>_profile/profile_<host>_<pid>.nsys-rep")
+
+    if p.gpu_metrics:
+        prof_table.add_row("GPU metrics", "enabled (requires elevated privileges)")
+
+    # Nsys container mount check
+    mounts = config.container_mounts or {}
+    has_nsys_mount = any("nsight-systems" in str(v) for v in mounts.values())
+    if p.is_nsys:
+        if has_nsys_mount:
+            prof_table.add_row("nsys mount", "/opt/nvidia/nsight-systems [green]present[/]")
+        else:
+            prof_table.add_row("nsys mount", "[red]MISSING[/] - nsys binary may not be available in container")
+
+    # Backend-specific activation
+    if p.is_nsys:
+        backend_type = getattr(config.backend, "type", "")
+        if backend_type == "trtllm":
+            prof_table.add_row("Activation", "TLLM_PROFILE_START_STOP env var (automatic)")
+        else:
+            prof_table.add_row("Activation", "/start_profile HTTP API (via profile.sh)")
+
+    console.print()
+    console.print(prof_table)
+
+
 def submit_with_orchestrator(
     config_path: Path,
     config: SrtConfig | None = None,
@@ -255,10 +313,7 @@ def submit_with_orchestrator(
             )
         )
         if config.profiling.enabled:
-            console.print(
-                f"[bold magenta]Profiling:[/] {config.profiling.type} "
-                f"(via CLI flags)" if config_overrides else ""
-            )
+            _print_profiling_summary(console, config, via_cli=bool(config_overrides))
         console.print()
         syntax = Syntax(script_content, "bash", theme="monokai", line_numbers=True)
         console.print(Panel(syntax, title="Generated sbatch Script", border_style="cyan"))

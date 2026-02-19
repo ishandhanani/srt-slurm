@@ -238,10 +238,48 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
             registry.cleanup()
             if exit_code != 0:
                 registry.print_failure_details()
+            if self.config.profiling.enabled:
+                self._print_profile_summary()
             # Run post-processing (AI analysis if enabled)
             self.run_postprocess(exit_code)
 
         return exit_code
+
+    def _print_profile_summary(self) -> None:
+        """Log a summary of generated profile files after the sweep completes."""
+        log_dir = self.runtime.log_dir
+        profile_dirs = sorted(log_dir.glob("*_profile"))
+        nsys_files = sorted(log_dir.glob("*_profile/*.nsys-rep"))
+        torch_dirs = sorted(log_dir.glob("*_profile/torch_*"))
+
+        logger.info("=" * 60)
+        logger.info("Profiling Summary")
+        logger.info("=" * 60)
+        logger.info("Profiler type: %s", self.config.profiling.type)
+
+        if nsys_files:
+            logger.info("nsys profiles: %d .nsys-rep files in %d directories", len(nsys_files), len(profile_dirs))
+            for f in nsys_files:
+                size_mb = f.stat().st_size / (1024 * 1024)
+                logger.info("  %s (%.1f MB)", f.name, size_mb)
+            logger.info("")
+            logger.info("Download profiles:")
+            logger.info("  scp -r user@cluster:%s/*_profile/ ./profiles/", log_dir)
+            logger.info("")
+            logger.info("Open in Nsight Systems GUI or analyze with:")
+            logger.info("  nsys stats <file>.nsys-rep --report cuda_gpu_kern_sum")
+        elif torch_dirs:
+            logger.info("PyTorch profiler traces: %d directories", len(torch_dirs))
+            for d in torch_dirs:
+                logger.info("  %s", d)
+        elif profile_dirs:
+            logger.info("Profile directories found but no .nsys-rep files generated.")
+            logger.info("This usually means cudaProfilerStart() was never triggered.")
+            logger.info("Check that --profile-start/stop values fall within the benchmark's iteration range.")
+        else:
+            logger.info("No profile output found in %s", log_dir)
+            logger.info("Workers may have exited before reaching the profiling window.")
+        logger.info("=" * 60)
 
 
 def main():
