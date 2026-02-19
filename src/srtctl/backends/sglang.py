@@ -260,7 +260,8 @@ class SGLangProtocol:
             cmd.extend(["--port", str(process.http_port)])
 
         # Add disaggregation mode for prefill/decode workers (both dynamo and sglang frontend)
-        if mode != "agg":
+        # Skip when profiling with sglang.launch_server (it may not accept this flag)
+        if mode != "agg" and not profiling_enabled:
             cmd.extend(["--disaggregation-mode", mode])
             # Bootstrap port only needed for sglang frontend (dynamo handles internally)
             if frontend_type == "sglang" and mode == "prefill" and process.bootstrap_port is not None:

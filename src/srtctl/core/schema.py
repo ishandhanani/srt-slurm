@@ -675,9 +675,10 @@ class ProfilingConfig:
         if not self.is_nsys:
             return []
 
-        # Output pattern uses process ID for unique files per worker
-        # %p expands to the process ID, ensuring unique files for each MPI rank
-        output_pattern = f"{output_dir}/profile_%p"
+        # Output pattern uses hostname + PID for globally unique files.
+        # %h = hostname, %p = PID. Using both ensures no collisions when
+        # multi-node MPI ranks on different hosts write to a shared directory.
+        output_pattern = f"{output_dir}/profile_%h_%p"
 
         cmd = [
             "nsys",
@@ -894,12 +895,18 @@ class SrtConfig:
         if not prof.enabled:
             return
 
-        # Traffic generator params are required when profiling is enabled
-        if prof.isl is None or prof.osl is None or prof.concurrency is None:
-            raise ValidationError(
-                "profiling.isl/osl/concurrency must be set when profiling is enabled. "
-                f"Got isl={prof.isl}, osl={prof.osl}, concurrency={prof.concurrency}"
-            )
+        # Traffic params are only required when no separate benchmark provides traffic.
+        # When a real benchmark (sa-bench, router, etc.) is configured, traffic comes
+        # from the benchmark and profiling just wraps the workers.
+        has_benchmark_traffic = self.benchmark.type not in ("manual", "profiling")
+        if not has_benchmark_traffic:
+            if prof.isl is None or prof.osl is None or prof.concurrency is None:
+                raise ValidationError(
+                    "profiling.isl/osl/concurrency must be set when no benchmark provides traffic. "
+                    "Either set these values, use --profile-opt isl=X osl=Y concurrency=Z, "
+                    "or use a traffic-generating benchmark (e.g., benchmark.type: 'sa-bench').\n"
+                    f"Got isl={prof.isl}, osl={prof.osl}, concurrency={prof.concurrency}"
+                )
 
         r = self.resources
         is_disaggregated = r.is_disaggregated

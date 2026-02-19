@@ -168,7 +168,7 @@ def get_srtslurm_setting(key: str, default: Any = None) -> Any:
     return default
 
 
-def load_config(path: Path | str) -> SrtConfig:
+def load_config(path: Path | str, config_overrides: dict | None = None) -> SrtConfig:
     """
     Load and validate YAML config, applying cluster defaults.
 
@@ -176,6 +176,9 @@ def load_config(path: Path | str) -> SrtConfig:
 
     Args:
         path: Path to the YAML configuration file
+        config_overrides: Optional dict to deep-merge into the raw config before
+            schema validation. Used by CLI flags (e.g., --nsys) to inject
+            profiling config without modifying the YAML file.
 
     Returns:
         SrtConfig frozen dataclass
@@ -191,6 +194,14 @@ def load_config(path: Path | str) -> SrtConfig:
     # Load raw user config
     with open(path) as f:
         user_config = yaml.safe_load(f)
+
+    # Apply CLI overrides (e.g., profiling flags) before resolving defaults
+    if config_overrides:
+        for key, value in config_overrides.items():
+            if isinstance(value, dict) and isinstance(user_config.get(key), dict):
+                user_config[key].update(value)
+            else:
+                user_config[key] = value
 
     # Load cluster defaults (optional)
     cluster_config = load_cluster_config()

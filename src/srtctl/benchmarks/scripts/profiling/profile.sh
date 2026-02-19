@@ -3,8 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Profiling script for sglang/trtllm workers
-# For torch profiling: Sends /start_profile API calls to workers
-# For nsys profiling: nsys handles capture via time-based delay (no API calls needed)
+#
+# Supports multiple backends and profiler types:
+# - SGLang + torch: /start_profile API with ["CPU", "GPU", "MEM"] activities
+# - SGLang + nsys:  /start_profile API with ["CUDA_PROFILER"] activity
+# - TRT-LLM + nsys: TLLM_PROFILE_START_STOP env var (no API call needed)
 #
 # NOTE: The orchestrator (do_sweep.py) already waits for all workers to be healthy
 # before running this script, so we don't need to wait here.
@@ -26,12 +29,17 @@ num_prompts="${PROFILE_NUM_PROMPTS:-128}"
 # Profiler type: "nsys" or "torch" (default: torch for backward compat)
 profiler_type="${PROFILER_TYPE:-torch}"
 
-# Backend type for benchmark_serving.py
+# Backend type for benchmark_serving.py (dynamo, sglang, tensorrt-llm)
 backend_type="${BACKEND_TYPE:-dynamo}"
+
+# Internal backend type for profiling logic (sglang, trtllm)
+# Used to determine whether to call /start_profile API for nsys profiling
+srtctl_backend="${SRTCTL_BACKEND_TYPE:-sglang}"
 
 echo "Profiling Configuration:"
 echo "  Profiler type: ${profiler_type}"
 echo "  Backend type: ${backend_type}"
+echo "  Internal backend: ${srtctl_backend}"
 echo "  Profiling mode: ${PROFILING_MODE}"
 echo "  Profiling dir: ${SGLANG_TORCH_PROFILER_DIR}"
 echo "  Prefill workers: ${n_prefill}"
@@ -72,11 +80,13 @@ get_phase_stop_step() {
     echo "${!var_name:-50}"
 }
 
-# Start profiling on a worker (only for torch profiler, not nsys)
+# Start profiling on a worker via /start_profile API
+# This is used by backends that support the SGLang-style /start_profile endpoint
 start_profile_on_worker() {
     local ip="$1"
     local start_step="$2"
     local stop_step="$3"
+    local activities="$4"  # JSON array of activities
     
     if [[ -z "${ip}" ]]; then
         return
@@ -88,18 +98,34 @@ start_profile_on_worker() {
         return 1
     fi
     
-    # Determine activities based on profiler type
-    local ACTIVITIES
-    if [[ -n "${SGLANG_TORCH_PROFILER_DIR}" ]]; then
-        ACTIVITIES='["CPU", "GPU", "MEM"]'
-    else
-        ACTIVITIES='["CUDA_PROFILER"]'
-    fi
-    
-    echo "Starting profiling on http://${ip}:30000 (steps ${start_step}-${stop_step})"
+    echo "Starting profiling on http://${ip}:30000 (steps ${start_step}-${stop_step}, activities: ${activities})"
     curl -sS -X POST "http://${ip}:30000/start_profile" \
         -H "Content-Type: application/json" \
-        -d "{\"start_step\": ${start_step}, \"num_steps\": ${num_steps}, \"activities\": ${ACTIVITIES}}" || true
+        -d "{\"start_step\": ${start_step}, \"num_steps\": ${num_steps}, \"activities\": ${activities}}" || true
+}
+
+# Call /start_profile API on all workers for a given phase
+call_start_profile_on_workers() {
+    local activities="$1"
+    
+    for ip in "${PREFILL_IPS[@]}"; do
+        start_profile_on_worker "${ip}" "${prefill_start}" "${prefill_stop}" "${activities}"
+    done
+    for ip in "${DECODE_IPS[@]}"; do
+        start_profile_on_worker "${ip}" "${decode_start}" "${decode_stop}" "${activities}"
+    done
+    for ip in "${AGG_IPS[@]}"; do
+        start_profile_on_worker "${ip}" "${agg_start}" "${agg_stop}" "${activities}"
+    done
+}
+
+# Check if backend supports /start_profile API
+# Currently only SGLang supports this; TRT-LLM uses env vars instead
+backend_supports_start_profile_api() {
+    case "${srtctl_backend}" in
+        sglang) return 0 ;;
+        *)      return 1 ;;
+    esac
 }
 
 # Check if we have any workers to profile
@@ -128,21 +154,42 @@ decode_stop=$(get_phase_stop_step DECODE)
 agg_start=$(get_phase_start_step AGG)
 agg_stop=$(get_phase_stop_step AGG)
 
-# Start profiling on workers - ONLY for torch profiler
-# nsys uses time-based capture (-y delay, -d duration) so no API calls needed
-if [[ "${profiler_type}" == "torch" ]]; then
-    echo "Torch profiler: calling /start_profile API on workers..."
-    for ip in "${PREFILL_IPS[@]}"; do
-        start_profile_on_worker "${ip}" "${prefill_start}" "${prefill_stop}"
-    done
-    for ip in "${DECODE_IPS[@]}"; do
-        start_profile_on_worker "${ip}" "${decode_start}" "${decode_stop}"
-    done
-    for ip in "${AGG_IPS[@]}"; do
-        start_profile_on_worker "${ip}" "${agg_start}" "${agg_stop}"
-    done
+# =========================================================================
+# PROFILING ACTIVATION
+# =========================================================================
+# Different backends and profilers require different activation mechanisms:
+#
+# | Backend | Profiler | Mechanism                                          |
+# |---------|----------|-----------------------------------------------------|
+# | SGLang  | torch    | /start_profile API with ["CPU", "GPU", "MEM"]       |
+# | SGLang  | nsys     | /start_profile API with ["CUDA_PROFILER"]           |
+# | TRT-LLM | nsys     | TLLM_PROFILE_START_STOP env var (no API call)       |
+# | TRT-LLM | torch    | Not supported                                       |
+#
+# The /start_profile API tells the server when to start/stop profiling.
+# For nsys with CUDA_PROFILER activity, the server calls cudaProfilerStart/Stop.
+
+if backend_supports_start_profile_api; then
+    # Backend supports /start_profile API (e.g., SGLang)
+    if [[ "${profiler_type}" == "torch" ]]; then
+        echo "Activating torch profiler via /start_profile API..."
+        call_start_profile_on_workers '["CPU", "GPU", "MEM"]'
+    elif [[ "${profiler_type}" == "nsys" ]]; then
+        echo "Activating nsys profiler via /start_profile API (CUDA_PROFILER)..."
+        call_start_profile_on_workers '["CUDA_PROFILER"]'
+    else
+        echo "Warning: Unknown profiler type '${profiler_type}' for backend '${srtctl_backend}'"
+    fi
 else
-    echo "nsys profiler: skipping /start_profile API (using time-based capture)"
+    # Backend uses alternative profiling mechanisms (e.g., TRT-LLM)
+    if [[ "${profiler_type}" == "nsys" ]]; then
+        echo "nsys profiling activated via environment variables (no /start_profile API)"
+        echo "  TRT-LLM uses TLLM_PROFILE_START_STOP=${TLLM_PROFILE_START_STOP:-not set}"
+    elif [[ "${profiler_type}" == "torch" ]]; then
+        echo "Warning: torch profiling not supported for backend '${srtctl_backend}'"
+    else
+        echo "Warning: Unknown profiler type '${profiler_type}' for backend '${srtctl_backend}'"
+    fi
 fi
 
 # Only the prefill profiling job needs to generate traffic through the router.

@@ -40,6 +40,75 @@ from srtctl.core.status import create_job_record
 console = Console()
 
 
+def build_profiling_overrides(args: argparse.Namespace, config_data: dict) -> dict | None:
+    """Build profiling config overrides from CLI flags.
+
+    Reads the resources section from the raw config dict to determine whether
+    to generate prefill/decode (disaggregated) or aggregated phase configs.
+
+    Args:
+        args: Parsed CLI arguments
+        config_data: Raw config dict loaded from YAML (used to check resources)
+
+    Returns:
+        Dict with 'profiling' key ready for merging, or None if no profiling flags set
+    """
+    nsys = getattr(args, "nsys", False)
+    torch_profile = getattr(args, "torch_profile", False)
+
+    if not (nsys or torch_profile):
+        return None
+
+    if nsys and torch_profile:
+        raise ValueError("Cannot use both --nsys and --torch-profile at the same time")
+
+    prof_type = "nsys" if nsys else "torch"
+    start = getattr(args, "profile_start", 100)
+    stop = getattr(args, "profile_stop", 105)
+    start_decode = getattr(args, "profile_start_decode", None)
+    stop_decode = getattr(args, "profile_stop_decode", None)
+    if start_decode is None:
+        start_decode = start
+    if stop_decode is None:
+        stop_decode = stop
+
+    resources = config_data.get("resources", {})
+    is_disaggregated = resources.get("prefill_nodes") is not None
+
+    profiling: dict = {"type": prof_type}
+
+    if is_disaggregated:
+        profiling["prefill"] = {"start_step": start, "stop_step": stop}
+        profiling["decode"] = {"start_step": start_decode, "stop_step": stop_decode}
+    else:
+        profiling["aggregated"] = {"start_step": start, "stop_step": stop}
+
+    # Parse --profile-opt key=value pairs
+    for opt in getattr(args, "profile_opt", []) or []:
+        if "=" not in opt:
+            raise ValueError(f"Invalid --profile-opt format: '{opt}' (expected KEY=VALUE)")
+        key, _, value = opt.partition("=")
+        if value.lower() in ("true", "false"):
+            profiling[key] = value.lower() == "true"
+        else:
+            try:
+                profiling[key] = int(value)
+            except ValueError:
+                profiling[key] = value
+
+    overrides: dict = {"profiling": profiling}
+
+    # Auto-inject nsight-systems container mount when using --nsys
+    # (needed for nsys binary to be available inside the container)
+    if nsys:
+        existing_mounts = config_data.get("container_mounts", {})
+        nsys_mount_path = "/opt/nvidia/nsight-systems"
+        if nsys_mount_path not in existing_mounts:
+            overrides["container_mounts"] = {nsys_mount_path: nsys_mount_path}
+
+    return overrides
+
+
 def setup_logging(level: int = logging.INFO) -> None:
     logging.basicConfig(
         level=level,
@@ -131,6 +200,7 @@ def submit_with_orchestrator(
     tags: list[str] | None = None,
     setup_script: str | None = None,
     output_dir: Path | None = None,
+    config_overrides: dict | None = None,
 ) -> None:
     """Submit job using the new Python orchestrator.
 
@@ -143,14 +213,34 @@ def submit_with_orchestrator(
         tags: Optional tags for the run
         setup_script: Optional custom setup script name (overrides config)
         output_dir: Custom output directory (CLI flag, highest priority)
+        config_overrides: Optional dict to merge into config (e.g., CLI profiling flags)
     """
 
     if config is None:
-        config = load_config(config_path)
+        config = load_config(config_path, config_overrides=config_overrides)
+
+    # When CLI overrides are present (e.g., --nsys), write a merged YAML so the
+    # orchestrator on the cluster reads the correct config (it re-loads from path).
+    # The merged file is written next to the original with a .merged.yaml suffix,
+    # ensuring it persists until the SLURM job runs.
+    effective_config_path = config_path
+    if config_overrides:
+        with open(config_path) as f:
+            raw = yaml.safe_load(f) or {}
+        for key, value in config_overrides.items():
+            if isinstance(value, dict) and isinstance(raw.get(key), dict):
+                raw[key].update(value)
+            else:
+                raw[key] = value
+        merged_path = config_path.parent / f"{config_path.stem}.merged.yaml"
+        with open(merged_path, "w") as f:
+            yaml.dump(raw, f, default_flow_style=False)
+        effective_config_path = merged_path
+        console.print(f"[dim]Merged config with CLI overrides:[/] {merged_path}")
 
     script_content = generate_minimal_sbatch_script(
         config=config,
-        config_path=config_path,
+        config_path=effective_config_path,
         setup_script=setup_script,
         output_dir=output_dir,
     )
@@ -164,9 +254,18 @@ def submit_with_orchestrator(
                 border_style="yellow",
             )
         )
+        if config.profiling.enabled:
+            console.print(
+                f"[bold magenta]Profiling:[/] {config.profiling.type} "
+                f"(via CLI flags)" if config_overrides else ""
+            )
         console.print()
         syntax = Syntax(script_content, "bash", theme="monokai", line_numbers=True)
         console.print(Panel(syntax, title="Generated sbatch Script", border_style="cyan"))
+        # Clean up merged config (not needed for dry-run)
+        if config_overrides and effective_config_path != config_path:
+            with contextlib.suppress(OSError):
+                os.remove(effective_config_path)
         return
 
     # Write script to temp file
@@ -202,7 +301,7 @@ def submit_with_orchestrator(
                 job_output_dir = srtctl_source / "outputs" / job_id
         job_output_dir.mkdir(parents=True, exist_ok=True)
 
-        shutil.copy(config_path, job_output_dir / "config.yaml")
+        shutil.copy(effective_config_path, job_output_dir / "config.yaml")
         shutil.copy(script_path, job_output_dir / "sbatch_script.sh")
 
         # Build comprehensive job metadata
@@ -276,6 +375,7 @@ def submit_single(
     setup_script: str | None = None,
     tags: list[str] | None = None,
     output_dir: Path | None = None,
+    config_overrides: dict | None = None,
 ):
     """Submit a single job from YAML config.
 
@@ -288,9 +388,10 @@ def submit_single(
         setup_script: Optional custom setup script name
         tags: Optional list of tags
         output_dir: Custom output directory (CLI flag, highest priority)
+        config_overrides: Optional dict to merge into config (e.g., CLI profiling flags)
     """
     if config is None and config_path:
-        config = load_config(config_path)
+        config = load_config(config_path, config_overrides=config_overrides)
 
     if config is None:
         raise ValueError("Either config_path or config must be provided")
@@ -303,6 +404,7 @@ def submit_single(
         tags=tags,
         setup_script=setup_script,
         output_dir=output_dir,
+        config_overrides=config_overrides,
     )
 
 
@@ -322,6 +424,7 @@ def submit_sweep(
     setup_script: str | None = None,
     tags: list[str] | None = None,
     output_dir: Path | None = None,
+    config_overrides: dict | None = None,
 ):
     """Submit parameter sweep.
 
@@ -331,6 +434,7 @@ def submit_sweep(
         setup_script: Optional custom setup script name
         tags: Optional list of tags
         output_dir: Custom output directory (CLI flag, highest priority)
+        config_overrides: Optional dict to merge into config (e.g., CLI profiling flags)
     """
     from srtctl.core.sweep import generate_sweep_configs
 
@@ -397,7 +501,7 @@ def submit_sweep(
             with os.fdopen(fd, "w") as f:
                 yaml.dump(config_dict, f)
 
-            config = load_config(Path(temp_config_path))
+            config = load_config(Path(temp_config_path), config_overrides=config_overrides)
             submit_single(
                 config_path=Path(temp_config_path),
                 config=config,
@@ -405,6 +509,7 @@ def submit_sweep(
                 setup_script=setup_script,
                 tags=tags,
                 output_dir=output_dir,
+                config_overrides=config_overrides,
             )
         finally:
             with contextlib.suppress(OSError):
@@ -435,6 +540,7 @@ def submit_directory(
     tags: list[str] | None = None,
     force_sweep: bool = False,
     output_dir: Path | None = None,
+    config_overrides: dict | None = None,
 ) -> None:
     """Submit all YAML configs in a directory recursively.
 
@@ -445,6 +551,7 @@ def submit_directory(
         tags: Optional list of tags
         force_sweep: If True, treat all configs as sweeps
         output_dir: Custom output directory (CLI flag, highest priority)
+        config_overrides: Optional dict to merge into config (e.g., CLI profiling flags)
     """
     yaml_files = find_yaml_files(directory)
 
@@ -480,10 +587,10 @@ def submit_directory(
         try:
             is_sweep = force_sweep or is_sweep_config(yaml_file)
             if is_sweep:
-                submit_sweep(yaml_file, dry_run=dry_run, setup_script=setup_script, tags=tags, output_dir=output_dir)
+                submit_sweep(yaml_file, dry_run=dry_run, setup_script=setup_script, tags=tags, output_dir=output_dir, config_overrides=config_overrides)
             else:
                 submit_single(
-                    config_path=yaml_file, dry_run=dry_run, setup_script=setup_script, tags=tags, output_dir=output_dir
+                    config_path=yaml_file, dry_run=dry_run, setup_script=setup_script, tags=tags, output_dir=output_dir, config_overrides=config_overrides
                 )
             success_count += 1
         except Exception as e:
@@ -539,8 +646,38 @@ def main():
     apply_parser.add_argument("--setup-script", type=str, help="Custom setup script in configs/")
     apply_parser.add_argument("--tags", type=str, help="Comma-separated tags")
 
+    # Profiling flags -- layer profiling on top of any recipe without modifying YAML
+    def add_profiling_args(p):
+        prof = p.add_argument_group("profiling", "Profile any recipe without modifying YAML")
+        prof.add_argument("--nsys", action="store_true", help="Enable NVIDIA Nsight Systems profiling")
+        prof.add_argument("--torch-profile", action="store_true", help="Enable PyTorch profiler")
+        prof.add_argument(
+            "--profile-start", type=int, default=100,
+            help="Profiling start step for prefill workers (default: 100)",
+        )
+        prof.add_argument(
+            "--profile-stop", type=int, default=105,
+            help="Profiling stop step for prefill workers (default: 105)",
+        )
+        prof.add_argument(
+            "--profile-start-decode", type=int, default=None,
+            help="Profiling start step for decode workers (defaults to --profile-start)",
+        )
+        prof.add_argument(
+            "--profile-stop-decode", type=int, default=None,
+            help="Profiling stop step for decode workers (defaults to --profile-stop)",
+        )
+        prof.add_argument(
+            "--profile-opt", action="append", default=[], metavar="KEY=VALUE",
+            help="Extra profiling options as key=value (repeatable). "
+            "e.g., --profile-opt gpu_metrics=true --profile-opt num_prompts=512",
+        )
+
+    add_profiling_args(apply_parser)
+
     dry_run_parser = subparsers.add_parser("dry-run", help="Validate without submitting")
     add_common_args(dry_run_parser)
+    add_profiling_args(dry_run_parser)
 
     args = parser.parse_args()
 
@@ -550,6 +687,16 @@ def main():
 
     is_dry_run = args.command == "dry-run"
     tags = [t.strip() for t in (getattr(args, "tags", "") or "").split(",") if t.strip()] or None
+
+    # Build profiling overrides from CLI flags (None if no flags set)
+    profiling_overrides = None
+    if getattr(args, "nsys", False) or getattr(args, "torch_profile", False):
+        if args.config.is_file():
+            with open(args.config) as f:
+                raw_config = yaml.safe_load(f) or {}
+        else:
+            raw_config = {}
+        profiling_overrides = build_profiling_overrides(args, raw_config)
 
     try:
         setup_script = getattr(args, "setup_script", None)
@@ -564,12 +711,18 @@ def main():
                 tags=tags,
                 force_sweep=args.sweep,
                 output_dir=output_dir,
+                config_overrides=profiling_overrides,
             )
         else:
             is_sweep = args.sweep or is_sweep_config(args.config)
             if is_sweep:
                 submit_sweep(
-                    args.config, dry_run=is_dry_run, setup_script=setup_script, tags=tags, output_dir=output_dir
+                    args.config,
+                    dry_run=is_dry_run,
+                    setup_script=setup_script,
+                    tags=tags,
+                    output_dir=output_dir,
+                    config_overrides=profiling_overrides,
                 )
             else:
                 submit_single(
@@ -578,6 +731,7 @@ def main():
                     setup_script=setup_script,
                     tags=tags,
                     output_dir=output_dir,
+                    config_overrides=profiling_overrides,
                 )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")

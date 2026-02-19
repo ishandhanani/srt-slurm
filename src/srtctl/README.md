@@ -130,6 +130,195 @@ resources:
 
 `CUDA_VISIBLE_DEVICES` is automatically set per worker (e.g., `0,1,2,3` and `4,5,6,7`).
 
+## Profiling Support
+
+srtctl supports GPU profiling with NVIDIA Nsight Systems (nsys) and PyTorch Profiler.
+The recommended approach is **CLI flags** -- layer profiling on top of any existing recipe
+without modifying YAML files.
+
+<details>
+<summary><b>Quick Start: CLI Profiling (Recommended)</b></summary>
+
+### Profile any recipe with `--nsys`
+
+```bash
+# Nsys profiling with default window (steps 100-105)
+srtctl apply -f recipes/my-benchmark.yaml --nsys
+
+# Custom profiling window
+srtctl apply -f recipes/my-benchmark.yaml --nsys --profile-start 200 --profile-stop 210
+
+# Different windows for prefill vs decode workers
+srtctl apply -f recipes/my-benchmark.yaml --nsys \
+  --profile-start 100 --profile-stop 105 \
+  --profile-start-decode 500 --profile-stop-decode 505
+
+# PyTorch profiler (SGLang only)
+srtctl apply -f recipes/my-benchmark.yaml --torch-profile
+
+# Dry-run to verify config
+srtctl dry-run -f recipes/my-benchmark.yaml --nsys
+```
+
+### How it works
+
+CLI flags inject a `profiling` config section at submission time. The recipe YAML is
+never modified. Workers start wrapped in `nsys profile` (or with torch profiler env vars)
+and your chosen benchmark runs normally -- the profiled iterations are captured as the
+benchmark generates traffic.
+
+### Two modes
+
+- **Profiling alongside a benchmark** (default): Use `--nsys` with a recipe that already
+  has `benchmark.type: sa-bench` (or any other benchmark). The benchmark generates traffic
+  and workers capture nsys/torch profiles during the specified iteration window.
+
+- **Dedicated profiling runner**: If your recipe has `benchmark.type: manual` or no
+  benchmark, srtctl auto-selects the dedicated `profile.sh` runner that generates its own
+  controlled traffic (requires `--profile-opt isl=X osl=Y concurrency=Z`).
+
+### Power-user knobs: `--profile-opt`
+
+Pass any `ProfilingConfig` field as a key=value pair:
+
+```bash
+srtctl apply -f recipe.yaml --nsys \
+  --profile-opt gpu_metrics=true \
+  --profile-opt num_prompts=512 \
+  --profile-opt isl=8192 \
+  --profile-opt osl=1024 \
+  --profile-opt concurrency=64
+```
+
+### CLI Flags Reference
+
+- `--nsys` -- Enable NVIDIA Nsight Systems profiling
+- `--torch-profile` -- Enable PyTorch profiler (mutually exclusive with `--nsys`)
+- `--profile-start N` -- Profiling start step for prefill/agg workers (default: 100)
+- `--profile-stop N` -- Profiling stop step for prefill/agg workers (default: 105)
+- `--profile-start-decode N` -- Start step for decode workers (defaults to `--profile-start`)
+- `--profile-stop-decode N` -- Stop step for decode workers (defaults to `--profile-stop`)
+- `--profile-opt KEY=VALUE` -- Extra profiling options (repeatable)
+
+</details>
+
+<details>
+<summary><b>Advanced: YAML-Based Profiling Configuration</b></summary>
+
+For CI pipelines or reproducible profiling jobs, you can also set profiling in YAML:
+
+```yaml
+profiling:
+  type: "nsys"        # "nsys" or "torch"
+  isl: 8192           # Input sequence length (only for dedicated profiling runner)
+  osl: 1024           # Output sequence length (only for dedicated profiling runner)
+  concurrency: 64     # Max concurrent requests (only for dedicated profiling runner)
+  num_prompts: 512    # Total prompts to generate
+  prefill:
+    start_step: 100
+    stop_step: 105
+  decode:
+    start_step: 500
+    stop_step: 505
+
+container_mounts:
+  /opt/nvidia/nsight-systems: /opt/nvidia/nsight-systems
+```
+
+When using profiling alongside a real benchmark (e.g., `benchmark.type: sa-bench`),
+the `isl`, `osl`, and `concurrency` fields in the profiling section are optional -- traffic
+comes from the benchmark itself.
+
+</details>
+
+<details>
+<summary><b>Backend-Specific Profiling Mechanisms</b></summary>
+
+Both SGLang and TRT-LLM use `nsys profile -c cudaProfilerApi` which tells nsys to wait for the application to call `cudaProfilerStart()` and `cudaProfilerStop()`. The difference is **how** each backend triggers these CUDA calls:
+
+### SGLang
+
+SGLang exposes a `/start_profile` HTTP API endpoint. When the profiling script calls this API with `activities: ["CUDA_PROFILER"]` and iteration parameters, SGLang internally calls `cudaProfilerStart()` at the specified iteration and `cudaProfilerStop()` after the specified number of steps. When profiling is enabled, srtctl automatically switches from `dynamo.sglang` to `sglang.launch_server`.
+
+### TRT-LLM
+
+TRT-LLM reads the `TLLM_PROFILE_START_STOP` environment variable at worker startup. The TRT-LLM executor automatically calls `cudaProfilerStart()` and `cudaProfilerStop()` at those iteration boundaries without requiring any external API calls.
+
+```bash
+# Set automatically by srtctl:
+TLLM_PROFILE_START_STOP="100-105"  # Start at iter 100, stop at iter 105
+```
+
+### Summary Table
+
+| Backend | Profiler | Activation Mechanism |
+|---------|----------|---------------------|
+| SGLang  | torch    | `/start_profile` API with `["CPU", "GPU", "MEM"]` |
+| SGLang  | nsys     | `/start_profile` API with `["CUDA_PROFILER"]` |
+| TRT-LLM | nsys     | `TLLM_PROFILE_START_STOP` env var |
+| TRT-LLM | torch    | Not supported |
+
+</details>
+
+<details>
+<summary><b>Analyzing nsys Profiles</b></summary>
+
+### Download profiles to local machine
+
+```bash
+scp -r user@cluster:/path/to/outputs/JOB_ID/logs/*_profile/ ./profiles/
+```
+
+### Open with Nsight Systems GUI
+
+Install from https://developer.nvidia.com/nsight-systems and open `.nsys-rep` files.
+
+### Command-line analysis
+
+```bash
+# Top GPU kernels by time
+nsys stats profile.nsys-rep --report cuda_gpu_kern_sum
+
+# NVTX markers (TRT-LLM phases, SGLang operations)
+nsys stats profile.nsys-rep --report nvtx_sum
+
+# CUDA API call summary
+nsys stats profile.nsys-rep --report cuda_api_sum
+
+# Export to CSV for custom analysis
+nsys stats profile.nsys-rep --report cuda_gpu_kern_sum --format csv -o kernels.csv
+```
+
+### Key metrics to look for
+
+| Metric | What it tells you |
+|--------|-------------------|
+| NCCL % | Communication overhead (TP/PP sync) |
+| GEMM % | Compute utilization |
+| Attention % | Memory bandwidth utilization |
+| Gaps in timeline | CPU/scheduling overhead |
+
+</details>
+
+<details>
+<summary><b>Advanced: GPU Metrics</b></summary>
+
+To capture GPU performance counters (SM utilization, memory bandwidth), enable `gpu_metrics`:
+
+```bash
+srtctl apply -f recipe.yaml --nsys --profile-opt gpu_metrics=true
+```
+
+**Note:** This requires elevated privileges. The cluster admin must configure:
+
+```bash
+echo 'options nvidia "NVreg_RestrictProfilingToAdminUsers=0"' > /etc/modprobe.d/nvidia-perf.conf
+```
+
+Without this, you'll see: `ERR_NVGPUCTRPERM: Insufficient privilege`
+
+</details>
+
 ## Files Overview
 
 | File                 | Purpose                                  |
@@ -143,4 +332,5 @@ resources:
 | `core/ip_utils/`     | Bash-based IP detection utilities        |
 | `cli/do_sweep.py`    | Main orchestrator (runs on head node)    |
 | `backends/sglang.py` | SGLang backend implementation            |
+| `backends/trtllm.py` | TRT-LLM backend implementation           |
 | `benchmarks/base.py` | BenchmarkRunner ABC                      |

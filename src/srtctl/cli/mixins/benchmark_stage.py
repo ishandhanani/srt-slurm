@@ -90,12 +90,15 @@ class BenchmarkStageMixin:
         if reporter:
             reporter.report(JobStatus.BENCHMARK, JobStage.BENCHMARK, "Running benchmark")
 
-        # Auto-select profiling benchmark when profiling is enabled
+        # When profiling is enabled, decide whether to use the dedicated profiling
+        # runner (profile.sh with controlled traffic) or let the user's benchmark run
+        # while workers are profiled via nsys/torch wrapping.
         benchmark_type = self.config.benchmark.type
         if self.config.profiling.enabled:
-            if benchmark_type != "profiling":
+            if benchmark_type in ("manual", "profiling"):
+                benchmark_type = "profiling"
                 logger.info(
-                    "Profiling enabled (type=%s) - automatically using 'profiling' benchmark",
+                    "Profiling enabled (type=%s) - using dedicated profiling benchmark",
                     self.config.profiling.type,
                 )
                 logger.info(
@@ -104,7 +107,13 @@ class BenchmarkStageMixin:
                     self.config.profiling.osl,
                     self.config.profiling.concurrency,
                 )
-            benchmark_type = "profiling"
+            else:
+                logger.info(
+                    "Profiling enabled (type=%s) alongside %s benchmark - "
+                    "workers are nsys/torch-wrapped, benchmark traffic will be profiled",
+                    self.config.profiling.type,
+                    benchmark_type,
+                )
 
         if benchmark_type == "manual":
             logger.info("Benchmark type is 'manual' - server is ready for testing")
@@ -263,6 +272,10 @@ class BenchmarkStageMixin:
             else:
                 # tensorrt-llm is the benchmark_serving.py name for TRT-LLM
                 env["BACKEND_TYPE"] = "tensorrt-llm"
+
+            # Internal backend type for profile.sh to distinguish sglang vs trtllm
+            # (needed for nsys profiling - sglang uses /start_profile API, trtllm uses env var)
+            env["SRTCTL_BACKEND_TYPE"] = self.config.backend_type
 
             # Configurable num_prompts
             env["PROFILE_NUM_PROMPTS"] = str(p.num_prompts)
