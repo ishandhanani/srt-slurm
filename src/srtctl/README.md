@@ -138,25 +138,60 @@ without modifying YAML files.
 
 ### Support Matrix
 
-| Feature | TRT-LLM | SGLang |
-|---------|---------|--------|
-| **nsys profiling** | Yes | Yes |
-| **PyTorch profiler** | No | Yes |
-| **Profiling alongside benchmark** | Yes (validated) | Yes (infrastructure ready) |
-| **Dedicated profiling runner** | Yes | Yes |
-| **Disaggregated (prefill + decode)** | Yes (multi-worker) | Yes (1P+1D with NIXL) |
-| **Aggregated (single worker type)** | Yes | Yes (multi-worker via sglang_router) |
-| **Multi-node workers (TP across nodes)** | Yes | Yes |
-| **Per-phase profiling windows** | Yes (prefill/decode separate) | Yes (prefill/decode separate) |
-| **Profiler activation** | `TLLM_PROFILE_START_STOP` env var | `/start_profile` HTTP API |
-| **nsys capture mode** | `cudaProfilerApi` | `cudaProfilerApi` |
-| **Profile output** | `.nsys-rep` per worker | `.nsys-rep` per worker |
-| **CLI flags** | `--nsys`, `--profile-start/stop` | `--nsys`, `--torch-profile`, `--profile-start/stop` |
+#### Profiler Type Support
 
-**Note on SGLang multi-worker:** SGLang supports multiple workers in aggregated mode
-(e.g., 8 TP2 workers via sglang_router). In disaggregated (P+D) mode with NIXL transfer,
-current tested configurations use 1 prefill + 1 decode. Multi-P+D with NIXL is an
-SGLang-level limitation, not an srtctl limitation.
+| Profiler | TRT-LLM | SGLang | Notes |
+|----------|---------|--------|-------|
+| **nsys** (Nsight Systems) | Yes | Yes | GPU kernel traces, NVTX markers, CUDA API calls |
+| **torch** (PyTorch Profiler) | No | Yes | CPU/GPU/memory activity via SGLang's `/start_profile` API |
+
+#### Deployment Topology
+
+| Topology | TRT-LLM | SGLang | Notes |
+|----------|---------|--------|-------|
+| **Aggregated** (all workers same role) | Yes | Yes | SGLang uses `sglang_router` for multi-worker routing |
+| **Disaggregated** (separate P+D) | Yes, N prefill + M decode | Yes, 1P + 1D | SGLang NIXL transfer currently limits to 1P+1D |
+| **Multi-node TP** (TP spanning nodes) | Yes | Yes | Each worker's `nsys` captures all ranks across its nodes |
+
+#### Profiling Modes
+
+| Mode | TRT-LLM | SGLang | Notes |
+|------|---------|--------|-------|
+| **Alongside benchmark** | Yes (validated E2E) | Yes | Workers profiled while sa-bench / other benchmark generates traffic |
+| **Dedicated runner** | Yes | Yes | `profile.sh` generates its own traffic; requires `--profile-opt isl=X osl=Y concurrency=Z` |
+| **Per-phase windows** | Yes | Yes | Separate `--profile-start/stop` vs `--profile-start-decode/stop-decode` |
+
+#### How Each Backend Activates Profiling
+
+| Backend | Mechanism | What happens |
+|---------|-----------|--------------|
+| **TRT-LLM** | `TLLM_PROFILE_START_STOP=100-105` env var | TRT-LLM executor calls `cudaProfilerStart()` / `cudaProfilerStop()` at those iteration boundaries automatically |
+| **SGLang** (nsys) | `/start_profile` HTTP API with `["CUDA_PROFILER"]` | SGLang server calls `cudaProfilerStart()` / `cudaProfilerStop()` internally |
+| **SGLang** (torch) | `/start_profile` HTTP API with `["CPU", "GPU", "MEM"]` | SGLang activates PyTorch Profiler; traces written to `SGLANG_TORCH_PROFILER_DIR` |
+
+Both backends use `nsys profile -c cudaProfilerApi` wrapping, meaning nsys waits
+for the application to signal when to start/stop capture rather than profiling the
+entire process lifetime.
+
+#### Output
+
+| Detail | TRT-LLM | SGLang |
+|--------|---------|--------|
+| **Profile files** | `.nsys-rep` per worker | `.nsys-rep` per worker (nsys) or PyTorch traces (torch) |
+| **Output location** | `outputs/<JOB_ID>/logs/<node>_<role>_w<N>_profile/` | Same |
+| **File naming** | `profile_<hostname>_<pid>.nsys-rep` | Same |
+
+#### CLI Flags
+
+| Flag | TRT-LLM | SGLang | Description |
+|------|---------|--------|-------------|
+| `--nsys` | Yes | Yes | Enable Nsight Systems profiling |
+| `--torch-profile` | -- | Yes | Enable PyTorch profiler (mutually exclusive with `--nsys`) |
+| `--profile-start N` | Yes | Yes | Start step for prefill/aggregated workers (default: 100) |
+| `--profile-stop N` | Yes | Yes | Stop step for prefill/aggregated workers (default: 105) |
+| `--profile-start-decode N` | Yes | Yes | Start step for decode workers (defaults to `--profile-start`) |
+| `--profile-stop-decode N` | Yes | Yes | Stop step for decode workers (defaults to `--profile-stop`) |
+| `--profile-opt KEY=VALUE` | Yes | Yes | Extra profiling config (repeatable), e.g. `gpu_metrics=true` |
 
 <details>
 <summary><b>Quick Start: CLI Profiling (Recommended)</b></summary>

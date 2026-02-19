@@ -53,14 +53,19 @@ srtctl apply -f recipes/my-benchmark.yaml --nsys --profile-start 100 --profile-s
 
 ### Support Matrix
 
-| Feature | TRT-LLM | SGLang |
-|---------|---------|--------|
-| nsys profiling | Yes | Yes |
-| PyTorch profiler | -- | Yes |
-| Alongside real benchmark | Yes | Yes |
-| Disaggregated (P+D) | Yes (multi-worker) | Yes (1P+1D with NIXL) |
-| Aggregated | Yes | Yes (multi-worker) |
-| Multi-node TP | Yes | Yes |
-| Per-phase windows (prefill vs decode) | Yes | Yes |
+| | TRT-LLM | SGLang |
+|--|---------|--------|
+| **nsys** | Yes | Yes |
+| **torch profiler** | -- | Yes |
+| **Profile alongside benchmark** | Yes | Yes |
+| **Disaggregated (P+D)** | Yes (N+M workers) | Yes (1P+1D, NIXL) |
+| **Aggregated** | Yes | Yes (multi-worker) |
+| **Multi-node TP** | Yes | Yes |
+| **Per-phase windows** | Yes | Yes |
+| **Activation** | `TLLM_PROFILE_START_STOP` env var | `/start_profile` HTTP API |
 
-See [src/srtctl/README.md](src/srtctl/README.md#profiling-support) for full CLI reference, YAML config, backend details, and analysis tips.
+Both backends use `nsys profile -c cudaProfilerApi` -- nsys waits for the application
+to call `cudaProfilerStart()`/`cudaProfilerStop()` at the configured iteration window.
+
+See [src/srtctl/README.md](src/srtctl/README.md#profiling-support) for the full CLI
+reference, YAML config, backend details, and profile analysis tips.
