@@ -25,6 +25,9 @@ backend:
 
       tp-size: 8
 
+      attention-backend: "trtllm_mha"
+      moe-runner-backend: "flashinfer_trtllm"
+
       disable-radix-cache: true
 
       mem-fraction-static: 0.82
@@ -36,6 +39,7 @@ backend:
       stream-interval: 30
       scheduler-recv-interval: 10
       enable-flashinfer-allreduce-fusion: true
+      enable-symm-mem: true
 
 benchmark:
   type: "sa-bench"
