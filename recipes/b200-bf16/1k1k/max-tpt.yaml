@@ -39,7 +39,6 @@ backend:
       stream-interval: 30
       scheduler-recv-interval: 30
       enable-flashinfer-allreduce-fusion: true
-      enable-symm-mem: true
 
 benchmark:
   type: "sa-bench"
