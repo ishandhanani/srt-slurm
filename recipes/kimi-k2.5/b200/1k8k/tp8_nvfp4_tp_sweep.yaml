@@ -1,0 +1,33 @@
+name: "kimi-k2.5-agg-tp8-nvfp4-simple-1k8k-sweep"
+
+model:
+  path: "kimi25nvfp4"
+  container: "sglang-dev-cu13-kimi-k2p5-fix"
+  precision: "fp4"
+
+resources:
+  gpu_type: "b200"
+  agg_nodes: 1
+  agg_workers: 1
+  gpus_per_node: 8
+
+backend:
+  sglang_config:
+    aggregated:
+      trust-remote-code: true
+      tensor-parallel-size: 8
+      quantization: modelopt_fp4
+
+frontend:
+  type: "sglang"
+
+health_check:
+  max_attempts: 360
+  interval_seconds: 10
+
+benchmark:
+  type: "sa-bench"
+  isl: 1024 
+  osl: 8192
+  concurrencies: [4, 8, 16, 32, 64, 128, 256]
+  req_rate: "inf"
