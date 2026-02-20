@@ -1,4 +1,4 @@
-name: "kimi-k2.5-agg-tp8-nvfp4-simple-1k1k-sweep"
+name: "kimi-k2.5-agg-tp8-nvfp4-simple-8k1k-sweep"
 
 model:
   path: "kimi25nvfp4"
@@ -27,7 +27,7 @@ health_check:
 
 benchmark:
   type: "sa-bench"
-  isl: 1024
+  isl: 8192
   osl: 1024 
-  concurrencies: [4, 8, 16, 32, 64, 128, 256]
+  concurrencies: [16, 32, 64, 128, 256]
   req_rate: "inf"
