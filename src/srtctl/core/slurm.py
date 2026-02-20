@@ -193,6 +193,11 @@ def start_srun_process(
     """
     srun_cmd = ["srun"]
 
+    # ensures srun runs in the same job context
+    slurm_job_id = get_slurm_job_id()
+    if slurm_job_id:
+        srun_cmd.extend(["--jobid", slurm_job_id])
+
     # Basic options
     if overlap:
         srun_cmd.append("--overlap")

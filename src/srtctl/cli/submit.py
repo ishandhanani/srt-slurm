@@ -40,6 +40,23 @@ from srtctl.core.status import create_job_record
 console = Console()
 
 
+def get_job_name(config: SrtConfig) -> str:
+    """Get job name, using RUNNER_NAME if available, otherwise config name.
+
+    This allows multi-runner setups to have unique job names for cleanup.
+
+    Args:
+        config: SrtConfig with the base job name
+
+    Returns:
+        Job name: RUNNER_NAME if set, otherwise config.name
+    """
+    runner_name = os.environ.get("RUNNER_NAME")
+    if runner_name:
+        return runner_name
+    return config.name
+
+
 def setup_logging(level: int = logging.INFO) -> None:
     logging.basicConfig(
         level=level,
@@ -101,8 +118,10 @@ def generate_minimal_sbatch_script(
     # Resolve container image path (expand aliases from srtslurm.yaml)
     container_image = os.path.expandvars(config.model.container)
 
+    job_name = get_job_name(config)
+
     rendered = template.render(
-        job_name=config.name,
+        job_name=job_name,
         total_nodes=total_nodes,
         gpus_per_node=config.resources.gpus_per_node,
         backend_type=config.backend_type,
@@ -205,12 +224,14 @@ def submit_with_orchestrator(
         shutil.copy(config_path, job_output_dir / "config.yaml")
         shutil.copy(script_path, job_output_dir / "sbatch_script.sh")
 
+        job_name = get_job_name(config)
+
         # Build comprehensive job metadata
         metadata = {
             "version": "2.0",
             "orchestrator": True,
             "job_id": job_id,
-            "job_name": config.name,
+            "job_name": job_name,
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             # Model info
             "model": {
@@ -251,7 +272,7 @@ def submit_with_orchestrator(
         create_job_record(
             reporting=config.reporting,
             job_id=job_id,
-            job_name=config.name,
+            job_name=job_name,
             cluster=get_srtslurm_setting("cluster"),
             recipe=str(config_path),
             metadata=metadata,
