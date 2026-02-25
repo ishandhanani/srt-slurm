@@ -114,8 +114,30 @@ class TestGenerateSweepConfigs:
         with pytest.raises(ValueError, match="must have 'sweep' section"):
             generate_sweep_configs(config)
 
+    def test_sweep_must_be_list(self):
+        """Test that sweep section must be a list."""
+        config = {
+            "name": "test",
+            "model": {"path": "model", "container": "c.sqsh", "precision": "fp8"},
+            "resources": {"gpu_type": "h100", "prefill_nodes": 1, "decode_nodes": 1},
+            "sweep": {"tokens": [1024, 2048]},
+        }
+        with pytest.raises(ValueError, match="non-empty list"):
+            generate_sweep_configs(config)
+
+    def test_sweep_entries_must_be_dicts(self):
+        """Test that each sweep entry must be a dict."""
+        config = {
+            "name": "test",
+            "model": {"path": "model", "container": "c.sqsh", "precision": "fp8"},
+            "resources": {"gpu_type": "h100", "prefill_nodes": 1, "decode_nodes": 1},
+            "sweep": ["not_a_dict"],
+        }
+        with pytest.raises(ValueError, match="must be a dict"):
+            generate_sweep_configs(config)
+
     def test_single_param_sweep(self):
-        """Test sweep with single parameter."""
+        """Test sweep with single varying parameter."""
         config = {
             "name": "test",
             "model": {
@@ -136,22 +158,23 @@ class TestGenerateSweepConfigs:
                     "decode": {},
                 }
             },
-            "sweep": {
-                "tokens": [1024, 2048, 4096],
-            },
+            "sweep": [
+                {"tokens": 1024},
+                {"tokens": 2048},
+                {"tokens": 4096},
+            ],
         }
         results = generate_sweep_configs(config)
 
         assert len(results) == 3
 
-        # Check parameter values
         params = [r[1] for r in results]
         assert params[0] == {"tokens": 1024}
         assert params[1] == {"tokens": 2048}
         assert params[2] == {"tokens": 4096}
 
-    def test_cartesian_product(self):
-        """Test that multiple params create Cartesian product."""
+    def test_correlated_params(self):
+        """Test sweep with correlated parameters (the whole point)."""
         config = {
             "name": "test",
             "model": {
@@ -160,35 +183,40 @@ class TestGenerateSweepConfigs:
                 "precision": "fp8",
             },
             "resources": {
-                "gpu_type": "h100",
-                "prefill_nodes": 1,
+                "gpu_type": "gb200",
+                "prefill_nodes": "{prefill_nodes}",
                 "decode_nodes": 1,
+                "gpus_per_node": 4,
             },
             "backend": {
                 "sglang_config": {
                     "prefill": {
-                        "val-a": "{a}",
-                        "val-b": "{b}",
+                        "tensor-parallel-size": "{tp_size}",
+                        "expert-parallel-size": "{ep_size}",
                     },
                     "decode": {},
                 }
             },
-            "sweep": {
-                "a": [1, 2],
-                "b": [10, 20],
-            },
+            "sweep": [
+                {"prefill_nodes": 1, "tp_size": 4, "ep_size": 1},
+                {"prefill_nodes": 2, "tp_size": 8, "ep_size": 8},
+            ],
         }
         results = generate_sweep_configs(config)
 
-        # 2 x 2 = 4 combinations
-        assert len(results) == 4
+        assert len(results) == 2
 
-        # Check all combinations exist
-        all_params = [r[1] for r in results]
-        assert {"a": 1, "b": 10} in all_params
-        assert {"a": 1, "b": 20} in all_params
-        assert {"a": 2, "b": 10} in all_params
-        assert {"a": 2, "b": 20} in all_params
+        # Job 1: 1 node, TP=4, EP=1
+        cfg1 = results[0][0]
+        assert cfg1["resources"]["prefill_nodes"] == 1
+        assert cfg1["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == "4"
+        assert cfg1["backend"]["sglang_config"]["prefill"]["expert-parallel-size"] == "1"
+
+        # Job 2: 2 nodes, TP=8, EP=8
+        cfg2 = results[1][0]
+        assert cfg2["resources"]["prefill_nodes"] == 2
+        assert cfg2["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == "8"
+        assert cfg2["backend"]["sglang_config"]["prefill"]["expert-parallel-size"] == "8"
 
     def test_sweep_removes_sweep_section(self):
         """Test that generated configs don't have sweep section."""
@@ -210,9 +238,9 @@ class TestGenerateSweepConfigs:
                     "decode": {},
                 }
             },
-            "sweep": {
-                "x": [1],
-            },
+            "sweep": [
+                {"x": 1},
+            ],
         }
         results = generate_sweep_configs(config)
         generated_config = results[0][0]
@@ -239,9 +267,10 @@ class TestGenerateSweepConfigs:
                     "decode": {},
                 }
             },
-            "sweep": {
-                "val": [100, 200],
-            },
+            "sweep": [
+                {"val": 100},
+                {"val": 200},
+            ],
         }
         results = generate_sweep_configs(config)
 
@@ -272,13 +301,13 @@ class TestGenerateSweepConfigs:
                     "decode": {},
                 }
             },
-            "sweep": {
-                "mem": [0.85, 0.90],
-            },
+            "sweep": [
+                {"mem": 0.85},
+                {"mem": 0.90},
+            ],
         }
         results = generate_sweep_configs(config)
 
-        # Check that values are substituted (note: they become strings)
         config1 = results[0][0]
         config2 = results[1][0]
 

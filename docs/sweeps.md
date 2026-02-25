@@ -6,7 +6,7 @@ Parameter sweeps let you run multiple configurations with a single command. Swee
 
 - [How It Works](#how-it-works)
 - [Simple Walkthrough](#simple-walkthrough)
-- [Multiple Parameters](#multiple-parameters)
+- [Correlated Parameters](#correlated-parameters)
 - [Where Placeholders Can Go](#where-placeholders-can-go)
 - [Auto-Detection](#auto-detection)
 - [Tips](#tips)
@@ -15,17 +15,18 @@ Parameter sweeps let you run multiple configurations with a single command. Swee
 
 ## How It Works
 
-1. Add a `sweep:` section to your YAML config with parameter values
+1. Add a `sweep:` section to your YAML config -- a list of parameter dicts
 2. Add `{placeholder}` markers where you want values substituted
-3. Run `srtctl apply -f <config>` - sweep mode is auto-detected
-4. `srtctl` generates and submits one job per parameter combination
+3. Run `srtctl apply -f <config>` -- sweep mode is auto-detected
+4. `srtctl` generates and submits one job per sweep entry
+
+Each entry in the `sweep` list is one job. All parameters in that entry are expanded together, so correlated values stay consistent.
 
 ## Simple Walkthrough
 
 ### Step 1: Create a sweep config
 
 ```yaml
-# configs/concurrency-sweep.yaml
 name: "concurrency-sweep"
 
 model:
@@ -42,10 +43,12 @@ benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 1024
-  concurrencies: [{ concurrency }] # <-- placeholder
+  concurrencies: [{concurrency}]
 
 sweep:
-  concurrency: [128, 256, 512] # <-- sweep values
+  - {concurrency: 128}
+  - {concurrency: 256}
+  - {concurrency: 512}
 ```
 
 ### Step 2: Preview with dry-run
@@ -54,7 +57,7 @@ sweep:
 srtctl dry-run -f configs/concurrency-sweep.yaml
 ```
 
-This shows you what will be generated without submitting. Sweep mode is automatically detected from the `sweep:` section.
+This shows you what will be generated without submitting.
 
 ### Step 3: Submit
 
@@ -62,36 +65,31 @@ This shows you what will be generated without submitting. Sweep mode is automati
 srtctl apply -f configs/concurrency-sweep.yaml
 ```
 
-This submits 3 separate jobs, one for each concurrency value (128, 256, 512).
+This submits 3 separate jobs, one for each concurrency value.
 
-## Multiple Parameters
+## Correlated Parameters
 
-Multiple parameters create a Cartesian product:
+The key advantage of the list format: parameters that must change together stay grouped in a single dict.
 
 ```yaml
+# Sweep prefill parallelism mapping on NVL72
+resources:
+  prefill_nodes: "{prefill_nodes}"
+  prefill_workers: "{prefill_workers}"
+
 backend:
   sglang_config:
-    decode:
-      mem-fraction-static: { mem }
-
-benchmark:
-  concurrencies: [{ conc }]
+    prefill:
+      tensor-parallel-size: "{tp_size}"
+      expert-parallel-size: "{ep_size}"
 
 sweep:
-  mem: [0.85, 0.90]
-  conc: [256, 512]
+  - {prefill_nodes: 1, prefill_workers: 1, tp_size: 4, ep_size: 1}
+  - {prefill_nodes: 2, prefill_workers: 2, tp_size: 4, ep_size: 2}
+  - {prefill_nodes: 4, prefill_workers: 4, tp_size: 4, ep_size: 4}
 ```
 
-```bash
-srtctl apply -f config.yaml
-```
-
-This generates 4 jobs (2 x 2):
-
-- mem=0.85, conc=256
-- mem=0.85, conc=512
-- mem=0.90, conc=256
-- mem=0.90, conc=512
+This generates 3 jobs. Each job has consistent resource allocation and parallelism -- no invalid combinations.
 
 ## Where Placeholders Can Go
 
@@ -99,14 +97,17 @@ Placeholders work anywhere in the YAML:
 
 ```yaml
 name: "sweep-{param}"
-mem-fraction-static: { mem }
-concurrencies: [{ conc }]
-dp-size: { dp }
+mem-fraction-static: "{mem}"
+concurrencies: [{conc}]
+dp-size: "{dp}"
+prefill_nodes: "{nodes}"
 ```
+
+Values are substituted as strings. For integer fields (like `prefill_nodes`), the schema coerces `"2"` to `2` automatically.
 
 ## Auto-Detection
 
-Sweep configs are automatically detected by the presence of a `sweep:` section. You don't need to pass `--sweep` flag:
+Sweep configs are automatically detected by the presence of a `sweep:` section:
 
 ```bash
 # Auto-detected sweep
@@ -119,6 +120,6 @@ srtctl apply -f config.yaml --sweep
 ## Tips
 
 - Always use `srtctl dry-run -f <config>` first to verify
-- Start with 2-3 values before running large sweeps
-- Cartesian products grow fast: 3 params x 4 values = 64 jobs
+- Start with 2-3 entries before running large sweeps
 - Each job gets a unique name based on parameter values
+- See `examples/example-sweep.yaml` for a full working example
