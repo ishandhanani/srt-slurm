@@ -1,69 +1,135 @@
-# Parameter sweep configuration
-# Sweeps perform Cartesian product expansion over multiple parameter values
-# This example sweeps over chunked-prefill-size (2 values) × max-total-tokens (2 values) = 4 jobs
+# Prefill parallelism sweep on GB200 NVL72 with DeepSeek-R1 FP4
+#
+# Each entry in `sweep` is one job with correlated parameters.
+# This sweeps prefill TP/EP mapping on NVL72 (4 GPUs/node):
+#
+#   Job 1: 1P node,  TP=4, EP=1  (single-node, no expert parallelism)
+#   Job 2: 2P nodes, TP=4, EP=2  (2-node, EP across nodes)
+#   Job 3: 4P nodes, TP=4, EP=4  (4-node, full EP)
+#
+# Decode is fixed at 2 nodes / 2 workers throughout.
+#
+# Usage:
+#   srtctl dry-run -f examples/example-sweep.yaml
+#   srtctl apply -f examples/example-sweep.yaml
 
-name: "example-sweep"
+name: "dsr1-fp4-prefill-sweep"
 
-# Define sweep parameters - all combinations will be tested
 sweep:
-  chunked_prefill_size: [4096, 8192]
-  max_total_tokens: [8192, 16384]
+  - {prefill_nodes: 1, prefill_workers: 1, tp_size: 4, ep_size: 1}
+  - {prefill_nodes: 2, prefill_workers: 2, tp_size: 4, ep_size: 2}
+  - {prefill_nodes: 4, prefill_workers: 4, tp_size: 4, ep_size: 4}
+
+dynamo:
+  version: 0.8.1
+
+frontend:
+  type: dynamo
+  enable_multiple_frontends: true
+  num_additional_frontends: 3
+  nginx_container: nginx
 
 model:
-  path: "deepseek-r1"
-  container: "lmsysorg+sglang+v0.5.5.post2.sqsh"
-  precision: "fp8"
+  path: "dsfp4"
+  container: "lmsysorg/sglang:v0.5.8-cu130"
+  precision: "fp4"
 
 resources:
   gpu_type: "gb200"
-  prefill_nodes: 1
-  decode_nodes: 4
-  prefill_workers: 1
-  decode_workers: 4
+  prefill_nodes: "{prefill_nodes}"
+  prefill_workers: "{prefill_workers}"
+  decode_nodes: 2
+  decode_workers: 2
   gpus_per_node: 4
 
 backend:
   prefill_environment:
     TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
     PYTHONUNBUFFERED: "1"
+    DYN_SKIP_SGLANG_LOG_FORMATTING: "1"
+    SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
+    SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
+    SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+    SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+    SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+    SGLANG_DECODE_BOOTSTRAP_TIMEOUT: "1000"
+    MC_FORCE_MNNVL: "1"
+    NCCL_MNNVL_ENABLE: "1"
+    NCCL_CUMEM_ENABLE: "1"
+    SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
+    SGLANG_ENABLE_JIT_DEEPGEMM: "false"
 
   decode_environment:
     TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
     PYTHONUNBUFFERED: "1"
+    DYN_SKIP_SGLANG_LOG_FORMATTING: "1"
+    SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
+    SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
+    SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+    SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+    SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+    SGLANG_DECODE_BOOTSTRAP_TIMEOUT: "1000"
+    MC_FORCE_MNNVL: "1"
+    NCCL_MNNVL_ENABLE: "1"
+    NCCL_CUMEM_ENABLE: "1"
+    SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
+    SGLANG_ENABLE_JIT_DEEPGEMM: "false"
 
   sglang_config:
     prefill:
-      served-model-name: "deepseek-ai/DeepSeek-R1"
-      model-path: "/model/"
-      trust-remote-code: true
-      kv-cache-dtype: "fp8_e4m3"
       disaggregation-mode: "prefill"
-      tensor-parallel-size: 4
-      max-total-tokens: "{max_total_tokens}"
-      chunked-prefill-size: "{chunked_prefill_size}"
+      served-model-name: "deepseek-ai/DeepSeek-R1"
+      trust-remote-code: true
+      disable-radix-cache: true
+      kv-cache-dtype: "fp8_e4m3"
+      attention-backend: "trtllm_mla"
+      quantization: "modelopt_fp4"
+      moe-runner-backend: "flashinfer_trtllm"
+      stream-interval: 10
+      watchdog-timeout: 1000000
+      context-length: 2200
+      mem-fraction-static: 0.95
+      max-total-tokens: 8192
+      chunked-prefill-size: 8192
+      cuda-graph-max-bs: 256
+      max-running-requests: 512
+      scheduler-recv-interval: 10
+      enable-symm-mem: true
+      load-balance-method: "round_robin"
+      disaggregation-bootstrap-port: 30001
+      disaggregation-transfer-backend: nixl
+      fp4-gemm-backend: "flashinfer_trtllm"
+      data-parallel-size: 1
+      tensor-parallel-size: "{tp_size}"
+      expert-parallel-size: "{ep_size}"
 
     decode:
-      served-model-name: "deepseek-ai/DeepSeek-R1"
-      model-path: "/model/"
-      trust-remote-code: true
-      kv-cache-dtype: "fp8_e4m3"
       disaggregation-mode: "decode"
+      served-model-name: "deepseek-ai/DeepSeek-R1"
+      prefill-round-robin-balance: true
+      trust-remote-code: true
+      disable-radix-cache: true
+      kv-cache-dtype: "fp8_e4m3"
+      attention-backend: "trtllm_mla"
+      quantization: "modelopt_fp4"
+      moe-runner-backend: "flashinfer_trtllm"
+      disaggregation-bootstrap-port: 30001
+      stream-interval: 10
+      watchdog-timeout: 1000000
+      context-length: 2200
+      mem-fraction-static: 0.95
+      chunked-prefill-size: 8192
+      cuda-graph-max-bs: 256
+      scheduler-recv-interval: 10
+      enable-symm-mem: true
+      disaggregation-transfer-backend: nixl
+      fp4-gemm-backend: "flashinfer_trtllm"
       tensor-parallel-size: 4
-      chunked-prefill-size: "{chunked_prefill_size}"
+      expert-parallel-size: 1
 
 benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 1024
-  concurrencies: [256, 512]
+  concurrencies: "4x8x32"
   req_rate: "inf"
-
-# This generates 4 jobs:
-#   1. example-sweep_chunked_prefill_size4096_max_total_tokens8192
-#   2. example-sweep_chunked_prefill_size4096_max_total_tokens16384
-#   3. example-sweep_chunked_prefill_size8192_max_total_tokens8192
-#   4. example-sweep_chunked_prefill_size8192_max_total_tokens16384
-#
-# Usage:
-#   uv run srtctl dry-run -f example-sweep.yaml  # Preview jobs (sweep auto-detected)
-#   uv run srtctl apply -f example-sweep.yaml    # Submit all jobs (sweep auto-detected)

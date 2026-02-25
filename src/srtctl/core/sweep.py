@@ -5,12 +5,11 @@
 """
 Parameter sweep generation for YAML configs.
 
-This module generates multiple job configs from a sweep configuration by
-expanding all combinations of sweep parameters.
+Generates multiple job configs from a sweep list where each entry is a dict
+of correlated parameters expanded into one job. No Cartesian product.
 """
 
 import copy
-import itertools
 from typing import Any
 
 
@@ -51,8 +50,16 @@ def expand_template(template: Any, values: dict[str, Any]) -> Any:
 def generate_sweep_configs(sweep_config: dict) -> list[tuple[dict, dict]]:
     """Generate all job configs from a sweep configuration.
 
+    The sweep section must be a list of parameter dicts. Each dict is one job
+    with correlated parameters that get expanded into the template config.
+
+    Example:
+        sweep:
+          - {prefill_nodes: 1, tp_size: 4, ep_size: 1}
+          - {prefill_nodes: 2, tp_size: 8, ep_size: 8}
+
     Args:
-        sweep_config: Config dict with 'sweep' section defining parameters
+        sweep_config: Config dict with 'sweep' section (list of param dicts)
 
     Returns:
         List of (expanded_config, param_values) tuples
@@ -66,18 +73,15 @@ def generate_sweep_configs(sweep_config: dict) -> list[tuple[dict, dict]]:
     cluster_config = load_cluster_config()
     sweep_config = resolve_config_with_defaults(sweep_config, cluster_config)
 
-    # Extract sweep parameters
-    sweep_params = sweep_config["sweep"]
-
-    # Generate all combinations
-    param_names = list(sweep_params.keys())
-    param_values_list = [sweep_params[name] for name in param_names]
+    sweep_points = sweep_config["sweep"]
+    if not isinstance(sweep_points, list) or not sweep_points:
+        raise ValueError("sweep must be a non-empty list of parameter dicts")
+    for i, entry in enumerate(sweep_points):
+        if not isinstance(entry, dict):
+            raise ValueError(f"sweep[{i}] must be a dict, got {type(entry).__name__}")
 
     configs = []
-    for values in itertools.product(*param_values_list):
-        # Create parameter dict for this combination
-        params = dict(zip(param_names, values, strict=False))
-
+    for params in sweep_points:
         # Create a copy of the config without the sweep section
         config = copy.deepcopy(sweep_config)
         del config["sweep"]
