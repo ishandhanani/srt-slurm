@@ -358,6 +358,12 @@ class RuntimeContext:
         if not is_hf_model:
             container_mounts[model_path] = Path("/model")
 
+        # Include extra mounts from config (no path validation in dry-run)
+        if config.extra_mount:
+            for mount_spec in config.extra_mount:
+                host_path, container_path = mount_spec.split(":", 1)
+                container_mounts[Path(host_path)] = Path(container_path)
+
         return cls(
             job_id=job_id,
             run_name=run_name,

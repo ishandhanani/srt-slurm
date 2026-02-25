@@ -43,7 +43,7 @@ benchmark:
   type: "sa-bench"
   isl: 1024
   osl: 1024
-  concurrencies: [{concurrency}]
+  concurrencies: ["{concurrency}"]
 
 sweep:
   - {concurrency: 128}
@@ -98,7 +98,7 @@ Placeholders work anywhere in the YAML:
 ```yaml
 name: "sweep-{param}"
 mem-fraction-static: "{mem}"
-concurrencies: [{conc}]
+concurrencies: ["{conc}"]
 dp-size: "{dp}"
 prefill_nodes: "{nodes}"
 ```

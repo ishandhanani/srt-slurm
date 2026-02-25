@@ -173,6 +173,11 @@ class TestGenerateSweepConfigs:
         assert params[1] == {"tokens": 2048}
         assert params[2] == {"tokens": 4096}
 
+        # Verify placeholder is substituted in expanded config
+        assert results[0][0]["backend"]["sglang_config"]["prefill"]["max-total-tokens"] == "1024"
+        assert results[1][0]["backend"]["sglang_config"]["prefill"]["max-total-tokens"] == "2048"
+        assert results[2][0]["backend"]["sglang_config"]["prefill"]["max-total-tokens"] == "4096"
+
     def test_correlated_params(self):
         """Test sweep with correlated parameters (the whole point)."""
         config = {

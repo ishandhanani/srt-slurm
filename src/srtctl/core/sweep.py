@@ -5,8 +5,8 @@
 """
 Parameter sweep generation for YAML configs.
 
-This module generates multiple job configs from a sweep configuration by
-expanding all combinations of sweep parameters.
+Generates multiple job configs from a sweep list where each entry is a dict
+of correlated parameters expanded into one job. No Cartesian product.
 """
 
 import copy

@@ -278,16 +278,16 @@ def submit_with_orchestrator(
     if config is None:
         config = load_config(config_path)
 
+    if dry_run:
+        display_enhanced_dry_run(config, config_path)
+        return
+
     script_content = generate_minimal_sbatch_script(
         config=config,
         config_path=config_path,
         setup_script=setup_script,
         output_dir=output_dir,
     )
-
-    if dry_run:
-        display_enhanced_dry_run(config, config_path)
-        return
 
     # Write script to temp file
     fd, script_path = tempfile.mkstemp(suffix=".slurm", prefix="srtctl_", text=True)

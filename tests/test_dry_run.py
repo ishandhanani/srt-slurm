@@ -3,10 +3,12 @@
 
 """Tests for enhanced dry-run functionality."""
 
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from rich.console import Console
 
 from srtctl.backends import SGLangProtocol
 from srtctl.core.runtime import Nodes, RuntimeContext
@@ -244,7 +246,7 @@ class TestDryRunEndpointAllocation:
 
         processes = endpoints_to_processes(endpoints)
 
-        assert len(processes) >= 3  # 1 prefill + 2 decode
+        assert len(processes) == 3  # 1 prefill + 2 decode
         for proc in processes:
             assert proc.node.startswith("node-")
             assert proc.sys_port > 0
@@ -254,9 +256,9 @@ class TestDryRunEndpointAllocation:
 class TestDisplayEnhancedDryRun:
     """Tests for the enhanced dry-run display function."""
 
-    def test_display_dry_run_runs_without_error(self, capsys):
-        """display_enhanced_dry_run() runs without raising exceptions."""
-        from srtctl.cli.submit import display_enhanced_dry_run
+    def test_display_dry_run_runs_without_error(self):
+        """display_enhanced_dry_run() produces expected output."""
+        from srtctl.cli import submit as submit_module
 
         config = SrtConfig(
             name="test-display",
@@ -276,8 +278,14 @@ class TestDisplayEnhancedDryRun:
 
         config_path = Path("/tmp/test.yaml")
 
-        with patch("srtctl.core.runtime.get_srtslurm_setting", return_value="eth0"):
-            display_enhanced_dry_run(config, config_path)
+        buf = StringIO()
+        test_console = Console(file=buf, force_terminal=True)
 
-        captured = capsys.readouterr()
-        assert "DRY-RUN" in captured.out or len(captured.out) > 0
+        with patch.object(submit_module, "console", test_console), patch(
+            "srtctl.core.runtime.get_srtslurm_setting", return_value="eth0"
+        ):
+            submit_module.display_enhanced_dry_run(config, config_path)
+
+        output = buf.getvalue()
+        assert "DRY-RUN" in output
+        assert "test-display" in output
