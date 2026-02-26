@@ -366,7 +366,14 @@ def wait_for_model(
     Returns:
         True if model is ready with expected workers, False if timeout/aborted
     """
-    if frontend_type == "sglang":
+    if frontend_type == "direct":
+        health_url = f"http://{host}:{port}/health"
+        logger.info(
+            "Polling %s every %.1fs (direct worker mode, bypassing router)",
+            health_url,
+            poll_interval,
+        )
+    elif frontend_type == "sglang":
         health_url = f"http://{host}:{port}/workers"
         logger.info(
             "Polling %s every %.1fs for %d prefills and %d decodes (sglang frontend)",
@@ -404,6 +411,12 @@ def wait_for_model(
         try:
             response = requests.get(health_url, timeout=5.0)
             if response.status_code == 200:
+                # Direct mode: SGLang worker /health returns plain text, not JSON.
+                # A 200 status means the worker is healthy and ready.
+                if frontend_type == "direct":
+                    logger.info("Worker is healthy (direct mode, 200 OK from %s)", health_url)
+                    return True
+
                 response_json = response.json()
 
                 # Check worker counts based on frontend type
