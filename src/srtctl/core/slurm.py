@@ -258,7 +258,8 @@ def start_srun_process(
     else:
         srun_cmd.extend(command)
 
-    logger.debug("Starting srun: %s", shlex.join(srun_cmd))
+
+    logger.info("srun command: %s", shlex.join(srun_cmd))
 
     # Start the process
     proc = subprocess.Popen(
