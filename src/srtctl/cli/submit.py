@@ -131,6 +131,7 @@ def submit_with_orchestrator(
     tags: list[str] | None = None,
     setup_script: str | None = None,
     output_dir: Path | None = None,
+    job_name: str | None = None,
 ) -> None:
     """Submit job using the new Python orchestrator.
 
@@ -143,10 +144,15 @@ def submit_with_orchestrator(
         tags: Optional tags for the run
         setup_script: Optional custom setup script name (overrides config)
         output_dir: Custom output directory (CLI flag, highest priority)
+        job_name: Optional job name override (overrides config.name)
     """
+    from dataclasses import replace
 
     if config is None:
         config = load_config(config_path)
+
+    if job_name:
+        config = replace(config, name=job_name)
 
     script_content = generate_minimal_sbatch_script(
         config=config,
@@ -280,6 +286,7 @@ def submit_single(
     setup_script: str | None = None,
     tags: list[str] | None = None,
     output_dir: Path | None = None,
+    job_name: str | None = None,
 ):
     """Submit a single job from YAML config.
 
@@ -292,6 +299,7 @@ def submit_single(
         setup_script: Optional custom setup script name
         tags: Optional list of tags
         output_dir: Custom output directory (CLI flag, highest priority)
+        job_name: Optional job name override (overrides config.name)
     """
     if config is None and config_path:
         config = load_config(config_path)
@@ -307,6 +315,7 @@ def submit_single(
         tags=tags,
         setup_script=setup_script,
         output_dir=output_dir,
+        job_name=job_name,
     )
 
 
@@ -326,6 +335,7 @@ def submit_sweep(
     setup_script: str | None = None,
     tags: list[str] | None = None,
     output_dir: Path | None = None,
+    job_name: str | None = None,
 ):
     """Submit parameter sweep.
 
@@ -335,6 +345,7 @@ def submit_sweep(
         setup_script: Optional custom setup script name
         tags: Optional list of tags
         output_dir: Custom output directory (CLI flag, highest priority)
+        job_name: Optional job name override (overrides config.name)
     """
     from srtctl.core.sweep import generate_sweep_configs
 
@@ -409,6 +420,7 @@ def submit_sweep(
                 setup_script=setup_script,
                 tags=tags,
                 output_dir=output_dir,
+                job_name=job_name,
             )
         finally:
             with contextlib.suppress(OSError):
@@ -439,6 +451,7 @@ def submit_directory(
     tags: list[str] | None = None,
     force_sweep: bool = False,
     output_dir: Path | None = None,
+    job_name: str | None = None,
 ) -> None:
     """Submit all YAML configs in a directory recursively.
 
@@ -449,6 +462,7 @@ def submit_directory(
         tags: Optional list of tags
         force_sweep: If True, treat all configs as sweeps
         output_dir: Custom output directory (CLI flag, highest priority)
+        job_name: Optional job name override (overrides config.name)
     """
     yaml_files = find_yaml_files(directory)
 
@@ -484,10 +498,22 @@ def submit_directory(
         try:
             is_sweep = force_sweep or is_sweep_config(yaml_file)
             if is_sweep:
-                submit_sweep(yaml_file, dry_run=dry_run, setup_script=setup_script, tags=tags, output_dir=output_dir)
+                submit_sweep(
+                    yaml_file,
+                    dry_run=dry_run,
+                    setup_script=setup_script,
+                    tags=tags,
+                    output_dir=output_dir,
+                    job_name=job_name,
+                )
             else:
                 submit_single(
-                    config_path=yaml_file, dry_run=dry_run, setup_script=setup_script, tags=tags, output_dir=output_dir
+                    config_path=yaml_file,
+                    dry_run=dry_run,
+                    setup_script=setup_script,
+                    tags=tags,
+                    output_dir=output_dir,
+                    job_name=job_name,
                 )
             success_count += 1
         except Exception as e:
@@ -542,9 +568,11 @@ def main():
     add_common_args(apply_parser)
     apply_parser.add_argument("--setup-script", type=str, help="Custom setup script in configs/")
     apply_parser.add_argument("--tags", type=str, help="Comma-separated tags")
+    apply_parser.add_argument("--job-name", type=str, help="Override job name (SLURM --job-name)")
 
     dry_run_parser = subparsers.add_parser("dry-run", help="Validate without submitting")
     add_common_args(dry_run_parser)
+    dry_run_parser.add_argument("--job-name", type=str, help="Override job name (SLURM --job-name)")
 
     args = parser.parse_args()
 
@@ -558,6 +586,7 @@ def main():
     try:
         setup_script = getattr(args, "setup_script", None)
         output_dir = getattr(args, "output_dir", None)
+        job_name = getattr(args, "job_name", None)
 
         # Handle directory input
         if args.config.is_dir():
@@ -568,12 +597,18 @@ def main():
                 tags=tags,
                 force_sweep=args.sweep,
                 output_dir=output_dir,
+                job_name=job_name,
             )
         else:
             is_sweep = args.sweep or is_sweep_config(args.config)
             if is_sweep:
                 submit_sweep(
-                    args.config, dry_run=is_dry_run, setup_script=setup_script, tags=tags, output_dir=output_dir
+                    args.config,
+                    dry_run=is_dry_run,
+                    setup_script=setup_script,
+                    tags=tags,
+                    output_dir=output_dir,
+                    job_name=job_name,
                 )
             else:
                 submit_single(
@@ -582,6 +617,7 @@ def main():
                     setup_script=setup_script,
                     tags=tags,
                     output_dir=output_dir,
+                    job_name=job_name,
                 )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")

@@ -502,6 +502,121 @@ class TestSetupScript:
         assert config.setup_script == "install-sglang-main.sh"
 
 
+class TestJobNameOverride:
+    """Tests for --job-name CLI override functionality."""
+
+    def test_job_name_override_with_replace(self):
+        """Test job name can be overridden with dataclasses.replace."""
+        from dataclasses import replace
+
+        from srtctl.core.schema import (
+            ModelConfig,
+            ResourceConfig,
+            SrtConfig,
+        )
+
+        config = SrtConfig(
+            name="original-name",
+            model=ModelConfig(path="/model", container="/container.sqsh", precision="fp8"),
+            resources=ResourceConfig(gpu_type="h100", gpus_per_node=8, agg_nodes=1),
+        )
+
+        assert config.name == "original-name"
+
+        # Override with replace (simulates CLI --job-name behavior)
+        config = replace(config, name="custom-job-name")
+        assert config.name == "custom-job-name"
+
+    def test_sbatch_script_uses_overridden_job_name(self):
+        """Test that sbatch script uses the overridden job name."""
+        from dataclasses import replace
+        from pathlib import Path
+
+        from srtctl.cli.submit import generate_minimal_sbatch_script
+        from srtctl.core.schema import (
+            ModelConfig,
+            ResourceConfig,
+            SrtConfig,
+        )
+
+        config = SrtConfig(
+            name="original-name",
+            model=ModelConfig(path="/model", container="/container.sqsh", precision="fp8"),
+            resources=ResourceConfig(gpu_type="h100", gpus_per_node=8, agg_nodes=1),
+        )
+
+        # Without override
+        script = generate_minimal_sbatch_script(config=config, config_path=Path("/tmp/test.yaml"))
+        assert "#SBATCH --job-name=original-name" in script
+
+        # With override
+        overridden = replace(config, name="my-custom-name")
+        script = generate_minimal_sbatch_script(config=overridden, config_path=Path("/tmp/test.yaml"))
+        assert "#SBATCH --job-name=my-custom-name" in script
+        assert "original-name" not in script
+
+    def test_submit_with_orchestrator_applies_job_name_override(self):
+        """Test that submit_with_orchestrator applies the job_name override to config."""
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from srtctl.cli.submit import submit_with_orchestrator
+        from srtctl.core.schema import (
+            ModelConfig,
+            ResourceConfig,
+            SrtConfig,
+        )
+
+        config = SrtConfig(
+            name="original-name",
+            model=ModelConfig(path="/model", container="/container.sqsh", precision="fp8"),
+            resources=ResourceConfig(gpu_type="h100", gpus_per_node=8, agg_nodes=1),
+        )
+
+        # In dry-run mode, we can capture what gets rendered
+        with patch("srtctl.cli.submit.console") as mock_console:
+            submit_with_orchestrator(
+                config_path=Path("/tmp/test.yaml"),
+                config=config,
+                dry_run=True,
+                job_name="overridden-name",
+            )
+
+        # The Panel should use the overridden name as title
+        panel_call = mock_console.print.call_args_list[1]
+        panel_obj = panel_call[0][0]
+        assert panel_obj.title == "overridden-name"
+
+    def test_submit_with_orchestrator_no_override(self):
+        """Test that submit_with_orchestrator uses config.name when no override."""
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from srtctl.cli.submit import submit_with_orchestrator
+        from srtctl.core.schema import (
+            ModelConfig,
+            ResourceConfig,
+            SrtConfig,
+        )
+
+        config = SrtConfig(
+            name="original-name",
+            model=ModelConfig(path="/model", container="/container.sqsh", precision="fp8"),
+            resources=ResourceConfig(gpu_type="h100", gpus_per_node=8, agg_nodes=1),
+        )
+
+        with patch("srtctl.cli.submit.console") as mock_console:
+            submit_with_orchestrator(
+                config_path=Path("/tmp/test.yaml"),
+                config=config,
+                dry_run=True,
+            )
+
+        panel_call = mock_console.print.call_args_list[1]
+        panel_obj = panel_call[0][0]
+        assert panel_obj.title == "original-name"
+
+
 class TestWorkerEnvironmentTemplating:
     """Tests for per-worker environment variable templating with {node} and {node_id}."""
 
