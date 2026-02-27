@@ -71,7 +71,7 @@ class BenchmarkStageMixin:
 
         # Determine if we're in direct worker mode (bypassing the router)
         is_direct = (
-            r.num_agg > 0
+            r.num_agg == 1
             and self.config.frontend.type == "sglang"
         )
         health_port = self.runtime.frontend_port

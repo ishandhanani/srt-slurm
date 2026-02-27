@@ -185,7 +185,7 @@ class FrontendStageMixin:
         """
         r = self.config.resources
         return (
-            r.num_agg > 0
+            r.num_agg == 1
             and self.config.frontend.type == "sglang"
         )
 
