@@ -69,16 +69,24 @@ class BenchmarkStageMixin:
             n_prefill = r.num_prefill
             n_decode = r.num_decode
 
+        # Determine if we're in direct worker mode (bypassing the router)
+        is_direct = (
+            r.num_agg == 1
+            and self.config.frontend.type == "sglang"
+        )
+        health_port = self.runtime.frontend_port
+        health_frontend_type = "direct" if is_direct else self.config.frontend.type
+
         hc = self.config.health_check
         if not wait_for_model(
             host=self.runtime.nodes.head,
-            port=8000,
+            port=health_port,
             n_prefill=n_prefill,
             n_decode=n_decode,
             poll_interval=float(hc.interval_seconds),
             timeout=float(hc.max_attempts * hc.interval_seconds),
             report_every=60.0,
-            frontend_type=self.config.frontend.type,
+            frontend_type=health_frontend_type,
             stop_event=stop_event,
         ):
             logger.error("Server did not become healthy")
@@ -90,34 +98,26 @@ class BenchmarkStageMixin:
         if reporter:
             reporter.report(JobStatus.BENCHMARK, JobStage.BENCHMARK, "Running benchmark")
 
-        # When profiling is enabled, decide whether to use the dedicated profiling
-        # runner (profile.sh with controlled traffic) or let the user's benchmark run
-        # while workers are profiled via nsys/torch wrapping.
+        # When profiling is enabled, use the dedicated profiling runner (profile.sh)
+        # which sends controlled traffic and triggers cudaProfilerStart/Stop via
+        # the SGLang /start_profile API.
         benchmark_type = self.config.benchmark.type
         if self.config.profiling.enabled:
-            if benchmark_type in ("manual", "profiling"):
-                benchmark_type = "profiling"
-                logger.info(
-                    "Profiling enabled (type=%s) - using dedicated profiling benchmark",
-                    self.config.profiling.type,
-                )
-                logger.info(
-                    "Profiling config: isl=%s, osl=%s, concurrency=%s",
-                    self.config.profiling.isl,
-                    self.config.profiling.osl,
-                    self.config.profiling.concurrency,
-                )
-            else:
-                logger.info(
-                    "Profiling enabled (type=%s) alongside %s benchmark - "
-                    "workers are nsys/torch-wrapped, benchmark traffic will be profiled",
-                    self.config.profiling.type,
-                    benchmark_type,
-                )
+            benchmark_type = "profiling"
+            logger.info(
+                "Profiling enabled (type=%s) - using dedicated profiling benchmark",
+                self.config.profiling.type,
+            )
+            logger.info(
+                "Profiling config: isl=%s, osl=%s, concurrency=%s",
+                self.config.profiling.isl,
+                self.config.profiling.osl,
+                self.config.profiling.concurrency,
+            )
 
         if benchmark_type == "manual":
             logger.info("Benchmark type is 'manual' - server is ready for testing")
-            logger.info("Frontend URL: http://%s:8000", self.runtime.nodes.head)
+            logger.info("Frontend URL: http://%s:%d", self.runtime.nodes.head, self.runtime.frontend_port)
             logger.info("Press Ctrl+C to stop the job")
 
             while not stop_event.is_set():

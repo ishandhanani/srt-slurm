@@ -176,12 +176,33 @@ class FrontendStageMixin:
             listen_port=topology.public_port,
         )
 
+    def _is_direct_worker_mode(self) -> bool:
+        """Check if we should bypass the router and talk to the worker directly.
+
+        This applies to single-worker aggregated SGLang deployments where the
+        router adds no value and introduces a race condition: the router starts
+        before the worker finishes loading and never re-discovers it.
+        """
+        r = self.config.resources
+        return (
+            r.num_agg == 1
+            and self.config.frontend.type == "sglang"
+        )
+
     def start_frontend(self, registry: "ProcessRegistry") -> list[ManagedProcess]:
         """Start the frontend layer (nginx + frontends if applicable).
 
         Returns:
             List of ManagedProcess instances for all frontend processes.
         """
+        if self._is_direct_worker_mode():
+            logger.info(
+                "Skipping router for aggregated SGLang mode — "
+                "health checks and benchmarks will talk to worker on port 30000 directly"
+            )
+            object.__setattr__(self.runtime, "frontend_port", 30000)
+            return []
+
         logger.info("Starting frontend layer")
         topology = self._compute_frontend_topology()
         processes: list[ManagedProcess] = []
