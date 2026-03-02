@@ -1,0 +1,243 @@
+# Rate-Matching Sweep: Qwen3.5-397B-A17B 1k/1k STP v2 on B200 (SGLang, TP=8, Disagg PD)
+# — base/override format —
+#
+# All engine settings are hand-written in ctx_sol_base (prefill) and
+# gen_sol_base (decode).  No gen_sweep needed — concurrency variations
+# are expressed directly as override_c* keys in gen_sol_base.
+#
+# Output: 1 prefill YAML + 1 decode YAML (with base + 6 overrides = 7 variants)
+#
+# Submit individual variants:
+#   srtctl apply -f configs/gen_sol.yaml:base          # C=4
+#   srtctl apply -f configs/gen_sol.yaml:override_c8   # C=8
+#   srtctl apply -f configs/gen_sol.yaml:override_c256 # C=256
+
+name: qwen3_397b_1k1k_sglang_stp_v2
+
+engine_type: sglang
+
+model:
+  path: qwen3.5-397B
+  container: sglang-nightly
+  precision: bf16
+
+workload:
+  isl: 1024
+  osl: 1024
+  random_ratio: 0.8
+
+resources:
+  gpu_type: b200
+  gpus_per_node: 8
+  ctx_gpus_per_instance: 8
+  gen_gpus_per_instance: 8
+  max_total_gpus: 64
+
+ctx_config:
+  benchmark_concurrency: 64
+
+# -----------------------------------------------------------------------
+# CTX SOL (prefill): complete srt-slurm config — aggregated mode, osl=1
+# -----------------------------------------------------------------------
+ctx_sol_base:
+  name: qwen3_397b_1k1k_sglang_stp_v2_ctx_sol
+  model:
+    path: qwen3.5-397B
+    container: sglang-nightly
+    precision: bf16
+  resources:
+    gpu_type: b200
+    agg_nodes: 1
+    agg_workers: 1
+    gpus_per_node: 8
+  backend:
+    type: sglang
+    aggregated_environment:
+      SGLANG_RECORD_STEP_TIME: "1"
+      PYTHONUNBUFFERED: "1"
+      NCCL_NVLS_ENABLE: "1"
+      SGL_ENABLE_JIT_DEEPGEMM: "false"
+      SGLANG_ENABLE_FLASHINFER_GEMM: "true"
+    sglang_config:
+      aggregated:
+        trust-remote-code: true
+        tp-size: 8
+        disable-radix-cache: true
+        mem-fraction-static: 0.82
+        chunked-prefill-size: 32768
+        max-prefill-tokens: 32768
+        decode-log-interval: 1
+        stream-interval: 30
+        enable-flashinfer-allreduce-fusion: true
+        max-running-requests: 64
+        served-model-name: "Qwen/Qwen3.5-397B-A17B"
+        attention-backend: trtllm_mha
+        moe-runner-backend: flashinfer_trtllm
+  benchmark:
+    type: sa-bench
+    isl: 1024
+    osl: 1
+    concurrencies: "64"
+    req_rate: inf
+
+# -----------------------------------------------------------------------
+# GEN SOL (decode): base/override format — disagg PD mode
+#
+# base = C=4 (low latency), overrides patch concurrency + decode settings.
+# Low-C tier (C=4,8): cuda-graph-max-bs=16, stream-interval=10
+# Mid/High-C tier (C=16+): cuda-graph-max-bs=128, stream-interval=30
+# -----------------------------------------------------------------------
+gen_sol_base:
+  base:
+    name: qwen3_397b_1k1k_sglang_stp_v2_gen_sol
+    model:
+      path: qwen3.5-397B
+      container: sglang-nightly
+      precision: bf16
+    resources:
+      gpu_type: b200
+      prefill_nodes: 1
+      prefill_workers: 1
+      decode_nodes: 1
+      decode_workers: 1
+      gpus_per_node: 8
+    frontend:
+      type: sglang
+    backend:
+      type: sglang
+      prefill_environment:
+        PYTHONUNBUFFERED: "1"
+        NCCL_NVLS_ENABLE: "1"
+        SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+        SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+        SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+        SGLANG_RECORD_STEP_TIME: "1"
+        SGL_ENABLE_JIT_DEEPGEMM: "false"
+        SGLANG_ENABLE_FLASHINFER_GEMM: "true"
+      decode_environment:
+        PYTHONUNBUFFERED: "1"
+        NCCL_NVLS_ENABLE: "1"
+        SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+        SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+        SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+        SGLANG_RECORD_STEP_TIME: "1"
+        SGL_ENABLE_JIT_DEEPGEMM: "false"
+        SGLANG_ENABLE_FLASHINFER_GEMM: "true"
+      sglang_config:
+        prefill:
+          trust-remote-code: true
+          tp-size: 8
+          disable-radix-cache: true
+          mem-fraction-static: 0.82
+          chunked-prefill-size: 32768
+          max-prefill-tokens: 32768
+          max-running-requests: 256
+          decode-log-interval: 1
+          stream-interval: 30
+          enable-flashinfer-allreduce-fusion: true
+          watchdog-timeout: 1000000
+          disaggregation-transfer-backend: nixl
+          served-model-name: "Qwen/Qwen3.5-397B-A17B"
+          attention-backend: trtllm_mha
+          moe-runner-backend: flashinfer_trtllm
+        decode:
+          trust-remote-code: true
+          tp-size: 8
+          disable-radix-cache: true
+          mem-fraction-static: 0.82
+          max-running-requests: 4
+          decode-log-interval: 1
+          cuda-graph-max-bs: 16
+          stream-interval: 10
+          enable-flashinfer-allreduce-fusion: true
+          scheduler-recv-interval: 10
+          watchdog-timeout: 1000000
+          disaggregation-transfer-backend: nixl
+          served-model-name: "Qwen/Qwen3.5-397B-A17B"
+          attention-backend: trtllm_mha
+          moe-runner-backend: flashinfer_trtllm
+    benchmark:
+      type: sa-bench
+      isl: 1024
+      osl: 1024
+      concurrencies: "4"
+      req_rate: inf
+      skip_initial_test: true
+
+  # --- Low-C tier ---
+  override_c8:
+    backend:
+      sglang_config:
+        decode:
+          max-running-requests: 8
+    benchmark:
+      concurrencies: "8"
+
+  # --- Mid/High-C tier (switch to throughput-optimized settings) ---
+  override_c16:
+    backend:
+      sglang_config:
+        decode:
+          max-running-requests: 16
+          cuda-graph-max-bs: 128
+          stream-interval: 30
+          scheduler-recv-interval: 30
+    benchmark:
+      concurrencies: "16"
+
+  override_c32:
+    backend:
+      sglang_config:
+        decode:
+          max-running-requests: 32
+          cuda-graph-max-bs: 128
+          stream-interval: 30
+          scheduler-recv-interval: 30
+    benchmark:
+      concurrencies: "32"
+
+  override_c64:
+    backend:
+      sglang_config:
+        decode:
+          max-running-requests: 64
+          cuda-graph-max-bs: 128
+          stream-interval: 30
+          scheduler-recv-interval: 30
+    benchmark:
+      concurrencies: "64"
+
+  override_c128:
+    backend:
+      sglang_config:
+        decode:
+          max-running-requests: 128
+          cuda-graph-max-bs: 128
+          stream-interval: 30
+          scheduler-recv-interval: 30
+    benchmark:
+      concurrencies: "128"
+
+  override_c256:
+    backend:
+      sglang_config:
+        decode:
+          max-running-requests: 256
+          cuda-graph-max-bs: 256
+          stream-interval: 30
+          scheduler-recv-interval: 30
+    benchmark:
+      concurrencies: "256"
+
+settings:
+  poll_interval: 180
+  max_retries: 2
+  max_poll_time: 14400
+  run_e2e_validation: true
+  parallel_submissions: false
+
+  e2e_validation:
+    concurrency_multipliers: [0.95, 1.0, 1.05]
+    tpot_tolerance_pct: 15.0
+    throughput_tolerance_pct: 20.0
+    ttft_constraint_ms: 5000.0
