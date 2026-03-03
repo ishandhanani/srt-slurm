@@ -1,9 +1,16 @@
 # B200-FP8 1k1k MTP — all scale variants in one file
 #
+# Two parallelism modes:
+#   tep8 (low-latency): DP=1 decode — base config
+#   dep8 (max-tpt):     DP=8 decode — zip_override_maxtpt adds DP settings
+#
+# Note: max-tpt DP=8 does NOT raise max-running-requests for MTP (stays 512).
+#       override_maxtpt_1p2d is a special case: speculative-num-steps=1, draft-tokens=2.
+#
 # Usage:
-#   srtctl apply  -f recipes/b200-fp8/1k1k-mtp.yaml                       # all 6 variants
-#   srtctl apply  -f recipes/b200-fp8/1k1k-mtp.yaml:zip_override_scale[0] # 1p1d low-lat
-#   srtctl dry-run -f recipes/b200-fp8/1k1k-mtp.yaml                      # preview
+#   srtctl apply  -f recipes/b200-fp8/1k1k-mtp.yaml                               # all 6 variants
+#   srtctl apply  -f recipes/b200-fp8/1k1k-mtp.yaml:zip_override_lowlat[0]       # 1p1d low-lat only
+#   srtctl dry-run -f recipes/b200-fp8/1k1k-mtp.yaml                             # preview
 
 base:
   name: "b200-fp8-mtp-1k1k"
@@ -117,25 +124,63 @@ base:
     req_rate: "inf"
 
 
-# Sweep: low-latency (1p1d, 1p3d) and max-throughput (1p1d, 1p2d, 1p5d, 2p5d)
-zip_override_scale:
+# Low-latency variants: tep8 decode (DP=1), scale sweep 1p1d and 1p3d
+zip_override_lowlat:
   name:
     - "b200-fp8-low-latency-tep8-1p-1d"
     - "b200-fp8-low-latency-tep8-1p-3d"
+  resources:
+    decode_nodes: [1, 3]
+    decode_workers: [1, 3]
+  benchmark:
+    concurrencies: ["4x64", "4x8x16x32x128"]
+
+
+# Max-throughput variants: dep8 decode (DP=8), scale sweep 1p1d/1p5d/2p5d
+# Note: max-running-requests stays at 512 for MTP (unlike STP)
+zip_override_maxtpt:
+  name:
     - "b200-fp8-max-tpt-dep8-1p-1d"
-    - "b200-fp8-max-tpt-dep8-1p-2d"
     - "b200-fp8-max-tpt-dep8-1p-5d"
     - "b200-fp8-max-tpt-dep8-2p-5d"
   resources:
-    prefill_nodes: [1, 1, 1, 1, 1, 2]
-    prefill_workers: [1, 1, 1, 1, 1, 2]
-    decode_nodes: [1, 3, 1, 2, 5, 5]
-    decode_workers: [1, 3, 1, 2, 5, 5]
+    prefill_nodes: [1, 1, 2]
+    prefill_workers: [1, 1, 2]
+    decode_nodes: [1, 5, 5]
+    decode_workers: [1, 5, 5]
+  backend:
+    sglang_config:
+      prefill:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+      decode:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
   benchmark:
-    concurrencies:
-      - "4x64"
-      - "4x8x16x32x128"
-      - "512x1024x2048x4096"
-      - "512x1024x2048"
-      - "512x4096"
-      - "1024x2048x4096"
+    concurrencies: ["512x1024x2048x4096", "512x4096", "1024x2048x4096"]
+
+
+# Special case: 1p2d has speculative-num-steps=1 and draft-tokens=2 (vs 2/3 for all others)
+override_maxtpt_1p2d:
+  name: "b200-fp8-max-tpt-dep8-1p-2d"
+  resources:
+    decode_nodes: 2
+    decode_workers: 2
+  backend:
+    sglang_config:
+      prefill:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+      decode:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+        speculative-num-steps: 1
+        speculative-num-draft-tokens: 2
+  benchmark:
+    concurrencies: "512x1024x2048"

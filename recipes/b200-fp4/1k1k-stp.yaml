@@ -1,9 +1,16 @@
 # B200-FP4 1k1k STP — all scale variants in one file
 #
+# Two decode modes:
+#   tep8 (low-latency): DP=1 decode — base config
+#   dep8 (max-tpt):     DP=8 decode — zip_override_maxtpt adds DP settings +
+#                       SGLANG_MOE_NVFP4_DISPATCH / SGLANG_FLASHINFER_FP4_GEMM_BACKEND
+#
+# Note: max-tpt 1d has max-running-requests=1024; max-tpt 2d keeps 512.
+#
 # Usage:
-#   srtctl apply  -f recipes/b200-fp4/1k1k-stp.yaml                       # all 4 variants
-#   srtctl apply  -f recipes/b200-fp4/1k1k-stp.yaml:zip_override_scale[0] # 1p5d low-lat
-#   srtctl dry-run -f recipes/b200-fp4/1k1k-stp.yaml                      # preview
+#   srtctl apply  -f recipes/b200-fp4/1k1k-stp.yaml                          # all 4 variants
+#   srtctl apply  -f recipes/b200-fp4/1k1k-stp.yaml:zip_override_lowlat[0]  # 1p5d low-lat only
+#   srtctl dry-run -f recipes/b200-fp4/1k1k-stp.yaml                        # preview
 
 base:
   name: "b200-fp4-stp-1k1k"
@@ -116,15 +123,40 @@ base:
     req_rate: "inf"
 
 
-# Sweep: low-latency (1p5d, 1p6d) and max-throughput (1p1d, 1p2d)
-zip_override_scale:
+# Low-latency variants: tep8 decode (DP=1), scale sweep 1p5d and 1p6d
+zip_override_lowlat:
   name:
     - "b200-fp4-low-latency-dep4-1p-tep8-5d"
     - "b200-fp4-low-latency-dep4-1p-tep8-6d"
+  resources:
+    decode_nodes: [5, 6]
+    decode_workers: [5, 6]
+  benchmark:
+    concurrencies: ["16x128", "32x64x256"]
+
+
+# Max-throughput variants: dep8 decode (DP=8), scale sweep 1p1d and 1p2d
+# Note: 1d has max-running-requests=1024; 2d keeps 512 (scale determines optimal batch)
+zip_override_maxtpt:
+  name:
     - "b200-fp4-max-tpt-dep4-1p-dep8-1d"
     - "b200-fp4-max-tpt-dep4-1p-dep8-2d"
   resources:
-    decode_nodes: [5, 6, 1, 2]
-    decode_workers: [5, 6, 1, 2]
+    decode_nodes: [1, 2]
+    decode_workers: [1, 2]
+  backend:
+    decode_environment:
+      SGLANG_MOE_NVFP4_DISPATCH: "1"
+      SGLANG_FLASHINFER_FP4_GEMM_BACKEND: "cutlass"
+    sglang_config:
+      prefill:
+        max-running-requests: [1024, 512]
+      decode:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+        max-running-requests: [1024, 512]
+        cuda-graph-max-bs: [1024, 512]
   benchmark:
-    concurrencies: ["16x128", "32x64x256", "512", "512"]
+    concurrencies: ["512", "512"]

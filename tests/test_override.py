@@ -109,7 +109,7 @@ class TestGenerateOverrideConfigs:
         suffixes = [s for s, _ in variants]
         assert suffixes == ["small", "tp_0", "tp_1"]
 
-        # override auto-name and deep-merge
+        # override auto-name and deep-merge (no explicit name in override)
         assert variants[0][1]["name"] == "base-job_small"
         assert variants[0][1]["resources"]["decode_nodes"] == 2
 

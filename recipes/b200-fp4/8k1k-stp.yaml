@@ -1,14 +1,15 @@
 # B200-FP4 8k1k STP — all variants in one file
 #
-# Two prefill modes:
-#   dep4 (default): DP4 prefill — tensor-parallel-size=4, data-parallel-size=4
-#   tp4  (override_tp4): TP4 prefill — tensor-parallel-size=4, data-parallel-size=1
+# Three modes:
+#   dep4 low-lat (default): DP4 prefill + tep8 decode (DP=1)
+#   tp4  (override_tp4):    TP4 prefill (DP=1, EP=1) — for low-latency single-node
+#   dep8 max-tpt (override_maxtpt_7p2d): DP8 decode, large-scale 7p2d
 #
 # Usage:
-#   srtctl apply  -f recipes/b200-fp4/8k1k-stp.yaml                       # all 4 dep4 variants
-#   srtctl apply  -f recipes/b200-fp4/8k1k-stp.yaml:override_tp4          # tp4 variant
-#   srtctl apply  -f recipes/b200-fp4/8k1k-stp.yaml:zip_override_scale[0] # 1p1d dep4 only
-#   srtctl dry-run -f recipes/b200-fp4/8k1k-stp.yaml                      # preview
+#   srtctl apply  -f recipes/b200-fp4/8k1k-stp.yaml                         # all 5 variants
+#   srtctl apply  -f recipes/b200-fp4/8k1k-stp.yaml:override_tp4            # tp4 variant
+#   srtctl apply  -f recipes/b200-fp4/8k1k-stp.yaml:zip_override_lowlat[0]  # 1p1d dep4 only
+#   srtctl dry-run -f recipes/b200-fp4/8k1k-stp.yaml                        # preview
 
 base:
   name: "b200-fp4-stp-8k1k"
@@ -18,6 +19,9 @@ base:
     container: "dynamo-sglang"
     precision: "fp4"
 
+  frontend:
+    num_additional_frontends: 4
+
   resources:
     gpu_type: "b200"
     prefill_nodes: 1
@@ -25,7 +29,6 @@ base:
     gpus_per_prefill: 4
     decode_nodes: 1
     decode_workers: 1
-    num_additional_frontends: 4
     gpus_per_node: 8
 
   backend:
@@ -84,6 +87,7 @@ base:
         kv-cache-dtype: "fp8_e4m3"
         moe-runner-backend: "flashinfer_trtllm"
         moe-dense-tp-size: 1
+        fp4-gemm-backend: "flashinfer_trtllm"
         stream-interval: 30
         watchdog-timeout: 1000000
         enable-flashinfer-allreduce-fusion: true
@@ -106,6 +110,7 @@ base:
         attention-backend: "trtllm_mla"
         kv-cache-dtype: "fp8_e4m3"
         moe-runner-backend: "flashinfer_trtllm"
+        fp4-gemm-backend: "flashinfer_trtllm"
         stream-interval: 30
         watchdog-timeout: 1000000
         enable-flashinfer-allreduce-fusion: true
@@ -125,7 +130,7 @@ base:
 # TP4 prefill mode: tensor-parallel instead of data-parallel for prefill
 override_tp4:
   name: "b200-fp4-low-latency-tp4-1p-tp8-1d"
-  resources:
+  frontend:
     num_additional_frontends: 2
   backend:
     sglang_config:
@@ -134,21 +139,51 @@ override_tp4:
         expert-parallel-size: 1
         enable-dp-attention: null
         enable-dp-lm-head: null
+      decode:
+        expert-parallel-size: 1
   benchmark:
     concurrencies: "4x8x16x64"
 
 
-# dep4 scale sweep: low-latency (1p1d, 1p5d, 2p5d) and max-throughput (7p2d)
-zip_override_scale:
+# dep4 low-latency scale sweep: 1p1d, 1p5d, 2p5d
+zip_override_lowlat:
   name:
     - "b200-fp4-low-latency-dep4-1p-tep8-1d"
     - "b200-fp4-low-latency-dep4-1p-tep8-5d"
     - "b200-fp4-low-latency-dep4-2p-tep8-5d"
-    - "b200-fp4-max-tpt-dep4-7p-dep8-2d"
   resources:
-    prefill_nodes: [1, 1, 2, 7]
-    prefill_workers: [1, 1, 2, 7]
-    decode_nodes: [1, 5, 5, 2]
-    decode_workers: [1, 5, 5, 2]
+    prefill_nodes: [1, 1, 2]
+    prefill_workers: [1, 1, 2]
+    decode_nodes: [1, 5, 5]
+    decode_workers: [1, 5, 5]
   benchmark:
-    concurrencies: ["64x128", "8", "4x128", "1024x2048"]
+    concurrencies: ["64x128", "8", "4x128"]
+
+
+# Max-throughput 7p2d: dep8 decode, large-scale, flashinfer_cutlass backend
+override_maxtpt_7p2d:
+  name: "b200-fp4-max-tpt-dep4-7p-dep8-2d"
+  resources:
+    prefill_nodes: 7
+    prefill_workers: 7
+    decode_nodes: 2
+    decode_workers: 2
+  backend:
+    decode_environment:
+      SGLANG_MOE_NVFP4_DISPATCH: "1"
+    sglang_config:
+      prefill:
+        max-prefill-tokens: 65536
+        chunked-prefill-size: 65536
+        max-running-requests: 1024
+        fp4-gemm-backend: "flashinfer_cutlass"
+      decode:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+        max-running-requests: 2048
+        cuda-graph-max-bs: 1024
+        fp4-gemm-backend: "flashinfer_cutlass"
+  benchmark:
+    concurrencies: "1024x2048"
