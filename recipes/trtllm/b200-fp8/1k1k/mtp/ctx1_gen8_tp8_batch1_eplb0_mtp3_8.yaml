@@ -86,7 +86,7 @@ backend:
         enable_block_reuse: false
         free_gpu_memory_fraction: 0.8
       max_batch_size: 1
-      max_num_tokens: 256
+      max_num_tokens: 4
       max_seq_len: 2176
       moe_config:
         backend: TRTLLM

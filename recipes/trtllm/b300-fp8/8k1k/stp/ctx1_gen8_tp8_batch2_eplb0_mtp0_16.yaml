@@ -86,7 +86,7 @@ backend:
         max_tokens_in_buffer: 8320
       cuda_graph_config:
         enable_padding: true
-        max_batch_size: 2
+        max_batch_size: 1
       disable_overlap_scheduler: false
       enable_attention_dp: false
       enable_iter_perf_stats: false
@@ -95,8 +95,8 @@ backend:
         dtype: fp8
         enable_block_reuse: false
         free_gpu_memory_fraction: 0.8
-      max_batch_size: 2
-      max_num_tokens: 512
+      max_batch_size: 1
+      max_num_tokens: 1
       max_seq_len: 9344
       moe_config:
         backend: TRTLLM
@@ -111,7 +111,7 @@ benchmark:
   type: "sa-bench"
   isl: 8192
   osl: 1024
-  concurrencies: [16]
+  concurrencies: [10]
   req_rate: "inf"
 
 frontend:

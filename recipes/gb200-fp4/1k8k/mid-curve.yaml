@@ -3,15 +3,15 @@ name: "gb200-fp4-1k8k-mid-curve"
 dynamo:
   version: 0.8.1
 
-frontend:  
-  type: dynamo  
+frontend:
+  type: dynamo
   enable_multiple_frontends: true
   num_additional_frontends: 9
-  nginx_container: nginx
+  nginx_container: nginx-sqsh
 
 model:
-  path: "dsfp4"
-  container: "lmsysorg/sglang:v0.5.8-cu130"
+  path: "dsr1-fp4"
+  container: "dynamo-sglang"
   precision: "fp4"
 
 resources:

@@ -1,4 +1,4 @@
-name: "gb200-fp8-1k8k-low-latency-mtp3"
+name: "gb200-fp8-1k8k-low-latency-mtp"
 
 frontend:
   nginx_container: nginx
@@ -85,9 +85,9 @@ backend:
       expert-parallel-size: 1
       disaggregation-transfer-backend: "nixl"
       speculative-algorithm: "EAGLE"
-      speculative-num-steps: 3
+      speculative-num-steps: 2
       speculative-eagle-topk: 1
-      speculative-num-draft-tokens: 4
+      speculative-num-draft-tokens: 3
 
     decode:
       served-model-name: "deepseek-ai/DeepSeek-R1"
@@ -115,9 +115,9 @@ backend:
       expert-parallel-size: 1
       disaggregation-transfer-backend: "nixl"
       speculative-algorithm: "EAGLE"
-      speculative-num-steps: 3
+      speculative-num-steps: 2
       speculative-eagle-topk: 1
-      speculative-num-draft-tokens: 4
+      speculative-num-draft-tokens: 3
 
 benchmark:
   type: "sa-bench"
