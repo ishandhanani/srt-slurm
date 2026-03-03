@@ -223,7 +223,7 @@ zip_override_tp_sweep:
 
 Each submitted job gets its own directory under `outputs/<job_id>/`:
 
-```
+```text
 outputs/6717/
 ├── config.yaml            # original override YAML (for reference)
 ├── config_tp_sweep_0.yaml # resolved config for this specific variant

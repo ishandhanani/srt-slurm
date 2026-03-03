@@ -4,6 +4,7 @@
 """Tests for config override (base + override_* + zip_override_*) functionality."""
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,7 +20,7 @@ from srtctl.core.config import deep_merge, expand_zip_override, generate_overrid
 
 
 class TestDeepMerge:
-    def test_merge_rules(self):
+    def test_merge_rules(self) -> None:
         """Scalar override, list replace, nested merge, null delete, new key — all in one."""
         base = {
             "name": "old",
@@ -44,7 +45,7 @@ class TestDeepMerge:
         assert "extra_mount" not in result                                         # null delete
         assert result["environment"]["NEW_VAR"] == "value"                         # new key
 
-    def test_immutability(self):
+    def test_immutability(self) -> None:
         """Neither base nor override is mutated."""
         base = {"resources": {"decode_nodes": 8}}
         override = {"resources": {"decode_nodes": 4, "extra": [1, 2, 3]}}
@@ -60,7 +61,7 @@ class TestDeepMerge:
 
 
 class TestParseConfigArg:
-    def test_valid_selectors(self):
+    def test_valid_selectors(self) -> None:
         """Plain path, base, override_, zip_override_, and zip_override_[N] are all accepted."""
         assert parse_config_arg("config.yaml") == (Path("config.yaml"), None)
         assert parse_config_arg("config.yaml:base") == (Path("config.yaml"), "base")
@@ -69,7 +70,7 @@ class TestParseConfigArg:
         assert parse_config_arg("config.yaml:zip_override_sweep[0]") == (Path("config.yaml"), "zip_override_sweep[0]")
         assert parse_config_arg("config.yaml:zip_override_sweep[12]") == (Path("config.yaml"), "zip_override_sweep[12]")
 
-    def test_invalid_selector_raises(self):
+    def test_invalid_selector_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid selector"):
             parse_config_arg("config.yaml:foobar")
 
@@ -88,7 +89,7 @@ _RAW = {
 
 
 class TestGenerateOverrideConfigs:
-    def test_full_expansion(self):
+    def test_full_expansion(self) -> None:
         """No selector: base + overrides (sorted) + zip groups (sorted) all returned."""
         variants = generate_override_configs(_RAW)
         suffixes = [s for s, _ in variants]
@@ -107,7 +108,7 @@ class TestGenerateOverrideConfigs:
         assert variants[3][1]["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 8
         assert variants[2][1]["resources"]["decode_nodes"] == 8  # from base
 
-    def test_selectors(self):
+    def test_selectors(self) -> None:
         """All selector forms return the right subset."""
         # base only
         r = generate_override_configs(_RAW, selector="base")
@@ -127,7 +128,7 @@ class TestGenerateOverrideConfigs:
         assert r[0][0] == "tp_1"
         assert r[0][1]["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 8
 
-    def test_errors(self):
+    def test_errors(self) -> None:
         """Missing selectors and out-of-range index raise ValueError."""
         with pytest.raises(ValueError, match="not found"):
             generate_override_configs(_RAW, selector="override_nope")
@@ -143,7 +144,7 @@ class TestGenerateOverrideConfigs:
 
 
 class TestIsOverrideConfig:
-    def test_detection(self, tmp_path):
+    def test_detection(self, tmp_path: Path) -> None:
         """Normal, override, base-only, and empty files are correctly classified."""
         (tmp_path / "normal.yaml").write_text(yaml.dump({"name": "test"}))
         (tmp_path / "override.yaml").write_text(yaml.dump({"base": {"name": "test"}, "override_a": {}}))
@@ -168,7 +169,7 @@ _ZIP_BASE = {
 
 
 class TestExpandZipOverride:
-    def test_zip_semantics(self):
+    def test_zip_semantics(self) -> None:
         """Equal-length lists zip, length-1 broadcasts, list-of-list becomes literal, scalar passes through."""
         zip_dict = {
             "backend": {
@@ -197,7 +198,7 @@ class TestExpandZipOverride:
         assert v1["benchmark"]["concurrencies"] == [4, 8, 16]
         assert v0["resources"]["decode_nodes"] == 8          # base key preserved
 
-    def test_naming_and_immutability(self):
+    def test_naming_and_immutability(self) -> None:
         """Auto-name, explicit name list, and base not mutated."""
         zip_dict = {"backend": {"sglang_config": {"prefill": {"tensor-parallel-size": [4, 8]}}}}
         base = {"name": "base-job", "resources": {"decode_nodes": 8}}
@@ -214,7 +215,7 @@ class TestExpandZipOverride:
         assert variants[0][1]["name"] == "job-tp4"
         assert variants[1][1]["name"] == "job-tp8"
 
-    def test_errors(self):
+    def test_errors(self) -> None:
         """Incompatible lengths and no lists both raise ValueError."""
         with pytest.raises(ValueError, match="Incompatible zip lengths"):
             expand_zip_override("bad", {
@@ -249,7 +250,7 @@ MINIMAL_CONFIG = {
 }
 
 
-def _write_config(tmp_path, extra=None, filename="test.yaml"):
+def _write_config(tmp_path: Path, extra: dict[str, Any] | None = None, filename: str = "test.yaml") -> Path:
     raw = {"base": {**MINIMAL_CONFIG}, **(extra or {})}
     path = tmp_path / filename
     path.write_text(yaml.dump(raw, default_flow_style=False))
@@ -257,7 +258,7 @@ def _write_config(tmp_path, extra=None, filename="test.yaml"):
 
 
 class TestSubmitOverride:
-    def test_dry_run(self, tmp_path, capsys):
+    def test_dry_run(self, tmp_path: Path, capsys: Any) -> None:
         """Dry-run shows correct variant counts for base-only, overrides, zip, and selectors."""
         cfg = _write_config(tmp_path, {
             "override_small": {"resources": {"decode_nodes": 2}},
@@ -283,7 +284,7 @@ class TestSubmitOverride:
             assert "1 variant" in out
             assert "test-job_small" in out
 
-    def test_sbatch_call_counts(self, tmp_path):
+    def test_sbatch_call_counts(self, tmp_path: Path) -> None:
         """submit_override calls sbatch the right number of times for each selector."""
         cfg = _write_config(tmp_path, {
             "override_small": {"resources": {"decode_nodes": 2}},

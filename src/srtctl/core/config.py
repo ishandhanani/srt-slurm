@@ -237,11 +237,15 @@ def expand_zip_override(
     """
     n = _determine_zip_length(zip_dict)
     base_name = base.get("name", "unnamed")
+    # Only suppress auto-naming when the user explicitly provides a name list.
+    # A scalar name in zip_dict would broadcast to every variant (duplicates),
+    # so we auto-generate in that case too.
+    has_name_list = isinstance(zip_dict.get("name"), list)
     results: list[tuple[str, dict[str, Any]]] = []
     for i in range(n):
         sliced = _apply_zip_slice(zip_dict, i)
         merged = deep_merge(base, sliced)
-        if "name" not in sliced:
+        if not has_name_list:
             merged["name"] = f"{base_name}_{group_name}_{i}"
         suffix = f"{group_name}_{i}"
         results.append((suffix, merged))
@@ -276,7 +280,7 @@ def generate_override_configs(
 
     if selector is not None:
         # zip_override_foo[N] — single variant by index
-        m = re.fullmatch(r"(zip_override_\w+)\[(\d+)\]", selector)
+        m = re.fullmatch(r"(zip_override_[\w-]+)\[(\d+)\]", selector)
         if m:
             zip_key, idx = m.group(1), int(m.group(2))
             if zip_key not in raw_config:

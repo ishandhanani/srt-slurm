@@ -664,7 +664,12 @@ def parse_config_arg(arg: str) -> tuple[Path, str | None]:
         path_str, selector = arg.rsplit(":", 1)
         if not path_str.strip():
             raise ValueError("Invalid config path in selector syntax.")
-        valid = selector == "base" or selector.startswith("override_") or selector.startswith("zip_override_")
+        valid = bool(
+            selector == "base"
+            or re.fullmatch(r"override_\S+", selector)
+            or re.fullmatch(r"zip_override_[\w-]+", selector)
+            or re.fullmatch(r"zip_override_[\w-]+\[\d+\]", selector)
+        )
         if not valid:
             raise ValueError(
                 f"Invalid selector '{selector}'. "
@@ -729,12 +734,7 @@ def submit_override(
     cluster_config = load_cluster_config()
 
     for i, (suffix, config_dict) in enumerate(override_configs, 1):
-        if suffix == "base":
-            variant_label = "base"
-        elif re.search(r"_\d+$", suffix):
-            variant_label = f"zip_override_{suffix}"
-        else:
-            variant_label = f"override_{suffix}"
+        variant_label = "base" if suffix == "base" else f"override_{suffix}"
         job_name = config_dict.get("name", "unnamed")
 
         if dry_run:
