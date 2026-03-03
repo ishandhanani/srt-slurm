@@ -192,6 +192,8 @@ def _determine_zip_length(zip_dict: dict[str, Any]) -> int:
     lengths = _collect_list_lengths(zip_dict)
     if not lengths:
         raise ValueError("zip_override section contains no list values — nothing to zip")
+    if any(n == 0 for n in lengths):
+        raise ValueError("zip_override contains an empty list — cannot zip zero-length lists")
     non_broadcast = [n for n in lengths if n != 1]
     if not non_broadcast:
         return 1  # every list has length 1; N=1

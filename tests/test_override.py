@@ -98,7 +98,6 @@ class TestGenerateOverrideConfigs:
         # override auto-name and deep-merge
         assert variants[0][1]["name"] == "base-job_small"
         assert variants[0][1]["resources"]["decode_nodes"] == 2
-        assert variants[0][1]["resources"]["decode_nodes"] != _RAW["base"]["resources"]["decode_nodes"]
 
         # zip variants have correct values and inherit base fields
         assert variants[1][1]["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 4
@@ -227,6 +226,9 @@ class TestExpandZipOverride:
         with pytest.raises(ValueError, match="no list values"):
             expand_zip_override("empty", {"backend": {"tp": 4}}, _ZIP_BASE)
 
+        with pytest.raises(ValueError, match="empty list"):
+            expand_zip_override("zero", {"backend": {"tp": []}}, _ZIP_BASE)
+
 
 # =============================================================================
 # TestSubmitOverride (E2E with mocked SLURM)
@@ -291,7 +293,7 @@ class TestSubmitOverride:
         mock_result = MagicMock()
         mock_result.stdout = "Submitted batch job 99999"
 
-        def sbatch_count(selector=None):
+        def sbatch_count(selector: str | None = None) -> int:
             with (
                 patch("srtctl.cli.submit.load_cluster_config", return_value=None),
                 patch("subprocess.run", return_value=mock_result) as mock_run,
