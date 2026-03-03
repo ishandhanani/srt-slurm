@@ -18,6 +18,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -628,7 +629,12 @@ def parse_config_arg(arg: str) -> tuple[Path, str | None]:
     """Parse -f argument, supporting path:selector format.
 
     Args:
-        arg: CLI argument value, e.g. "config.yaml" or "config.yaml:override_tp64"
+        arg: CLI argument value, e.g.:
+             "config.yaml"
+             "config.yaml:base"
+             "config.yaml:override_tp64"
+             "config.yaml:zip_override_tp_sweep"
+             "config.yaml:zip_override_tp_sweep[0]"
 
     Returns:
         (config_path, selector) — selector is None when submitting all variants
@@ -636,9 +642,14 @@ def parse_config_arg(arg: str) -> tuple[Path, str | None]:
     if ":" in arg:
         path_str, selector = arg.rsplit(":", 1)
         if not path_str.strip():
-            raise ValueError("Invalid config path in selector syntax. Use '<path>:base' or '<path>:override_<name>'")
-        if selector != "base" and not selector.startswith("override_"):
-            raise ValueError(f"Invalid selector '{selector}'. Must be 'base' or 'override_<name>'")
+            raise ValueError("Invalid config path in selector syntax.")
+        valid = selector == "base" or selector.startswith("override_") or selector.startswith("zip_override_")
+        if not valid:
+            raise ValueError(
+                f"Invalid selector '{selector}'. "
+                "Must be 'base', 'override_<name>', 'zip_override_<name>', "
+                "or 'zip_override_<name>[N]'."
+            )
         return Path(path_str), selector
     return Path(arg), None
 
@@ -697,7 +708,12 @@ def submit_override(
     cluster_config = load_cluster_config()
 
     for i, (suffix, config_dict) in enumerate(override_configs, 1):
-        variant_label = "base" if suffix == "base" else f"override_{suffix}"
+        if suffix == "base":
+            variant_label = "base"
+        elif re.search(r"_\d+$", suffix):
+            variant_label = f"zip_override_{suffix}"
+        else:
+            variant_label = f"override_{suffix}"
         job_name = config_dict.get("name", "unnamed")
 
         if dry_run:
