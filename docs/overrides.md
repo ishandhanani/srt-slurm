@@ -26,9 +26,12 @@ An override config file has a `base` top-level key plus one or more variant keys
 Override files are auto-detected by the presence of a `base` key:
 
 ```bash
-srtctl apply -f config.yaml       # submit all variants
+srtctl apply -f config.yaml       # submit all override_* and zip_override_* variants (base excluded)
+srtctl apply -f config.yaml:base  # submit base only
 srtctl dry-run -f config.yaml     # preview without submitting
 ```
+
+> **Note:** Running without a selector submits every `override_*` and `zip_override_*` variant but **not** the `base` config. Use `:base` to submit the base config explicitly.
 
 ---
 
@@ -69,7 +72,8 @@ override_highconc:
     concurrencies: [16, 32, 64]
 ```
 
-Running `srtctl apply -f config.yaml` submits **3 jobs**: `base`, `my-job_lowmem`, `my-job_highconc`.
+Running `srtctl apply -f config.yaml` submits **2 jobs**: `my-job_lowmem`, `my-job_highconc` (base excluded).
+To also submit the base config: `srtctl apply -f config.yaml:base`.
 
 ### Deep merge rules
 
@@ -215,7 +219,7 @@ zip_override_tp_sweep:
         tensor-parallel-size: [4, 8]
 ```
 
-`srtctl apply -f config.yaml` submits **4 jobs**: `base` + `lowmem` + `tp_sweep_0` + `tp_sweep_1`.
+`srtctl apply -f config.yaml` submits **3 jobs**: `lowmem` + `tp_sweep_0` + `tp_sweep_1` (base is excluded unless you pass `:base`).
 
 ---
 

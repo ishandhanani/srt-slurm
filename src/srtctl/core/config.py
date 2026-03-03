@@ -262,7 +262,7 @@ def generate_override_configs(
         raw_config: Raw YAML dict containing 'base' and optional 'override_*' /
                     'zip_override_*' keys.
         selector: Optional selector:
-                    None                        – all variants
+                    None                        – all override_* and zip_override_* variants (base excluded)
                     "base"                      – base only
                     "override_<name>"           – single override variant
                     "zip_override_<name>"       – all variants in a zip group
@@ -316,8 +316,8 @@ def generate_override_configs(
         merged["name"] = f"{base_name}_{suffix}"
         return [(suffix, merged)]
 
-    # selector=None: base + all overrides + all zip groups (sorted for determinism)
-    configs: list[tuple[str, dict[str, Any]]] = [("base", copy.deepcopy(base))]
+    # selector=None: all overrides + all zip groups (sorted for determinism); base excluded
+    configs: list[tuple[str, dict[str, Any]]] = []
     for key in override_keys:
         suffix = key[len("override_") :]
         merged = deep_merge(base, raw_config[key])

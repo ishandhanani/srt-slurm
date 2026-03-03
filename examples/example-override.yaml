@@ -6,8 +6,8 @@
 #   zip_override_*  — N variants, list-valued leaves zipped in parallel
 #
 # Usage:
-#   srtctl apply -f example-override.yaml                            # Submit all 5 variants
-#   srtctl apply -f example-override.yaml:base                       # Submit base only
+#   srtctl apply -f example-override.yaml                            # Submit all override_* + zip_override_* variants (base excluded)
+#   srtctl apply -f example-override.yaml:base                       # Submit base only (explicit)
 #   srtctl apply -f example-override.yaml:override_tp64              # Submit tp64 variant only
 #   srtctl apply -f example-override.yaml:override_small             # Submit small variant only
 #   srtctl apply -f example-override.yaml:zip_override_tp_sweep      # Submit all 3 tp_sweep variants

@@ -90,23 +90,20 @@ _RAW = {
 
 class TestGenerateOverrideConfigs:
     def test_full_expansion(self) -> None:
-        """No selector: base + overrides (sorted) + zip groups (sorted) all returned."""
+        """No selector: overrides + zip groups returned (sorted); base excluded."""
         variants = generate_override_configs(_RAW)
         suffixes = [s for s, _ in variants]
-        assert suffixes == ["base", "small", "tp_0", "tp_1"]
-
-        # base untouched
-        assert variants[0][1]["name"] == "base-job"
+        assert suffixes == ["small", "tp_0", "tp_1"]
 
         # override auto-name and deep-merge
-        assert variants[1][1]["name"] == "base-job_small"
-        assert variants[1][1]["resources"]["decode_nodes"] == 2
-        assert variants[1][1]["resources"]["decode_nodes"] != _RAW["base"]["resources"]["decode_nodes"]
+        assert variants[0][1]["name"] == "base-job_small"
+        assert variants[0][1]["resources"]["decode_nodes"] == 2
+        assert variants[0][1]["resources"]["decode_nodes"] != _RAW["base"]["resources"]["decode_nodes"]
 
         # zip variants have correct values and inherit base fields
-        assert variants[2][1]["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 4
-        assert variants[3][1]["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 8
-        assert variants[2][1]["resources"]["decode_nodes"] == 8  # from base
+        assert variants[1][1]["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 4
+        assert variants[2][1]["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 8
+        assert variants[1][1]["resources"]["decode_nodes"] == 8  # from base
 
     def test_selectors(self) -> None:
         """All selector forms return the right subset."""
@@ -266,9 +263,9 @@ class TestSubmitOverride:
         })
 
         with patch("srtctl.cli.submit.load_cluster_config", return_value=None):
-            # all variants: base + override_small + zip_tp_0 + zip_tp_1 = 4
+            # all variants (no selector): override_small + zip_tp_0 + zip_tp_1 = 3 (base excluded)
             submit_override(cfg, dry_run=True)
-            assert "4 variants" in capsys.readouterr().out
+            assert "3 variants" in capsys.readouterr().out
 
             # zip group only
             submit_override(cfg, selector="zip_override_tp", dry_run=True)
@@ -304,7 +301,7 @@ class TestSubmitOverride:
                 submit_override(cfg, selector=selector, output_dir=tmp_path)
             return sum(1 for c in mock_run.call_args_list if c[0][0][0] == "sbatch")
 
-        assert sbatch_count() == 4               # base + small + tp_0 + tp_1
+        assert sbatch_count() == 3               # small + tp_0 + tp_1 (base excluded by default)
         assert sbatch_count("base") == 1
         assert sbatch_count("override_small") == 1
         assert sbatch_count("zip_override_tp") == 2
