@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 from srtctl.cli.submit import is_override_config, parse_config_arg, submit_override
-from srtctl.core.config import deep_merge, generate_override_configs
+from srtctl.core.config import deep_merge, expand_zip_override, generate_override_configs
 
 
 # =============================================================================
@@ -383,5 +383,313 @@ class TestSubmitOverrideE2E:
         ):
             submit_override(config_file, selector="base", output_dir=tmp_path)
 
+        sbatch_calls = [c for c in mock_sbatch.call_args_list if c[0][0][0] == "sbatch"]
+        assert len(sbatch_calls) == 1
+
+
+# =============================================================================
+# TestExpandZipOverride
+# =============================================================================
+
+_ZIP_BASE = {
+    "name": "base-job",
+    "backend": {"sglang_config": {"prefill": {"tensor-parallel-size": 4, "trust-remote-code": True}}},
+    "benchmark": {"concurrencies": [4, 8]},
+}
+
+
+class TestExpandZipOverride:
+    def test_basic_equal_length(self):
+        """Equal-length lists produce N variants with the correct values."""
+        zip_dict = {"backend": {"sglang_config": {"prefill": {"tensor-parallel-size": [4, 8]}}}}
+        variants = expand_zip_override("tp_sweep", zip_dict, _ZIP_BASE)
+        assert len(variants) == 2
+        assert variants[0][0] == "tp_sweep_0"
+        assert variants[0][1]["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 4
+        assert variants[1][0] == "tp_sweep_1"
+        assert variants[1][1]["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 8
+
+    def test_broadcast_length_one(self):
+        """Length-1 lists are broadcast to all variants."""
+        zip_dict = {
+            "backend": {
+                "sglang_config": {
+                    "prefill": {
+                        "tensor-parallel-size": [4, 8],
+                        "mem-fraction-static": [0.85],  # broadcast
+                    }
+                }
+            }
+        }
+        variants = expand_zip_override("tp_sweep", zip_dict, _ZIP_BASE)
+        assert len(variants) == 2
+        assert variants[0][1]["backend"]["sglang_config"]["prefill"]["mem-fraction-static"] == 0.85
+        assert variants[1][1]["backend"]["sglang_config"]["prefill"]["mem-fraction-static"] == 0.85
+
+    def test_list_of_lists_becomes_literal_list(self):
+        """List-of-list elements become literal list values (not further zipped)."""
+        zip_dict = {"benchmark": {"concurrencies": [[4, 8], [4, 8, 16]]}}
+        variants = expand_zip_override("conc_sweep", zip_dict, _ZIP_BASE)
+        assert len(variants) == 2
+        assert variants[0][1]["benchmark"]["concurrencies"] == [4, 8]
+        assert variants[1][1]["benchmark"]["concurrencies"] == [4, 8, 16]
+
+    def test_scalar_values_broadcast_to_all(self):
+        """Scalar values in zip_dict are applied to every variant unchanged."""
+        zip_dict = {
+            "backend": {
+                "sglang_config": {
+                    "prefill": {
+                        "tensor-parallel-size": [4, 8],
+                        "trust-remote-code": False,  # scalar override
+                    }
+                }
+            }
+        }
+        variants = expand_zip_override("tp_sweep", zip_dict, _ZIP_BASE)
+        assert variants[0][1]["backend"]["sglang_config"]["prefill"]["trust-remote-code"] is False
+        assert variants[1][1]["backend"]["sglang_config"]["prefill"]["trust-remote-code"] is False
+
+    def test_auto_name_generation(self):
+        """Auto-name is {base_name}_{group}_{i} when zip_dict has no 'name' list."""
+        zip_dict = {"backend": {"sglang_config": {"prefill": {"tensor-parallel-size": [4, 8]}}}}
+        variants = expand_zip_override("tp_sweep", zip_dict, _ZIP_BASE)
+        assert variants[0][1]["name"] == "base-job_tp_sweep_0"
+        assert variants[1][1]["name"] == "base-job_tp_sweep_1"
+
+    def test_explicit_name_list_overrides_auto(self):
+        """A 'name' list in zip_dict is used directly."""
+        zip_dict = {
+            "name": ["job-tp4", "job-tp8"],
+            "backend": {"sglang_config": {"prefill": {"tensor-parallel-size": [4, 8]}}},
+        }
+        variants = expand_zip_override("tp_sweep", zip_dict, _ZIP_BASE)
+        assert variants[0][1]["name"] == "job-tp4"
+        assert variants[1][1]["name"] == "job-tp8"
+
+    def test_base_not_mutated(self):
+        """expand_zip_override does not mutate the base dict."""
+        base = {"name": "test", "resources": {"decode_nodes": 8}}
+        zip_dict = {"resources": {"decode_nodes": [4, 2]}}
+        expand_zip_override("size", zip_dict, base)
+        assert base["resources"]["decode_nodes"] == 8
+
+    def test_incompatible_lengths_raises(self):
+        """Lists of different lengths (neither being 1) raise ValueError."""
+        zip_dict = {
+            "backend": {
+                "sglang_config": {
+                    "prefill": {"tensor-parallel-size": [4, 8]},
+                    "decode": {"tensor-parallel-size": [4, 8, 16]},
+                }
+            }
+        }
+        with pytest.raises(ValueError, match="Incompatible zip lengths"):
+            expand_zip_override("bad_sweep", zip_dict, _ZIP_BASE)
+
+    def test_no_lists_raises(self):
+        """zip_override with no list values raises ValueError."""
+        zip_dict = {"backend": {"sglang_config": {"prefill": {"tensor-parallel-size": 4}}}}
+        with pytest.raises(ValueError, match="no list values"):
+            expand_zip_override("empty", zip_dict, _ZIP_BASE)
+
+    def test_suffix_format(self):
+        """Suffix is always '{group}_{i}'."""
+        zip_dict = {"backend": {"sglang_config": {"prefill": {"tensor-parallel-size": [4, 8, 16]}}}}
+        variants = expand_zip_override("my_group", zip_dict, _ZIP_BASE)
+        assert [s for s, _ in variants] == ["my_group_0", "my_group_1", "my_group_2"]
+
+    def test_deep_merge_preserves_base_keys(self):
+        """Keys present in base but absent from the zip slice are kept."""
+        zip_dict = {"backend": {"sglang_config": {"prefill": {"tensor-parallel-size": [4, 8]}}}}
+        variants = expand_zip_override("tp_sweep", zip_dict, _ZIP_BASE)
+        # trust-remote-code is in base but not in zip_dict — must survive
+        assert variants[0][1]["backend"]["sglang_config"]["prefill"]["trust-remote-code"] is True
+        assert variants[1][1]["backend"]["sglang_config"]["prefill"]["trust-remote-code"] is True
+
+
+# =============================================================================
+# TestGenerateOverrideConfigsZip
+# =============================================================================
+
+
+class TestGenerateOverrideConfigsZip:
+    RAW = {
+        "base": {"name": "base-job"},
+        "override_single": {"name": "single"},
+        "zip_override_tp": {
+            "backend": {"sglang_config": {"prefill": {"tensor-parallel-size": [4, 8]}}},
+        },
+    }
+
+    def test_no_selector_includes_base_override_and_zip(self):
+        """selector=None returns base + overrides + all zip variants."""
+        variants = generate_override_configs(self.RAW)
+        suffixes = [s for s, _ in variants]
+        assert suffixes == ["base", "single", "tp_0", "tp_1"]
+
+    def test_zip_selector_all_variants(self):
+        """selector='zip_override_tp' returns all N zip variants."""
+        variants = generate_override_configs(self.RAW, selector="zip_override_tp")
+        assert len(variants) == 2
+        assert variants[0][0] == "tp_0"
+        assert variants[1][0] == "tp_1"
+
+    def test_zip_selector_index_zero(self):
+        """selector='zip_override_tp[0]' returns exactly the first variant."""
+        variants = generate_override_configs(self.RAW, selector="zip_override_tp[0]")
+        assert len(variants) == 1
+        assert variants[0][0] == "tp_0"
+        assert variants[0][1]["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 4
+
+    def test_zip_selector_index_one(self):
+        """selector='zip_override_tp[1]' returns exactly the second variant."""
+        variants = generate_override_configs(self.RAW, selector="zip_override_tp[1]")
+        assert len(variants) == 1
+        assert variants[0][0] == "tp_1"
+        assert variants[0][1]["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 8
+
+    def test_zip_selector_index_out_of_range(self):
+        """Index beyond N raises ValueError."""
+        with pytest.raises(ValueError, match="out of range"):
+            generate_override_configs(self.RAW, selector="zip_override_tp[5]")
+
+    def test_zip_selector_missing_group(self):
+        """Selector for non-existent zip group raises ValueError."""
+        with pytest.raises(ValueError):
+            generate_override_configs(self.RAW, selector="zip_override_nonexistent")
+
+    def test_override_selector_still_works(self):
+        """Existing override_ selector is unaffected by zip support."""
+        variants = generate_override_configs(self.RAW, selector="override_single")
+        assert len(variants) == 1
+        assert variants[0][0] == "single"
+        assert variants[0][1]["name"] == "base-job_single"
+
+    def test_multiple_zip_groups_all_expanded(self):
+        """Multiple zip_override_* groups are all expanded with selector=None."""
+        raw = {
+            "base": {"name": "base"},
+            "zip_override_tp": {"backend": {"tp": [4, 8]}},
+            "zip_override_mem": {"backend": {"mem": [0.7, 0.8, 0.9]}},
+        }
+        variants = generate_override_configs(raw)
+        suffixes = [s for s, _ in variants]
+        assert suffixes == ["base", "mem_0", "mem_1", "mem_2", "tp_0", "tp_1"]
+
+    def test_zip_variants_inherit_base_fields(self):
+        """zip variants include all fields from base via deep_merge."""
+        raw = {
+            "base": {"name": "base", "resources": {"decode_nodes": 8}},
+            "zip_override_tp": {"backend": {"tp": [4, 8]}},
+        }
+        variants = generate_override_configs(raw)
+        for suffix, cfg in variants[1:]:  # skip base
+            assert cfg["resources"]["decode_nodes"] == 8
+
+
+# =============================================================================
+# TestParseConfigArgZip
+# =============================================================================
+
+
+class TestParseConfigArgZip:
+    def test_zip_selector_all(self):
+        """zip_override_<name> selector is accepted."""
+        path, selector = parse_config_arg("config.yaml:zip_override_tp_sweep")
+        assert path == Path("config.yaml")
+        assert selector == "zip_override_tp_sweep"
+
+    def test_zip_selector_index(self):
+        """zip_override_<name>[N] selector is accepted."""
+        path, selector = parse_config_arg("config.yaml:zip_override_tp_sweep[0]")
+        assert path == Path("config.yaml")
+        assert selector == "zip_override_tp_sweep[0]"
+
+    def test_zip_selector_large_index(self):
+        """Multi-digit index is accepted."""
+        _, selector = parse_config_arg("config.yaml:zip_override_foo[12]")
+        assert selector == "zip_override_foo[12]"
+
+    def test_invalid_selector_still_rejected(self):
+        """Non-override, non-zip selector still raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid selector"):
+            parse_config_arg("config.yaml:foobar")
+
+
+# =============================================================================
+# TestSubmitOverrideZipE2E
+# =============================================================================
+
+
+class TestSubmitOverrideZipE2E:
+    """Integration tests for submit_override with zip_override_ variants."""
+
+    def _write_zip_config(self, tmp_path, extra=None):
+        raw = {
+            "base": {**MINIMAL_CONFIG},
+            "zip_override_tp": {
+                "resources": {"decode_nodes": [1, 2]},
+            },
+        }
+        if extra:
+            raw.update(extra)
+        config_file = tmp_path / "zip_test.yaml"
+        config_file.write_text(yaml.dump(raw, default_flow_style=False))
+        return config_file
+
+    def test_dry_run_shows_zip_variants(self, tmp_path, capsys):
+        """Dry-run with zip_override shows correct variant count."""
+        config_file = self._write_zip_config(tmp_path)
+        with patch("srtctl.cli.submit.load_cluster_config", return_value=None):
+            submit_override(config_file, dry_run=True)
+        output = capsys.readouterr().out
+        assert "3 variants" in output  # base + tp_0 + tp_1
+
+    def test_dry_run_zip_selector_all(self, tmp_path, capsys):
+        """Dry-run with zip_override selector shows N variants."""
+        config_file = self._write_zip_config(tmp_path)
+        with patch("srtctl.cli.submit.load_cluster_config", return_value=None):
+            submit_override(config_file, selector="zip_override_tp", dry_run=True)
+        output = capsys.readouterr().out
+        assert "2 variants" in output
+
+    def test_dry_run_zip_selector_index(self, tmp_path, capsys):
+        """Dry-run with zip_override[N] selector shows 1 variant."""
+        config_file = self._write_zip_config(tmp_path)
+        with patch("srtctl.cli.submit.load_cluster_config", return_value=None):
+            submit_override(config_file, selector="zip_override_tp[0]", dry_run=True)
+        output = capsys.readouterr().out
+        assert "1 variant" in output
+
+    def test_submit_zip_calls_sbatch_per_variant(self, tmp_path):
+        """Real submit calls sbatch once per zip variant (plus base = 3 total)."""
+        config_file = self._write_zip_config(tmp_path)
+        mock_result = MagicMock()
+        mock_result.stdout = "Submitted batch job 99999"
+        mock_result.returncode = 0
+        with (
+            patch("srtctl.cli.submit.load_cluster_config", return_value=None),
+            patch("subprocess.run", return_value=mock_result) as mock_sbatch,
+            patch("srtctl.cli.submit.get_srtslurm_setting", return_value=None),
+            patch("srtctl.cli.submit.create_job_record"),
+        ):
+            submit_override(config_file, output_dir=tmp_path)
+        sbatch_calls = [c for c in mock_sbatch.call_args_list if c[0][0][0] == "sbatch"]
+        assert len(sbatch_calls) == 3  # base + tp_0 + tp_1
+
+    def test_submit_zip_selector_index_calls_sbatch_once(self, tmp_path):
+        """zip_override[N] selector submits exactly one job."""
+        config_file = self._write_zip_config(tmp_path)
+        mock_result = MagicMock()
+        mock_result.stdout = "Submitted batch job 99999"
+        mock_result.returncode = 0
+        with (
+            patch("srtctl.cli.submit.load_cluster_config", return_value=None),
+            patch("subprocess.run", return_value=mock_result) as mock_sbatch,
+            patch("srtctl.cli.submit.get_srtslurm_setting", return_value=None),
+            patch("srtctl.cli.submit.create_job_record"),
+        ):
+            submit_override(config_file, selector="zip_override_tp[1]", output_dir=tmp_path)
         sbatch_calls = [c for c in mock_sbatch.call_args_list if c[0][0][0] == "sbatch"]
         assert len(sbatch_calls) == 1
