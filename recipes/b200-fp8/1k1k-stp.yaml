@@ -1,0 +1,126 @@
+# B200-FP8 1k1k STP — all scale variants in one file
+#
+# Usage:
+#   srtctl apply  -f recipes/b200-fp8/1k1k-stp.yaml                       # all 4 variants
+#   srtctl apply  -f recipes/b200-fp8/1k1k-stp.yaml:zip_override_scale[0] # 1p1d only
+#   srtctl dry-run -f recipes/b200-fp8/1k1k-stp.yaml                      # preview
+
+base:
+  name: "b200-fp8-stp-1k1k"
+
+  model:
+    path: "dsr1-fp8"
+    container: "dynamo-sglang"
+    precision: "fp8"
+
+  resources:
+    gpu_type: "b200"
+    prefill_nodes: 1
+    prefill_workers: 1
+    decode_nodes: 1
+    decode_workers: 1
+    gpus_per_node: 8
+
+  backend:
+    prefill_environment:
+      TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
+      PYTHONUNBUFFERED: "1"
+      DYN_SKIP_SGLANG_LOG_FORMATTING: "1"
+      SGLANG_ENABLE_JIT_DEEPGEMM: "false"
+      SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+      SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+      SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+      SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
+      SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
+      SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
+      MC_FORCE_MNNVL: "1"
+      NCCL_MNNVL_ENABLE: "1"
+      NCCL_CUMEM_ENABLE: "1"
+      DYN_REQUEST_PLANE: nats
+    decode_environment:
+      TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
+      PYTHONUNBUFFERED: "1"
+      DYN_SKIP_SGLANG_LOG_FORMATTING: "1"
+      SGLANG_ENABLE_JIT_DEEPGEMM: "false"
+      SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+      SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+      SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+      SGLANG_DECODE_BOOTSTRAP_TIMEOUT: "1000"
+      SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
+      SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
+      SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
+      MC_FORCE_MNNVL: "1"
+      NCCL_MNNVL_ENABLE: "1"
+      NCCL_CUMEM_ENABLE: "1"
+      DYN_REQUEST_PLANE: nats
+    sglang_config:
+      prefill:
+        served-model-name: "deepseek-ai/DeepSeek-R1"
+        trust-remote-code: true
+        quantization: "fp8"
+        disaggregation-mode: "prefill"
+        disaggregation-transfer-backend: nixl
+        mem-fraction-static: 0.85
+        max-prefill-tokens: 32768
+        chunked-prefill-size: 32768
+        context-length: 2200
+        max-running-requests: 512
+        disable-cuda-graph: true
+        tensor-parallel-size: 8
+        data-parallel-size: 1
+        expert-parallel-size: 8
+        attention-backend: "trtllm_mla"
+        kv-cache-dtype: "fp8_e4m3"
+        moe-runner-backend: "flashinfer_trtllm"
+        stream-interval: 30
+        watchdog-timeout: 1000000
+        enable-flashinfer-allreduce-fusion: true
+        disable-radix-cache: true
+      decode:
+        served-model-name: "deepseek-ai/DeepSeek-R1"
+        trust-remote-code: true
+        quantization: "fp8"
+        disaggregation-mode: "decode"
+        disaggregation-transfer-backend: nixl
+        mem-fraction-static: 0.85
+        max-prefill-tokens: 32768
+        chunked-prefill-size: 32768
+        context-length: 2200
+        max-running-requests: 512
+        cuda-graph-max-bs: 512
+        tensor-parallel-size: 8
+        data-parallel-size: 1
+        expert-parallel-size: 8
+        attention-backend: "trtllm_mla"
+        kv-cache-dtype: "fp8_e4m3"
+        moe-runner-backend: "flashinfer_trtllm"
+        stream-interval: 30
+        watchdog-timeout: 1000000
+        enable-flashinfer-allreduce-fusion: true
+        disable-radix-cache: true
+
+  health_check:
+    max_attempts: 360
+    interval_seconds: 10
+
+  benchmark:
+    type: "sa-bench"
+    isl: 1024
+    osl: 1024
+    req_rate: "inf"
+
+
+# Sweep all scale variants: low-latency 1p1d/1p3d and max-throughput 1p5d/2p5d
+zip_override_scale:
+  name:
+    - "b200-fp8-low-latency-tep8-1p-1d"
+    - "b200-fp8-low-latency-tep8-1p-3d"
+    - "b200-fp8-max-tpt-dep8-1p-5d"
+    - "b200-fp8-max-tpt-dep8-2p-5d"
+  resources:
+    prefill_nodes: [1, 1, 1, 2]
+    prefill_workers: [1, 1, 1, 2]
+    decode_nodes: [1, 3, 5, 5]
+    decode_workers: [1, 3, 5, 5]
+  benchmark:
+    concurrencies: ["4", "16x32x64x128x256", "1024", "2048"]
