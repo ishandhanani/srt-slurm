@@ -13,6 +13,7 @@ This module provides:
 import copy
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -170,48 +171,164 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     return result
 
 
+def _collect_list_lengths(d: dict[str, Any]) -> list[int]:
+    """Return the length of every list-valued leaf in d (recursive)."""
+    lengths: list[int] = []
+    for v in d.values():
+        if isinstance(v, list):
+            lengths.append(len(v))
+        elif isinstance(v, dict):
+            lengths.extend(_collect_list_lengths(v))
+    return lengths
+
+
+def _determine_zip_length(zip_dict: dict[str, Any]) -> int:
+    """Determine N for a zip_override section, enforcing broadcast rules.
+
+    - Length-1 lists are broadcast to N.
+    - All other lists must share the same length N.
+    - Raises ValueError if incompatible lengths are found.
+    """
+    lengths = _collect_list_lengths(zip_dict)
+    if not lengths:
+        raise ValueError("zip_override section contains no list values — nothing to zip")
+    if any(n == 0 for n in lengths):
+        raise ValueError("zip_override contains an empty list — cannot zip zero-length lists")
+    non_broadcast = [n for n in lengths if n != 1]
+    if not non_broadcast:
+        return 1  # every list has length 1; N=1
+    unique = set(non_broadcast)
+    if len(unique) > 1:
+        raise ValueError(
+            f"Incompatible zip lengths {sorted(unique)}. All lists must have the same length or length 1 (broadcast)."
+        )
+    return unique.pop()
+
+
+def _apply_zip_slice(d: dict[str, Any], index: int) -> dict[str, Any]:
+    """Replace each list-valued leaf with its index-th element.
+
+    Length-1 lists are broadcast (always use element 0).
+    Scalar values pass through unchanged (implicitly broadcast).
+    List-of-list elements become literal list values in the result.
+    """
+    result: dict[str, Any] = {}
+    for k, v in d.items():
+        if isinstance(v, list):
+            result[k] = v[0 if len(v) == 1 else index]
+        elif isinstance(v, dict):
+            result[k] = _apply_zip_slice(v, index)
+        else:
+            result[k] = v
+    return result
+
+
+def expand_zip_override(
+    group_name: str,
+    zip_dict: dict[str, Any],
+    base: dict[str, Any],
+) -> list[tuple[str, dict[str, Any]]]:
+    """Expand a zip_override_* section into N (suffix, config_dict) tuples.
+
+    Each list-valued leaf in zip_dict is a zip dimension.
+    Length-1 lists are broadcast to N. All other list lengths must equal N.
+    Suffix is '{group_name}_{i}' for i in range(N).
+
+    If the zip_dict provides a 'name' list, each variant uses the corresponding
+    name. Otherwise the name is auto-generated as '{base_name}_{group_name}_{i}'.
+    """
+    n = _determine_zip_length(zip_dict)
+    base_name = base.get("name", "unnamed")
+    # Only suppress auto-naming when the user explicitly provides a name list.
+    # A scalar name in zip_dict would broadcast to every variant (duplicates),
+    # so we auto-generate in that case too.
+    has_name_list = isinstance(zip_dict.get("name"), list)
+    results: list[tuple[str, dict[str, Any]]] = []
+    for i in range(n):
+        sliced = _apply_zip_slice(zip_dict, i)
+        merged = deep_merge(base, sliced)
+        if not has_name_list:
+            merged["name"] = f"{base_name}_{group_name}_{i}"
+        suffix = f"{group_name}_{i}"
+        results.append((suffix, merged))
+    return results
+
+
 def generate_override_configs(
     raw_config: dict[str, Any],
     selector: str | None = None,
 ) -> list[tuple[str, dict[str, Any]]]:
-    """Expand a raw config with base + override_* keys into independent configs.
+    """Expand a raw config with base + override_* + zip_override_* keys into independent configs.
 
     Args:
-        raw_config: Raw YAML dict containing 'base' and optional 'override_*' keys
-        selector: Optional selector. None=all, "base"=base only, "override_xxx"=that variant only
+        raw_config: Raw YAML dict containing 'base' and optional 'override_*' /
+                    'zip_override_*' keys.
+        selector: Optional selector:
+                    None                        – all override_* and zip_override_* variants (base excluded)
+                    "base"                      – base only
+                    "override_<name>"           – single override variant
+                    "zip_override_<name>"       – all variants in a zip group
+                    "zip_override_<name>[N]"    – single variant by 0-based index
 
     Returns:
-        List of (suffix, config_dict) tuples. Suffix is "base" or the override name part.
+        List of (suffix, config_dict) tuples.
 
     Raises:
-        ValueError: If selector specifies a non-existent override
+        ValueError: If selector specifies a non-existent key or out-of-range index.
     """
     base = raw_config["base"]
-
-    # Collect all override keys sorted for deterministic ordering
     override_keys = sorted(k for k in raw_config if k.startswith("override_"))
-
-    if selector == "base":
-        return [("base", copy.deepcopy(base))]
+    zip_keys = sorted(k for k in raw_config if k.startswith("zip_override_"))
 
     if selector is not None:
+        # zip_override_foo[N] — single variant by index
+        m = re.fullmatch(r"(zip_override_[\w-]+)\[(\d+)\]", selector)
+        if m:
+            zip_key, idx = m.group(1), int(m.group(2))
+            if zip_key not in raw_config:
+                available = ", ".join(f"{k}[i]" for k in zip_keys) or "(none)"
+                raise ValueError(f"'{zip_key}' not found in config. Available zip groups: {available}")
+            group_name = zip_key[len("zip_override_") :]
+            variants = expand_zip_override(group_name, raw_config[zip_key], base)
+            if idx >= len(variants):
+                raise ValueError(
+                    f"Index [{idx}] out of range for '{zip_key}' "
+                    f"(has {len(variants)} variants, valid: 0–{len(variants) - 1})"
+                )
+            return [variants[idx]]
+
+        if selector == "base":
+            return [("base", copy.deepcopy(base))]
+
+        # zip_override_foo — all variants in the group
+        if selector.startswith("zip_override_"):
+            if selector not in raw_config:
+                available = ", ".join(zip_keys) or "(none)"
+                raise ValueError(f"'{selector}' not found in config. Available: {available}")
+            group_name = selector[len("zip_override_") :]
+            return expand_zip_override(group_name, raw_config[selector], base)
+
+        # override_foo — single override variant
         if selector not in raw_config:
-            available = ", ".join(override_keys) or "(none)"
-            raise ValueError(f"Override '{selector}' not found in config. Available: {available}")
+            all_selectors = ", ".join([*override_keys, *[f"{k}[i]" for k in zip_keys]]) or "(none)"
+            raise ValueError(f"Override '{selector}' not found in config. Available: {all_selectors}")
         suffix = selector[len("override_") :]
         merged = deep_merge(base, raw_config[selector])
         base_name = base.get("name", "unnamed")
         merged["name"] = f"{base_name}_{suffix}"
         return [(suffix, merged)]
 
-    # selector=None: return base + all overrides
-    configs: list[tuple[str, dict[str, Any]]] = [("base", copy.deepcopy(base))]
+    # selector=None: all overrides + all zip groups (sorted for determinism); base excluded
+    configs: list[tuple[str, dict[str, Any]]] = []
     for key in override_keys:
         suffix = key[len("override_") :]
         merged = deep_merge(base, raw_config[key])
         base_name = base.get("name", "unnamed")
         merged["name"] = f"{base_name}_{suffix}"
         configs.append((suffix, merged))
+    for key in zip_keys:
+        group_name = key[len("zip_override_") :]
+        configs.extend(expand_zip_override(group_name, raw_config[key], base))
 
     return configs
 
