@@ -1,4 +1,4 @@
-name: "gb200-fp8-1p-2d-low-latency-mtp3"
+name: "gb200-fp8-1p-2d-low-latency-mtp"
 
 frontend:
   nginx_container: nginx
@@ -73,11 +73,11 @@ backend:
       watchdog-timeout: 1000000
       context-length: 2200
       disaggregation-mode: "prefill"
-      mem-fraction-static: 0.95
+      mem-fraction-static: 0.90
       max-total-tokens: 8192
       chunked-prefill-size: 8192
       cuda-graph-max-bs: 128
-      max-running-requests: 128
+      max-running-requests: 512
       load-balance-method: "round_robin"
       scheduler-recv-interval: 10
       enable-flashinfer-allreduce-fusion: true
@@ -87,9 +87,9 @@ backend:
       expert-parallel-size: 1
       disaggregation-transfer-backend: "nixl"
       speculative-algorithm: "EAGLE"
-      speculative-num-steps: 3
+      speculative-num-steps: 2
       speculative-eagle-topk: 1
-      speculative-num-draft-tokens: 4
+      speculative-num-draft-tokens: 3
 
     decode:
       served-model-name: "deepseek-ai/DeepSeek-R1"
@@ -116,9 +116,9 @@ backend:
       expert-parallel-size: 1
       disaggregation-transfer-backend: "nixl"
       speculative-algorithm: "EAGLE"
-      speculative-num-steps: 3
+      speculative-num-steps: 2
       speculative-eagle-topk: 1
-      speculative-num-draft-tokens: 4
+      speculative-num-draft-tokens: 3
 
 benchmark:
   type: "sa-bench"

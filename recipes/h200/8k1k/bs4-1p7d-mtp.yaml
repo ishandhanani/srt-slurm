@@ -2,7 +2,7 @@ name: "bs4-1p7d-h200-fp8-mtp"
 
 model:
   path: "dsr1"
-  container: "lmsysorg/sglang:v0.5.8-cu130"
+  container: "lmsysorg/sglang:v0.5.8.post1-cu130"
   precision: "fp8"
 
 frontend:

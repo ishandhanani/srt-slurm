@@ -1,12 +1,12 @@
 name: "h100-fp8-1p2d-max-tp-mtp"
 
 model:
-  path: "dsfp8"
+  path: "dsr1-fp8"
   container: "lmsysorg/sglang:v0.5.8-cu130"
   precision: "fp8"
 
 frontend:
-  nginx_container: nginx
+  nginx_container: nginx-sqsh
 
 resources:
   gpu_type: "h100"
@@ -35,6 +35,7 @@ backend:
       model-path: "/model/"
       skip-tokenizer-init: true
       trust-remote-code: true
+      watchdog-timeout: 1000000
 
       # Parallelism
       tp-size: 16
@@ -76,6 +77,7 @@ backend:
       model-path: "/model/"
       skip-tokenizer-init: true
       trust-remote-code: true
+      watchdog-timeout: 1000000
 
       # Parallelism
       tp-size: 16

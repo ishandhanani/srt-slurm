@@ -80,15 +80,15 @@ backend:
         max_tokens_in_buffer: 8320
       cuda_graph_config:
         enable_padding: true
-        max_batch_size: 32
+        max_batch_size: 4
       disable_overlap_scheduler: false
       enable_attention_dp: false
       kv_cache_config:
         dtype: fp8
         enable_block_reuse: false
         free_gpu_memory_fraction: 0.8
-      max_batch_size: 32
-      max_num_tokens: 128
+      max_batch_size: 4
+      max_num_tokens: 16
       max_seq_len: 9344
       moe_config:
         backend: TRTLLM
