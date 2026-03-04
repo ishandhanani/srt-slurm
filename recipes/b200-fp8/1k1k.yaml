@@ -1,13 +1,18 @@
-# B200-FP8 1k1k STP — all scale variants in one file
+# B200-FP8 1k1k — STP and MTP in one file
 #
-# Two parallelism modes:
-#   tep8 (low-latency): DP=1 decode — base config
-#   dep8 (max-tpt):     DP=8 decode — zip_override_maxtpt adds DP settings
+# Two inference modes distinguished by override key names:
+#   zip_override_stp_*  — standard token prediction (no speculative decoding)
+#   zip_override_mtp_*  — multi-token prediction (EAGLE speculative decoding)
+#
+# Low-latency variants: tep8 decode (DP=1)
+# Max-throughput variants: dep8 decode (DP=8)
 #
 # Usage:
-#   srtctl apply  -f recipes/b200-fp8/1k1k-stp.yaml                          # all 4 variants
-#   srtctl apply  -f recipes/b200-fp8/1k1k-stp.yaml:zip_override_lowlat[0]  # 1p1d low-lat only
-#   srtctl dry-run -f recipes/b200-fp8/1k1k-stp.yaml                        # preview
+#   srtctl apply  -f recipes/b200-fp8/1k1k.yaml                              # all 10 variants
+#   srtctl apply  -f recipes/b200-fp8/1k1k.yaml:*stp*                        # all STP variants
+#   srtctl apply  -f recipes/b200-fp8/1k1k.yaml:*mtp*                        # all MTP variants
+#   srtctl apply  -f recipes/b200-fp8/1k1k.yaml:zip_override_stp_lowlat[0]   # STP 1p1d only
+#   srtctl dry-run -f recipes/b200-fp8/1k1k.yaml                             # preview
 
 base:
   name: "b200-fp8-stp-1k1k"
@@ -114,11 +119,11 @@ base:
     req_rate: "inf"
 
 
-# Low-latency variants: tep8 decode (DP=1), scale sweep 1p1d and 1p3d
-zip_override_lowlat:
+# STP low-latency variants: tep8 decode (DP=1), scale sweep 1p1d and 1p3d
+zip_override_stp_lowlat:
   name:
-    - "b200-fp8-low-latency-tep8-1p-1d"
-    - "b200-fp8-low-latency-tep8-1p-3d"
+    - "b200-fp8-stp-low-latency-tep8-1p-1d"
+    - "b200-fp8-stp-low-latency-tep8-1p-3d"
   resources:
     decode_nodes: [1, 3]
     decode_workers: [1, 3]
@@ -126,11 +131,36 @@ zip_override_lowlat:
     concurrencies: ["4", "16x32x64x128x256"]
 
 
-# Max-throughput variants: dep8 decode (DP=8), scale sweep 1p5d and 2p5d
-zip_override_maxtpt:
+# MTP low-latency variants: same scales as STP, adds EAGLE speculative decoding
+zip_override_mtp_lowlat:
   name:
-    - "b200-fp8-max-tpt-dep8-1p-5d"
-    - "b200-fp8-max-tpt-dep8-2p-5d"
+    - "b200-fp8-mtp-low-latency-tep8-1p-1d"
+    - "b200-fp8-mtp-low-latency-tep8-1p-3d"
+  resources:
+    decode_nodes: [1, 3]
+    decode_workers: [1, 3]
+  backend:
+    prefill_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+    decode_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+    sglang_config:
+      prefill:
+        moe-dense-tp-size: 1
+      decode:
+        speculative-algorithm: "EAGLE"
+        speculative-num-steps: 2
+        speculative-eagle-topk: 1
+        speculative-num-draft-tokens: 3
+  benchmark:
+    concurrencies: ["4x64", "4x8x16x32x128"]
+
+
+# STP max-throughput variants: dep8 decode (DP=8), scale sweep 1p5d and 2p5d
+zip_override_stp_maxtpt:
+  name:
+    - "b200-fp8-stp-max-tpt-dep8-1p-5d"
+    - "b200-fp8-stp-max-tpt-dep8-2p-5d"
   resources:
     prefill_nodes: [1, 2]
     prefill_workers: [1, 2]
@@ -153,3 +183,69 @@ zip_override_maxtpt:
         cuda-graph-max-bs: 1024
   benchmark:
     concurrencies: ["1024", "2048"]
+
+
+# MTP max-throughput variants: dep8 decode, adds EAGLE speculative decoding
+# Note: max-running-requests stays at 512 for MTP (unlike STP which raises to 1024)
+zip_override_mtp_maxtpt:
+  name:
+    - "b200-fp8-mtp-max-tpt-dep8-1p-1d"
+    - "b200-fp8-mtp-max-tpt-dep8-1p-5d"
+    - "b200-fp8-mtp-max-tpt-dep8-2p-5d"
+  resources:
+    prefill_nodes: [1, 1, 2]
+    prefill_workers: [1, 1, 2]
+    decode_nodes: [1, 5, 5]
+    decode_workers: [1, 5, 5]
+  backend:
+    prefill_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+    decode_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+    sglang_config:
+      prefill:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+      decode:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+        speculative-algorithm: "EAGLE"
+        speculative-num-steps: 2
+        speculative-eagle-topk: 1
+        speculative-num-draft-tokens: 3
+  benchmark:
+    concurrencies: ["512x1024x2048x4096", "512x4096", "1024x2048x4096"]
+
+
+# MTP special case: 1p2d uses speculative-num-steps=1 and draft-tokens=2 (vs 2/3 for all others)
+override_mtp_maxtpt_1p2d:
+  name: "b200-fp8-mtp-max-tpt-dep8-1p-2d"
+  resources:
+    decode_nodes: 2
+    decode_workers: 2
+  backend:
+    prefill_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+    decode_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+    sglang_config:
+      prefill:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+      decode:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+        speculative-algorithm: "EAGLE"
+        speculative-num-steps: 1
+        speculative-eagle-topk: 1
+        speculative-num-draft-tokens: 2
+  benchmark:
+    concurrencies: "512x1024x2048"
