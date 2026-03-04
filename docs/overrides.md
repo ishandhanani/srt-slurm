@@ -249,7 +249,7 @@ The resolved YAML preserves field order and comments from the source file:
 
 Output files are written next to the source file using the same naming convention as `apply`:
 
-```
+```text
 config.yaml                 # source
 config_lowmem.yaml          # override_lowmem resolved
 config_tp_sweep_0.yaml      # zip_override_tp_sweep variant 0

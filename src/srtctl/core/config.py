@@ -410,8 +410,11 @@ def validate_config_file(path: Path | str) -> list[str]:
     if not path.exists():
         return [f"{path}: file not found"]
 
-    with open(path) as f:
-        raw = yaml.safe_load(f)
+    try:
+        with open(path) as f:
+            raw = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        return [f"{path}: YAML parse error: {e}"]
 
     if not isinstance(raw, dict):
         return [f"{path}: not a YAML mapping"]
