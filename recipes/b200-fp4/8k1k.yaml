@@ -7,7 +7,7 @@
 #   override_mtp_maxtpt_4p1d:  MTP-only 4p1d, no frontends, env-var FP4 backend
 #
 # Usage:
-#   srtctl apply  -f recipes/b200-fp4/8k1k.yaml                              # all 12 variants
+#   srtctl apply  -f recipes/b200-fp4/8k1k.yaml                              # all 11 variants
 #   srtctl apply  -f recipes/b200-fp4/8k1k.yaml:*stp*                        # all STP variants
 #   srtctl apply  -f recipes/b200-fp4/8k1k.yaml:*mtp*                        # all MTP variants
 #   srtctl apply  -f recipes/b200-fp4/8k1k.yaml:override_stp_tp4             # STP tp4 only
