@@ -3,11 +3,8 @@
 # Three modes distinguished by override key names:
 #   override_stp_tp4 / override_mtp_tp4:  TP4 prefill (DP=1, EP=1) — low-latency single-node
 #   zip_override_stp_lowlat / zip_override_mtp_lowlat:  dep4 prefill + tep8 decode (DP=1)
-#   zip_override_maxtpt_7p2d:  dep4 prefill + dep8 decode, 7p2d — STP and MTP via null mechanism
+#   override_stp_maxtpt_7p2d / override_mtp_maxtpt_7p2d:  dep4 prefill + dep8 decode, 7p2d
 #   override_mtp_maxtpt_4p1d:  MTP-only 4p1d, no frontends, env-var FP4 backend
-#
-# null in STP slots of zip_override_maxtpt_7p2d → no-op (keys absent from STP base);
-# "1"/"EAGLE"/etc. in MTP slots → adds SGLANG_ENABLE_SPEC_V2 and speculative settings.
 #
 # Usage:
 #   srtctl apply  -f recipes/b200-fp4/8k1k.yaml                              # all 12 variants
@@ -133,7 +130,7 @@ base:
     req_rate: "inf"
 
 
-# STP TP4 prefill mode: tensor-parallel instead of data-parallel for prefill
+# STP TP4 prefill mode: TP4 (DP=1, EP=1) instead of dep4 — low-latency single-node
 override_stp_tp4:
   name: "b200-fp4-stp-low-latency-tp4-1p-tp8-1d"
   frontend:
@@ -151,7 +148,7 @@ override_stp_tp4:
     concurrencies: "4x8x16x64"
 
 
-# MTP TP4 prefill mode: adds EAGLE speculative decoding
+# MTP TP4 prefill mode: same as STP tp4 but adds EAGLE speculative decoding
 override_mtp_tp4:
   name: "b200-fp4-mtp-low-latency-tp4-1p-tp8-1d"
   frontend:
@@ -177,7 +174,7 @@ override_mtp_tp4:
     concurrencies: "4x8x16x64"
 
 
-# STP dep4 low-latency scale sweep: 1p1d, 1p5d, 2p5d
+# STP low-latency: dep4 prefill + tep8 decode (DP=1), scale sweep 1p1d/1p5d/2p5d
 zip_override_stp_lowlat:
   name:
     - "b200-fp4-stp-low-latency-dep4-1p-tep8-1d"
@@ -192,7 +189,7 @@ zip_override_stp_lowlat:
     concurrencies: ["64x128", "8", "4x128"]
 
 
-# MTP dep4 low-latency scale sweep: same scales as STP, adds EAGLE speculative decoding
+# MTP low-latency: same scales as STP, adds EAGLE speculative decoding
 zip_override_mtp_lowlat:
   name:
     - "b200-fp4-mtp-low-latency-dep4-1p-tep8-1d"
@@ -218,24 +215,17 @@ zip_override_mtp_lowlat:
     concurrencies: ["64x128", "8", "4x128"]
 
 
-# Max-throughput 7p2d: STP and MTP combined via null mechanism.
-# null in STP slots → no-op (SGLANG_ENABLE_SPEC_V2 / spec settings absent from base);
-# values in MTP slots → add speculative decoding on top of the same resources/sglang config.
-zip_override_maxtpt_7p2d:
-  name:
-    - "b200-fp4-stp-max-tpt-dep4-7p-dep8-2d"
-    - "b200-fp4-mtp-max-tpt-dep4-7p-dep8-2d"
+# STP max-throughput 7p2d: dep4 prefill + dep8 decode, flashinfer_cutlass backend
+override_stp_maxtpt_7p2d:
+  name: "b200-fp4-stp-max-tpt-dep4-7p-dep8-2d"
   resources:
-    prefill_nodes: [7, 7]
-    prefill_workers: [7, 7]
-    decode_nodes: [2, 2]
-    decode_workers: [2, 2]
+    prefill_nodes: 7
+    prefill_workers: 7
+    decode_nodes: 2
+    decode_workers: 2
   backend:
-    prefill_environment:
-      SGLANG_ENABLE_SPEC_V2: [null, "1"]
     decode_environment:
       SGLANG_MOE_NVFP4_DISPATCH: "1"
-      SGLANG_ENABLE_SPEC_V2: [null, "1"]
     sglang_config:
       prefill:
         max-prefill-tokens: 65536
@@ -250,16 +240,48 @@ zip_override_maxtpt_7p2d:
         max-running-requests: 2048
         cuda-graph-max-bs: 1024
         fp4-gemm-backend: "flashinfer_cutlass"
-        speculative-algorithm: [null, "EAGLE"]
-        speculative-num-steps: [null, 2]
-        speculative-eagle-topk: [null, 1]
-        speculative-num-draft-tokens: [null, 3]
   benchmark:
-    concurrencies: ["1024x2048", "1024x2048"]
+    concurrencies: "1024x2048"
 
 
-# MTP-only: 4p1d, no frontends, uses env-var FP4 backend (fp4-gemm-backend null removes sglang key),
-# mem-fraction=0.75 for decode
+# MTP max-throughput 7p2d: same as STP but adds EAGLE speculative decoding
+override_mtp_maxtpt_7p2d:
+  name: "b200-fp4-mtp-max-tpt-dep4-7p-dep8-2d"
+  resources:
+    prefill_nodes: 7
+    prefill_workers: 7
+    decode_nodes: 2
+    decode_workers: 2
+  backend:
+    prefill_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+    decode_environment:
+      SGLANG_MOE_NVFP4_DISPATCH: "1"
+      SGLANG_ENABLE_SPEC_V2: "1"
+    sglang_config:
+      prefill:
+        max-prefill-tokens: 65536
+        chunked-prefill-size: 65536
+        max-running-requests: 1024
+        fp4-gemm-backend: "flashinfer_cutlass"
+      decode:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+        max-running-requests: 2048
+        cuda-graph-max-bs: 1024
+        fp4-gemm-backend: "flashinfer_cutlass"
+        speculative-algorithm: "EAGLE"
+        speculative-num-steps: 2
+        speculative-eagle-topk: 1
+        speculative-num-draft-tokens: 3
+  benchmark:
+    concurrencies: "1024x2048"
+
+
+# MTP-only: 4p1d, no frontends, SGLANG_FLASHINFER_FP4_GEMM_BACKEND env var (fp4-gemm-backend: null
+# removes the sglang_config key), mem-fraction=0.75 for decode
 override_mtp_maxtpt_4p1d:
   name: "b200-fp4-mtp-max-tpt-dep4-4p-dep8-1d"
   frontend: null

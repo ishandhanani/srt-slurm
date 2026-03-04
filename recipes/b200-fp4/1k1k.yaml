@@ -128,7 +128,7 @@ base:
     req_rate: "inf"
 
 
-# STP low-latency variants: tep8 decode (DP=1), scale sweep 1p5d and 1p6d
+# STP low-latency: tep8 decode (DP=1), scale sweep 1p5d and 1p6d
 zip_override_stp_lowlat:
   name:
     - "b200-fp4-stp-low-latency-dep4-1p-tep8-5d"
@@ -140,7 +140,7 @@ zip_override_stp_lowlat:
     concurrencies: ["16x128", "32x64x256"]
 
 
-# MTP low-latency variants: same scales as STP, adds EAGLE speculative decoding + fp4-gemm-backend
+# MTP low-latency: same scales as STP, adds EAGLE speculative decoding + fp4-gemm-backend
 zip_override_mtp_lowlat:
   name:
     - "b200-fp4-mtp-low-latency-dep4-1p-tep8-5d"
@@ -166,7 +166,8 @@ zip_override_mtp_lowlat:
     concurrencies: ["16x512", "32x64x256x512"]
 
 
-# STP max-throughput variants: dep8 decode (DP=8), scale sweep 1p1d and 1p2d
+# STP max-throughput: dep8 decode (DP=8), scale sweep 1p1d and 1p2d
+# Adds SGLANG_MOE_NVFP4_DISPATCH + SGLANG_FLASHINFER_FP4_GEMM_BACKEND env vars
 # 1d: max-running-requests=1024; 2d: keeps 512
 zip_override_stp_maxtpt:
   name:
@@ -193,8 +194,9 @@ zip_override_stp_maxtpt:
     concurrencies: ["512", "512"]
 
 
-# MTP max-throughput variants: dep8 decode, adds EAGLE speculative decoding + fp4-gemm-backend
-# 1d: max-running-requests=1024, mem-fraction=0.75; 2d: keeps 512/0.85
+# MTP max-throughput: dep8 decode, scale sweep 1p1d and 1p2d, adds EAGLE speculative decoding
+# Adds SGLANG_MOE_NVFP4_DISPATCH + SGLANG_FLASHINFER_FP4_GEMM_BACKEND + fp4-gemm-backend
+# 1d: max-running-requests=1024, mem-fraction=0.75 for decode; 2d: keeps 512/0.85
 zip_override_mtp_maxtpt:
   name:
     - "b200-fp4-mtp-max-tpt-dep4-1p-dep8-1d"
