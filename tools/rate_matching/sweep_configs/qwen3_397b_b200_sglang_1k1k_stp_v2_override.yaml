@@ -1,16 +1,16 @@
 # Rate-Matching Sweep: Qwen3.5-397B-A17B 1k/1k STP v2 on B200 (SGLang, TP=8, Disagg PD)
-# — base/override format —
+# — base/zip_override format —
 #
 # All engine settings are hand-written in ctx_sol_base (prefill) and
 # gen_sol_base (decode).  No gen_sweep needed — concurrency variations
-# are expressed directly as override_c* keys in gen_sol_base.
+# are expressed as a single zip_override_concurrency section.
 #
-# Output: 1 prefill YAML + 1 decode YAML (with base + 6 overrides = 7 variants)
+# Output: 1 prefill YAML + 1 decode YAML (with 7 zip variants)
 #
-# Submit individual variants:
-#   srtctl apply -f configs/gen_sol.yaml:base          # C=4
-#   srtctl apply -f configs/gen_sol.yaml:override_c8   # C=8
-#   srtctl apply -f configs/gen_sol.yaml:override_c256 # C=256
+# Submit variants:
+#   srtctl apply -f configs/gen_sol.yaml:zip_override_concurrency       # all 7
+#   srtctl apply -f configs/gen_sol.yaml:zip_override_concurrency[0]    # C=4
+#   srtctl apply -f configs/gen_sol.yaml:zip_override_concurrency[5]    # C=128
 
 name: qwen3_397b_1k1k_sglang_stp_v2
 
@@ -81,9 +81,9 @@ ctx_sol_base:
     req_rate: inf
 
 # -----------------------------------------------------------------------
-# GEN SOL (decode): base/override format — disagg PD mode
+# GEN SOL (decode): base/zip_override format — disagg PD mode
 #
-# base = C=4 (low latency), overrides patch concurrency + decode settings.
+# base = common decode config; zip_override_concurrency sweeps C=4..256.
 # Low-C tier (C=4,8): cuda-graph-max-bs=16, stream-interval=10
 # Mid/High-C tier (C=16+): cuda-graph-max-bs=128, stream-interval=30
 # -----------------------------------------------------------------------
@@ -145,12 +145,8 @@ gen_sol_base:
           tp-size: 8
           disable-radix-cache: true
           mem-fraction-static: 0.82
-          max-running-requests: 4
           decode-log-interval: 1
-          cuda-graph-max-bs: 16
-          stream-interval: 10
           enable-flashinfer-allreduce-fusion: true
-          scheduler-recv-interval: 10
           watchdog-timeout: 1000000
           disaggregation-transfer-backend: nixl
           served-model-name: "Qwen/Qwen3.5-397B-A17B"
@@ -160,74 +156,28 @@ gen_sol_base:
       type: sa-bench
       isl: 1024
       osl: 1024
-      concurrencies: "4"
       req_rate: inf
       skip_initial_test: true
 
-  # --- Low-C tier ---
-  override_c8:
+  # Sweep C=4,8,16,32,64,128,256 — all concurrency-dependent params zipped
+  zip_override_concurrency:
+    name:
+      - qwen3_397b_1k1k_sglang_stp_v2_gen_sol_c4
+      - qwen3_397b_1k1k_sglang_stp_v2_gen_sol_c8
+      - qwen3_397b_1k1k_sglang_stp_v2_gen_sol_c16
+      - qwen3_397b_1k1k_sglang_stp_v2_gen_sol_c32
+      - qwen3_397b_1k1k_sglang_stp_v2_gen_sol_c64
+      - qwen3_397b_1k1k_sglang_stp_v2_gen_sol_c128
+      - qwen3_397b_1k1k_sglang_stp_v2_gen_sol_c256
     backend:
       sglang_config:
         decode:
-          max-running-requests: 8
+          max-running-requests:  [4,   8,   16,  32,  64,  128, 256]
+          cuda-graph-max-bs:     [16,  16,  128, 128, 128, 128, 256]
+          stream-interval:       [10,  10,  30,  30,  30,  30,  30]
+          scheduler-recv-interval: [10, 10, 30,  30,  30,  30,  30]
     benchmark:
-      concurrencies: "8"
-
-  # --- Mid/High-C tier (switch to throughput-optimized settings) ---
-  override_c16:
-    backend:
-      sglang_config:
-        decode:
-          max-running-requests: 16
-          cuda-graph-max-bs: 128
-          stream-interval: 30
-          scheduler-recv-interval: 30
-    benchmark:
-      concurrencies: "16"
-
-  override_c32:
-    backend:
-      sglang_config:
-        decode:
-          max-running-requests: 32
-          cuda-graph-max-bs: 128
-          stream-interval: 30
-          scheduler-recv-interval: 30
-    benchmark:
-      concurrencies: "32"
-
-  override_c64:
-    backend:
-      sglang_config:
-        decode:
-          max-running-requests: 64
-          cuda-graph-max-bs: 128
-          stream-interval: 30
-          scheduler-recv-interval: 30
-    benchmark:
-      concurrencies: "64"
-
-  override_c128:
-    backend:
-      sglang_config:
-        decode:
-          max-running-requests: 128
-          cuda-graph-max-bs: 128
-          stream-interval: 30
-          scheduler-recv-interval: 30
-    benchmark:
-      concurrencies: "128"
-
-  override_c256:
-    backend:
-      sglang_config:
-        decode:
-          max-running-requests: 256
-          cuda-graph-max-bs: 256
-          stream-interval: 30
-          scheduler-recv-interval: 30
-    benchmark:
-      concurrencies: "256"
+      concurrencies:             ["4", "8", "16", "32", "64", "128", "256"]
 
 settings:
   poll_interval: 180
