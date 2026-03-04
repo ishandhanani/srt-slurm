@@ -299,10 +299,10 @@ def generate_override_configs(
                     None                        – all override_* and zip_override_* variants (base excluded)
                     "base"                      – base only
                     "override_<name>"           – single override variant
-                    "override_<glob>"           – all override_* variants matching glob pattern (e.g. "override_mtp*")
                     "zip_override_<name>"       – all variants in a zip group
-                    "zip_override_<glob>"       – all zip groups matching glob pattern
                     "zip_override_<name>[N]"    – single variant by 0-based index
+                    "<glob>"                    – all matching keys (fnmatch against all override_* and
+                                                  zip_override_* names; base always excluded)
 
     Returns:
         List of (suffix, config_dict) tuples.
