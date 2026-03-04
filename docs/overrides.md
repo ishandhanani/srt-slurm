@@ -75,6 +75,19 @@ override_highconc:
 Running `srtctl apply -f config.yaml` submits **2 jobs**: `my-job_lowmem`, `my-job_highconc` (base excluded).
 To also submit the base config: `srtctl apply -f config.yaml:base`.
 
+### Naming
+
+If an `override_*` section includes a `name:` field, it is used as the job name. Otherwise, the name is auto-generated as `{base_name}_{suffix}`:
+
+```yaml
+override_maxtpt:
+  name: "my-job-max-throughput"   # used as-is
+  ...
+
+override_lowmem:                  # no name → auto-generates "my-job_lowmem"
+  ...
+```
+
 ### Deep merge rules
 
 - **dict** → merged recursively (unmentioned keys are kept from base)
@@ -183,12 +196,28 @@ srtctl apply -f config.yaml:zip_override_tp_sweep
 
 # single variant by 0-based index
 srtctl apply -f config.yaml:zip_override_tp_sweep[0]
-srtctl apply -f config.yaml:zip_override_tp_sweep[2]
 ```
+
+### Glob patterns
+
+Selectors support shell-style glob patterns (`*`, `?`). The pattern is matched against all `override_*` and `zip_override_*` key names — `base` is always excluded regardless of the pattern.
+
+```bash
+# all keys containing "maxtpt" (both override_* and zip_override_*)
+srtctl apply -f config.yaml:*maxtpt*
+
+# all override_maxtpt_* keys only
+srtctl apply -f config.yaml:override_maxtpt*
+
+# all zip groups
+srtctl apply -f config.yaml:zip_override_*
+```
+
+A pattern that matches nothing raises a clear error listing the available keys.
 
 Always preview first with `dry-run`:
 ```bash
-srtctl dry-run -f config.yaml:zip_override_tp_sweep
+srtctl dry-run -f config.yaml:*maxtpt*
 ```
 
 ---
@@ -246,3 +275,4 @@ outputs/6717/
 - Use `zip_override_*` when parameters belong together (e.g. tp-size + node count)
 - Use `override_*` for one-off named configurations
 - Broadcast (`[value]`) avoids repeating the same value across all list entries
+- Use `override_<glob>*` to run a named subset without listing each variant explicitly

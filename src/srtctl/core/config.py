@@ -11,6 +11,7 @@ This module provides:
 """
 
 import copy
+import fnmatch
 import logging
 import os
 import re
@@ -254,6 +255,37 @@ def expand_zip_override(
     return results
 
 
+def _expand_wildcard(
+    raw_config: dict[str, Any],
+    pattern: str,
+    base: dict[str, Any],
+    override_keys: list[str],
+    zip_keys: list[str],
+) -> list[tuple[str, dict[str, Any]]]:
+    """Expand a glob pattern against all override_* / zip_override_* keys (base always excluded)."""
+    all_keys = sorted(override_keys + zip_keys)
+    matched = [k for k in all_keys if fnmatch.fnmatch(k, pattern)]
+    if not matched:
+        available = ", ".join([*override_keys, *[f"{k}[i]" for k in zip_keys]]) or "(none)"
+        raise ValueError(f"No variants match '{pattern}'. Available: {available}")
+
+    configs: list[tuple[str, dict[str, Any]]] = []
+    for key in matched:
+        if key.startswith("zip_override_"):
+            group_name = key[len("zip_override_") :]
+            configs.extend(expand_zip_override(group_name, raw_config[key], base))
+        else:
+            suffix = key[len("override_") :]
+            override_dict = raw_config[key]
+            merged = deep_merge(base, override_dict)
+            if "name" not in override_dict:
+                base_name = base.get("name", "unnamed")
+                merged["name"] = f"{base_name}_{suffix}"
+            configs.append((suffix, merged))
+
+    return configs
+
+
 def generate_override_configs(
     raw_config: dict[str, Any],
     selector: str | None = None,
@@ -269,6 +301,8 @@ def generate_override_configs(
                     "override_<name>"           – single override variant
                     "zip_override_<name>"       – all variants in a zip group
                     "zip_override_<name>[N]"    – single variant by 0-based index
+                    "<glob>"                    – all matching keys (fnmatch against all override_* and
+                                                  zip_override_* names; base always excluded)
 
     Returns:
         List of (suffix, config_dict) tuples.
@@ -300,6 +334,10 @@ def generate_override_configs(
         if selector == "base":
             return [("base", copy.deepcopy(base))]
 
+        # Wildcard: delegate to glob matching before exact-key lookups
+        if "*" in selector or "?" in selector:
+            return _expand_wildcard(raw_config, selector, base, override_keys, zip_keys)
+
         # zip_override_foo — all variants in the group
         if selector.startswith("zip_override_"):
             if selector not in raw_config:
@@ -313,18 +351,22 @@ def generate_override_configs(
             all_selectors = ", ".join([*override_keys, *[f"{k}[i]" for k in zip_keys]]) or "(none)"
             raise ValueError(f"Override '{selector}' not found in config. Available: {all_selectors}")
         suffix = selector[len("override_") :]
-        merged = deep_merge(base, raw_config[selector])
-        base_name = base.get("name", "unnamed")
-        merged["name"] = f"{base_name}_{suffix}"
+        override_dict = raw_config[selector]
+        merged = deep_merge(base, override_dict)
+        if "name" not in override_dict:
+            base_name = base.get("name", "unnamed")
+            merged["name"] = f"{base_name}_{suffix}"
         return [(suffix, merged)]
 
     # selector=None: all overrides + all zip groups (sorted for determinism); base excluded
     configs: list[tuple[str, dict[str, Any]]] = []
     for key in override_keys:
         suffix = key[len("override_") :]
-        merged = deep_merge(base, raw_config[key])
-        base_name = base.get("name", "unnamed")
-        merged["name"] = f"{base_name}_{suffix}"
+        override_dict = raw_config[key]
+        merged = deep_merge(base, override_dict)
+        if "name" not in override_dict:
+            base_name = base.get("name", "unnamed")
+            merged["name"] = f"{base_name}_{suffix}"
         configs.append((suffix, merged))
     for key in zip_keys:
         group_name = key[len("zip_override_") :]

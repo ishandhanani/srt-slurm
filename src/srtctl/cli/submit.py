@@ -633,6 +633,7 @@ def parse_config_arg(arg: str) -> tuple[Path, str | None]:
              "config.yaml"
              "config.yaml:base"
              "config.yaml:override_tp64"
+             "config.yaml:override_mtp*"
              "config.yaml:zip_override_tp_sweep"
              "config.yaml:zip_override_tp_sweep[0]"
 
@@ -648,12 +649,13 @@ def parse_config_arg(arg: str) -> tuple[Path, str | None]:
             or re.fullmatch(r"override_\S+", selector)
             or re.fullmatch(r"zip_override_[\w-]+", selector)
             or re.fullmatch(r"zip_override_[\w-]+\[\d+\]", selector)
+            or ("*" in selector or "?" in selector)
         )
         if not valid:
             raise ValueError(
                 f"Invalid selector '{selector}'. "
                 "Must be 'base', 'override_<name>', 'zip_override_<name>', "
-                "or 'zip_override_<name>[N]'."
+                "'zip_override_<name>[N]', or a glob pattern like '*mtp*'."
             )
         return Path(path_str), selector
     return Path(arg), None

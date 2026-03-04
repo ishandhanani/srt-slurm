@@ -87,6 +87,15 @@ _RAW = {
     },
 }
 
+_RAW_MULTI = {
+    "base": {"name": "base-job", "resources": {"decode_nodes": 8}},
+    "override_maxtpt_1p1d": {"name": "max-1p1d", "resources": {"decode_nodes": 1}},
+    "override_maxtpt_1p2d": {"name": "max-1p2d", "resources": {"decode_nodes": 2}},
+    "override_lowlat_1d": {"name": "low-1d", "resources": {"decode_nodes": 1}},
+    "zip_override_scale": {"resources": {"decode_nodes": [3, 4, 5]}},
+    "zip_override_mem": {"resources": {"decode_nodes": [6, 7]}},
+}
+
 
 class TestGenerateOverrideConfigs:
     def test_full_expansion(self) -> None:
@@ -132,6 +141,77 @@ class TestGenerateOverrideConfigs:
             generate_override_configs(_RAW, selector="zip_override_nonexistent")
         with pytest.raises(ValueError, match="out of range"):
             generate_override_configs(_RAW, selector="zip_override_tp[5]")
+
+    def test_override_explicit_name(self) -> None:
+        """An explicit 'name' in override_* is used instead of auto-generated name."""
+        raw = {
+            "base": {"name": "base-job", "resources": {"decode_nodes": 8}},
+            "override_custom": {"name": "my-custom-name", "resources": {"decode_nodes": 4}},
+        }
+        variants = generate_override_configs(raw)
+        assert len(variants) == 1
+        assert variants[0][1]["name"] == "my-custom-name"
+        assert variants[0][1]["resources"]["decode_nodes"] == 4
+
+        # Selector form also respects explicit name
+        r = generate_override_configs(raw, selector="override_custom")
+        assert r[0][1]["name"] == "my-custom-name"
+
+
+# =============================================================================
+# TestWildcardSelector
+# =============================================================================
+
+
+class TestWildcardSelector:
+    def test_glob_matches_subset(self) -> None:
+        """*maxtpt* matches all keys containing 'maxtpt', both override and zip."""
+        variants = generate_override_configs(_RAW_MULTI, selector="*maxtpt*")
+        assert [s for s, _ in variants] == ["maxtpt_1p1d", "maxtpt_1p2d"]
+        assert variants[0][1]["name"] == "max-1p1d"
+        assert variants[1][1]["resources"]["decode_nodes"] == 2
+
+    def test_glob_matches_override_and_zip(self) -> None:
+        """*scale* matches both override_* and zip_override_* keys uniformly."""
+        raw = {
+            "base": {"name": "job"},
+            "override_scale_big": {"resources": {"decode_nodes": 8}},
+            "zip_override_scale": {"resources": {"decode_nodes": [1, 2]}},
+        }
+        variants = generate_override_configs(raw, selector="*scale*")
+        suffixes = [s for s, _ in variants]
+        assert "scale_big" in suffixes   # from override_scale_big
+        assert "scale_0" in suffixes     # from zip_override_scale
+        assert "scale_1" in suffixes
+
+    def test_glob_all_overrides(self) -> None:
+        """override_* returns all override variants (base excluded)."""
+        variants = generate_override_configs(_RAW_MULTI, selector="override_*")
+        assert [s for s, _ in variants] == ["lowlat_1d", "maxtpt_1p1d", "maxtpt_1p2d"]
+
+    def test_glob_all_zip(self) -> None:
+        """zip_override_* returns all zip variants across all groups."""
+        variants = generate_override_configs(_RAW_MULTI, selector="zip_override_*")
+        suffixes = [s for s, _ in variants]
+        assert suffixes == ["mem_0", "mem_1", "scale_0", "scale_1", "scale_2"]
+
+    def test_glob_base_excluded(self) -> None:
+        """base is never matched by wildcards — only reachable via :base."""
+        variants = generate_override_configs(_RAW_MULTI, selector="*")
+        suffixes = [s for s, _ in variants]
+        assert "base" not in suffixes
+
+    def test_no_match_raises(self) -> None:
+        """A pattern that matches nothing raises ValueError."""
+        with pytest.raises(ValueError, match="No variants match"):
+            generate_override_configs(_RAW_MULTI, selector="*nonexistent*")
+
+    def test_parse_config_arg_accepts_wildcard(self) -> None:
+        """parse_config_arg passes any wildcard selector through."""
+        _, sel = parse_config_arg("config.yaml:*mtp*")
+        assert sel == "*mtp*"
+        _, sel = parse_config_arg("config.yaml:override_maxtpt*")
+        assert sel == "override_maxtpt*"
 
 
 # =============================================================================
