@@ -59,6 +59,7 @@ def comment_aware_merge(base: CommentedMap, override: CommentedMap | dict[str, A
       with their override comments when the override is a CommentedMap.
     """
     result = CommentedMap()
+    last_base_key = None
 
     # Pass 1 — base keys in base order
     for key in list(base.keys()):
@@ -77,13 +78,47 @@ def comment_aware_merge(base: CommentedMap, override: CommentedMap | dict[str, A
         if key in base.ca.items:
             result.ca.items[key] = base.ca.items[key]
 
+        last_base_key = key
+
+    # Collect new keys that pass 2 will append
+    new_keys = [k for k in override if k not in base and override[k] is not None]
+
+    if new_keys and last_base_key is not None and last_base_key in result.ca.items:
+        # Strip the trailing block comment from the last base key before appending
+        # override-only keys.  In the source file this token is a section separator
+        # (e.g. "# zip_override_* — ...") that ruamel.yaml attaches as an
+        # after-value token on the last key of the preceding block.  Keeping it
+        # would place it between the base-inherited fields and the newly appended
+        # fields, making the output look broken.
+        #
+        # Two sub-cases handled:
+        # 1. Pure block comment (starts with \n, col 0)  → strip the whole token.
+        # 2. Inline comment with a block comment appended → keep the inline line,
+        #    truncate everything after the first \n.
+        tokens = result.ca.items[last_base_key]
+        if tokens is not None and len(tokens) > 2 and tokens[2] is not None:
+            tok = tokens[2]
+            val = tok.value
+            if val.startswith("\n"):
+                new_tok: object = None  # pure block separator — drop entirely
+            else:
+                first_nl = val.find("\n")
+                stripped = val[: first_nl + 1] if first_nl != -1 else val
+                if stripped != val:
+                    new_tok = copy.copy(tok)
+                    new_tok.value = stripped  # type: ignore[union-attr]
+                else:
+                    new_tok = tok  # unchanged
+            if new_tok is not tok:
+                # Copy the list so we don't mutate the shared source ca.items
+                result.ca.items[last_base_key] = [tokens[0], tokens[1], new_tok, tokens[3] if len(tokens) > 3 else None]
+
     # Pass 2 — new keys from override not present in base
-    for key in override:
-        if key not in base and override[key] is not None:
-            result[key] = copy.deepcopy(override[key])
-            # Carry over comment from override (only available for CommentedMap)
-            if isinstance(override, CommentedMap) and key in override.ca.items:
-                result.ca.items[key] = override.ca.items[key]
+    for key in new_keys:
+        result[key] = copy.deepcopy(override[key])
+        # Carry over comment from override (only available for CommentedMap)
+        if isinstance(override, CommentedMap) and key in override.ca.items:
+            result.ca.items[key] = override.ca.items[key]
 
     # Block comment before the first key (e.g. "# section header")
     if base.ca.comment is not None:

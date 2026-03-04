@@ -1,0 +1,253 @@
+# B200-FP8 8k1k — STP and MTP in one file
+#
+# Two inference modes distinguished by override key names:
+#   zip_override_stp_*  — standard token prediction (no speculative decoding)
+#   zip_override_mtp_*  — multi-token prediction (EAGLE speculative decoding)
+#
+# Low-latency variants: tep8 decode (DP=1)
+# Max-throughput variants: dep8 decode (DP=8)
+#
+# Usage:
+#   srtctl apply  -f recipes/b200-fp8/8k1k.yaml                              # all 10 variants
+#   srtctl apply  -f recipes/b200-fp8/8k1k.yaml:*stp*                        # all STP variants
+#   srtctl apply  -f recipes/b200-fp8/8k1k.yaml:*mtp*                        # all MTP variants
+#   srtctl apply  -f recipes/b200-fp8/8k1k.yaml:zip_override_stp_lowlat[0]   # STP 1p1d only
+#   srtctl dry-run -f recipes/b200-fp8/8k1k.yaml                             # preview
+
+base:
+  name: "b200-fp8-stp-8k1k"
+
+  model:
+    path: "dsr1-fp8"
+    container: "dynamo-sglang"
+    precision: "fp8"
+
+  resources:
+    gpu_type: "b200"
+    prefill_nodes: 1
+    prefill_workers: 1
+    decode_nodes: 1
+    decode_workers: 1
+    gpus_per_node: 8
+
+  backend:
+    prefill_environment:
+      TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
+      PYTHONUNBUFFERED: "1"
+      DYN_SKIP_SGLANG_LOG_FORMATTING: "1"
+      SGLANG_ENABLE_JIT_DEEPGEMM: "false"
+      SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+      SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+      SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+      SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
+      SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
+      SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
+      MC_FORCE_MNNVL: "1"
+      NCCL_MNNVL_ENABLE: "1"
+      NCCL_CUMEM_ENABLE: "1"
+      DYN_REQUEST_PLANE: nats
+    decode_environment:
+      TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
+      PYTHONUNBUFFERED: "1"
+      DYN_SKIP_SGLANG_LOG_FORMATTING: "1"
+      SGLANG_ENABLE_JIT_DEEPGEMM: "false"
+      SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+      SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+      SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+      SGLANG_DECODE_BOOTSTRAP_TIMEOUT: "1000"
+      SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
+      SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
+      SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
+      MC_FORCE_MNNVL: "1"
+      NCCL_MNNVL_ENABLE: "1"
+      NCCL_CUMEM_ENABLE: "1"
+      DYN_REQUEST_PLANE: nats
+    sglang_config:
+      prefill:
+        # Model configuration
+        served-model-name: "deepseek-ai/DeepSeek-R1"
+        trust-remote-code: true
+        quantization: "fp8"
+
+        # Disaggregation mode
+        disaggregation-mode: "prefill"
+        disaggregation-transfer-backend: nixl
+
+        # Memory and token limits
+        mem-fraction-static: 0.85
+        max-prefill-tokens: 32768
+        chunked-prefill-size: 32768
+        context-length: 9600
+        max-running-requests: 512
+        disable-cuda-graph: true
+
+        # Parallelism
+        tensor-parallel-size: 8
+        data-parallel-size: 1
+        expert-parallel-size: 8
+
+        # Attention
+        attention-backend: "trtllm_mla"
+        kv-cache-dtype: "fp8_e4m3"
+
+        # MoE
+        moe-runner-backend: "flashinfer_trtllm"
+        # moe-dense-tp-size: 1
+
+        # Other flags
+        stream-interval: 30
+        watchdog-timeout: 1000000
+        enable-flashinfer-allreduce-fusion: true
+        disable-radix-cache: true
+
+      decode:
+        # Model configuration
+        served-model-name: "deepseek-ai/DeepSeek-R1"
+        trust-remote-code: true
+        quantization: "fp8"
+
+        # Disaggregation mode
+        disaggregation-mode: "decode"
+        disaggregation-transfer-backend: nixl
+
+        # Memory and token limits
+        mem-fraction-static: 0.85
+        max-prefill-tokens: 32768
+        chunked-prefill-size: 32768
+        context-length: 9600
+        max-running-requests: 512
+        cuda-graph-max-bs: 512
+
+        # Parallelism
+        tensor-parallel-size: 8
+        data-parallel-size: 1
+        expert-parallel-size: 8
+
+        # Attention
+        attention-backend: "trtllm_mla"
+        kv-cache-dtype: "fp8_e4m3"
+
+        # MoE
+        moe-runner-backend: "flashinfer_trtllm"
+        # moe-dense-tp-size: 1
+
+        # Other flags
+        stream-interval: 30
+        watchdog-timeout: 1000000
+        enable-flashinfer-allreduce-fusion: true
+        disable-radix-cache: true
+        # disable-chunked-prefix-cache: true
+
+  health_check:
+    max_attempts: 360
+    interval_seconds: 10
+
+  benchmark:
+    type: "sa-bench"
+    isl: 8192
+    osl: 1024
+    req_rate: "inf"
+
+
+# STP low-latency: tep8 decode (DP=1), scale sweep 1p1d/1p4d/1p6d
+zip_override_stp_lowlat:
+  name:
+    - "b200-fp8-stp-low-latency-tep8-1p-1d"
+    - "b200-fp8-stp-low-latency-tep8-1p-4d"
+    - "b200-fp8-stp-low-latency-tep8-1p-6d"
+  resources:
+    decode_nodes: [1, 4, 6]
+    decode_workers: [1, 4, 6]
+  benchmark:
+    concurrencies: ["4x32x64", "64", "32"]
+
+
+# MTP low-latency: same scales as STP, adds EAGLE speculative decoding
+zip_override_mtp_lowlat:
+  name:
+    - "b200-fp8-mtp-low-latency-tep8-1p-1d"
+    - "b200-fp8-mtp-low-latency-tep8-1p-4d"
+    - "b200-fp8-mtp-low-latency-tep8-1p-6d"
+  resources:
+    decode_nodes: [1, 4, 6]
+    decode_workers: [1, 4, 6]
+  backend:
+    prefill_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+    decode_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+    sglang_config:
+      prefill:
+        moe-dense-tp-size: 1
+      decode:
+        speculative-algorithm: "EAGLE"
+        speculative-num-steps: 2
+        speculative-eagle-topk: 1
+        speculative-num-draft-tokens: 3
+  benchmark:
+    concurrencies: ["16x32x64", "8x256", "4x8x16x256"]
+
+
+# STP max-throughput: dep8 decode (DP=8), scale sweep 1p1d and 2p1d
+zip_override_stp_maxtpt:
+  name:
+    - "b200-fp8-stp-max-tpt-dep8-1p-1d"
+    - "b200-fp8-stp-max-tpt-dep8-2p-1d"
+  resources:
+    prefill_nodes: [1, 2]
+    prefill_workers: [1, 2]
+    decode_nodes: [1, 1]
+    decode_workers: [1, 1]
+  backend:
+    sglang_config:
+      prefill:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+        max-running-requests: 1024
+      decode:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+        max-running-requests: 1024
+        cuda-graph-max-bs: 1024
+  benchmark:
+    concurrencies: ["128", "256"]
+
+
+# MTP max-throughput: dep8 decode, scale sweep 1p1d/1p2d/2p1d, adds EAGLE speculative decoding
+# Note: max-running-requests stays at 512 for MTP (unlike STP which raises to 1024)
+zip_override_mtp_maxtpt:
+  name:
+    - "b200-fp8-mtp-max-tpt-dep8-1p-1d"
+    - "b200-fp8-mtp-max-tpt-dep8-1p-2d"
+    - "b200-fp8-mtp-max-tpt-dep8-2p-1d"
+  resources:
+    prefill_nodes: [1, 1, 2]
+    prefill_workers: [1, 1, 2]
+    decode_nodes: [1, 2, 1]
+    decode_workers: [1, 2, 1]
+  backend:
+    prefill_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+    decode_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+    sglang_config:
+      prefill:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+      decode:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+        speculative-algorithm: "EAGLE"
+        speculative-num-steps: 2
+        speculative-eagle-topk: 1
+        speculative-num-draft-tokens: 3
+  benchmark:
+    concurrencies: ["256", "128x256x512x1024", "128x512"]

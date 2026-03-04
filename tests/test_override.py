@@ -458,3 +458,32 @@ class TestResolveOverrideYaml:
         resolve_override_cmd(path, selector="override_lowmem", stdout=True)
         out = capsys.readouterr().out
         assert "decode_nodes: 4" in out
+
+    def test_section_separator_comment_not_leaked(self, tmp_path: Path) -> None:
+        """Section-separator comments between base and zip/override blocks must not
+        appear between base fields and newly appended override-only fields."""
+        src = textwrap.dedent("""\
+            base:
+              name: base
+              nums:
+                a: 1
+                b: 2  # inline b
+
+            # --- separator comment ---
+            zip_override_sweep:
+              nums:
+                c: [10, 20]
+        """)
+        path = tmp_path / "sep.yaml"
+        path.write_text(src)
+        variants = resolve_override_yaml(path)
+        from io import StringIO
+        from ruamel.yaml import YAML as _YAML
+        for _, cm in variants:
+            buf = StringIO()
+            _YAML().dump(cm, buf)
+            out = buf.getvalue()
+            # separator comment must not appear in the resolved output
+            assert "separator comment" not in out
+            # inline comment on 'b' should still be present
+            assert "inline b" in out
