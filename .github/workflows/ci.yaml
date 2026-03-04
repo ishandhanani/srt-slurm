@@ -99,22 +99,23 @@ jobs:
         run: |
           uv run python -c "
           from pathlib import Path
-          from srtctl.core.config import load_config
+          from srtctl.core.config import validate_config_file
 
           recipes = list(Path('recipes').rglob('*.yaml'))
           print(f'Found {len(recipes)} recipes')
 
-          failed = []
+          all_errors = []
           for recipe in recipes:
-              try:
-                  config = load_config(str(recipe))
+              errors = validate_config_file(recipe)
+              if errors:
+                  for e in errors:
+                      print(f'✗ {e}')
+                  all_errors.extend(errors)
+              else:
                   print(f'✓ {recipe.name}')
-              except Exception as e:
-                  print(f'✗ {recipe.name}: {e}')
-                  failed.append(recipe)
 
-          if failed:
-              print(f'\n{len(failed)} recipes failed validation')
+          if all_errors:
+              print(f'\n{len(all_errors)} validation error(s)')
               exit(1)
           print(f'\nAll {len(recipes)} recipes valid')
           "

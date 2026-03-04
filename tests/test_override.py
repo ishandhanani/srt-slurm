@@ -10,8 +10,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from srtctl.cli.submit import is_override_config, parse_config_arg, submit_override
-from srtctl.core.config import deep_merge, expand_zip_override, generate_override_configs
+import textwrap
+
+from ruamel.yaml.comments import CommentedMap
+
+from srtctl.cli.submit import is_override_config, parse_config_arg, resolve_override_cmd, submit_override
+from srtctl.core.config import deep_merge, expand_zip_override, generate_override_configs, resolve_override_yaml
+from srtctl.core.yaml_utils import comment_aware_merge, load_yaml_with_comments
 
 
 # =============================================================================
@@ -308,3 +313,148 @@ class TestSubmitOverride:
         assert sbatch_count("override_small") == 1
         assert sbatch_count("zip_override_tp") == 2
         assert sbatch_count("zip_override_tp[1]") == 1
+
+
+# =============================================================================
+# TestCommentAwareMerge
+# =============================================================================
+
+
+def _cm(src: str) -> CommentedMap:
+    """Parse a YAML string into a CommentedMap."""
+    from ruamel.yaml import YAML
+    y = YAML()
+    return y.load(src)
+
+
+class TestCommentAwareMerge:
+    def test_base_order_preserved(self) -> None:
+        """Keys from base appear first and in base order; override-only keys go last."""
+        base = _cm("a: 1\nb: 2\nc: 3\n")
+        override = _cm("b: 99\nd: 4\n")  # d is new
+        result = comment_aware_merge(base, override)
+        assert list(result.keys()) == ["a", "b", "c", "d"]
+        assert result["b"] == 99
+        assert result["d"] == 4
+
+    def test_none_deletes_key(self) -> None:
+        base = _cm("x: 1\ny: 2\n")
+        override = {"y": None}
+        result = comment_aware_merge(base, override)
+        assert "y" not in result
+        assert result["x"] == 1
+
+    def test_nested_merge(self) -> None:
+        base = _cm("outer:\n  a: 1\n  b: 2\n")
+        override = _cm("outer:\n  b: 99\n  c: 3\n")
+        result = comment_aware_merge(base, override)
+        assert list(result["outer"].keys()) == ["a", "b", "c"]
+        assert result["outer"]["b"] == 99
+
+    def test_comments_preserved(self) -> None:
+        """Inline and block comments from base survive the merge."""
+        src = textwrap.dedent("""\
+            # top comment
+            a: 1  # inline a
+            b: 2  # inline b
+        """)
+        base = _cm(src)
+        result = comment_aware_merge(base, {"b": 99})
+        from io import StringIO
+        from ruamel.yaml import YAML
+        buf = StringIO()
+        YAML().dump(result, buf)
+        out = buf.getvalue()
+        assert "inline a" in out
+        assert "inline b" in out
+
+
+# =============================================================================
+# TestResolveOverrideYaml
+# =============================================================================
+
+
+def _write_commented_config(tmp_path: Path) -> Path:
+    """Write an override YAML with comments to tmp_path."""
+    src = textwrap.dedent("""\
+        base:
+          name: "base-job"
+          # resource section
+          resources:
+            decode_nodes: 8  # eight decoders
+          model:
+            path: /models/test
+            container: test.sqsh
+            precision: fp8
+
+        # low-memory override
+        override_lowmem:
+          resources:
+            decode_nodes: 4
+          new_field: added_by_override
+    """)
+    path = tmp_path / "override.yaml"
+    path.write_text(src)
+    return path
+
+
+class TestResolveOverrideYaml:
+    def test_field_order_base_first(self, tmp_path: Path) -> None:
+        """Resolved YAML has base fields first; override-only fields are appended."""
+        path = _write_commented_config(tmp_path)
+        variants = resolve_override_yaml(path, selector="override_lowmem")
+        assert len(variants) == 1
+        suffix, cm = variants[0]
+        assert suffix == "lowmem"
+        keys = list(cm.keys())
+        # name and resources come from base (order preserved); new_field is new
+        assert keys.index("name") < keys.index("new_field")
+        assert keys.index("resources") < keys.index("new_field")
+
+    def test_comments_in_output(self, tmp_path: Path) -> None:
+        """Resolved YAML preserves inline and block comments from base."""
+        from io import StringIO
+        from ruamel.yaml import YAML
+        path = _write_commented_config(tmp_path)
+        variants = resolve_override_yaml(path, selector="override_lowmem")
+        _, cm = variants[0]
+        buf = StringIO()
+        YAML().dump(cm, buf)
+        out = buf.getvalue()
+        assert "resource section" in out
+        assert "eight decoders" in out
+
+    def test_zip_override_base_order(self, tmp_path: Path) -> None:
+        """Zip variants also follow base field order."""
+        src = textwrap.dedent("""\
+            base:
+              name: base
+              alpha: 1
+              beta: 2
+            zip_override_sweep:
+              alpha: [10, 20]
+        """)
+        path = tmp_path / "zip.yaml"
+        path.write_text(src)
+        variants = resolve_override_yaml(path)
+        assert len(variants) == 2
+        for _, cm in variants:
+            keys = list(cm.keys())
+            assert keys.index("alpha") < keys.index("beta")
+
+    def test_resolve_override_cmd_writes_files(self, tmp_path: Path) -> None:
+        """resolve_override_cmd writes one file per variant."""
+        path = _write_commented_config(tmp_path)
+        resolve_override_cmd(path, selector="override_lowmem")
+        out = tmp_path / "override_lowmem.yaml"
+        assert out.exists()
+        text = out.read_text()
+        assert "resource section" in text  # comment preserved
+        assert "decode_nodes: 4" in text   # override value applied
+
+    def test_resolve_override_cmd_stdout(self, tmp_path: Path, capsys: Any) -> None:
+        """resolve_override_cmd --stdout prints YAML to stdout."""
+        path = _write_commented_config(tmp_path)
+        resolve_override_cmd(path, selector="override_lowmem", stdout=True)
+        out = capsys.readouterr().out
+        assert "decode_nodes: 4" in out

@@ -748,7 +748,7 @@ def submit_override(
         # SLURM job can read it when it starts (sbatch script embeds the path).
         variant_file = config_path.parent / f"{config_path.stem}_{suffix}.yaml"
         with open(variant_file, "w") as f:
-            yaml.dump(resolved, f, default_flow_style=False)
+            yaml.dump(resolved, f, default_flow_style=False, sort_keys=False)
 
         if "sweep" in resolved:
             try:
@@ -783,6 +783,49 @@ def submit_override(
             # reads it at job start.
 
 
+def resolve_override_cmd(
+    config_path: Path,
+    selector: str | None = None,
+    stdout: bool = False,
+) -> None:
+    """Resolve an override config and write the specialised YAML file(s).
+
+    Unlike ``submit_override``, this command only generates the resolved
+    YAML — it does not submit any jobs. Field order follows the base config,
+    with any override-only keys appended at the end. Comments from the
+    source file are preserved.
+
+    Args:
+        config_path: Path to the override YAML file.
+        selector: Optional variant selector (same syntax as apply -f file:selector).
+        stdout: When True, print the resolved YAML to stdout instead of writing files.
+    """
+    from srtctl.core.config import resolve_override_yaml
+    from srtctl.core.yaml_utils import dump_yaml_with_comments
+
+    variants = resolve_override_yaml(config_path, selector=selector)
+
+    if stdout:
+        for i, (suffix, cm) in enumerate(variants):
+            if len(variants) > 1:
+                if i > 0:
+                    print()
+                print(f"# --- {suffix} ---")
+            text = dump_yaml_with_comments(cm)
+            print(text, end="")
+        return
+
+    written: list[Path] = []
+    for suffix, cm in variants:
+        out_path = config_path.parent / f"{config_path.stem}_{suffix}.yaml"
+        with open(out_path, "w") as f:
+            dump_yaml_with_comments(cm, f)
+        written.append(out_path)
+
+    for p in written:
+        console.print(f"[green]Wrote:[/] {p}")
+
+
 def main():
     # If no args at all, launch interactive mode
     if len(sys.argv) == 1:
@@ -800,6 +843,8 @@ def main():
   srtctl apply -f ./configs/                     # Submit all YAMLs in directory
   srtctl apply -f config.yaml --sweep            # Submit sweep
   srtctl dry-run -f config.yaml                  # Dry run
+  srtctl resolve-override -f config.yaml         # Resolve override YAML (no submit)
+  srtctl resolve-override -f config.yaml --stdout  # Print to stdout
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -827,6 +872,24 @@ def main():
     dry_run_parser = subparsers.add_parser("dry-run", help="Validate without submitting")
     add_common_args(dry_run_parser)
 
+    resolve_parser = subparsers.add_parser(
+        "resolve-override",
+        help="Resolve override YAML into specialised files without submitting",
+    )
+    resolve_parser.add_argument(
+        "-f",
+        "--file",
+        type=str,
+        required=True,
+        dest="config",
+        help="Override YAML file, or file:selector",
+    )
+    resolve_parser.add_argument(
+        "--stdout",
+        action="store_true",
+        help="Print resolved YAML to stdout instead of writing files",
+    )
+
     args = parser.parse_args()
 
     # Parse config arg: supports path:selector format for overrides
@@ -840,6 +903,14 @@ def main():
     tags = [t.strip() for t in (getattr(args, "tags", "") or "").split(",") if t.strip()] or None
 
     try:
+        # resolve-override has its own simple dispatch path
+        if args.command == "resolve-override":
+            if not is_override_config(config_path):
+                console.print(f"[bold red]Error:[/] {config_path} is not an override config (missing 'base' key)")
+                sys.exit(1)
+            resolve_override_cmd(config_path, selector=selector, stdout=getattr(args, "stdout", False))
+            return
+
         setup_script = getattr(args, "setup_script", None)
         output_dir = getattr(args, "output_dir", None)
 

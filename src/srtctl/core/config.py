@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from ruamel.yaml.comments import CommentedMap
 
 from .schema import ClusterConfig, SrtConfig
 
@@ -331,6 +332,115 @@ def generate_override_configs(
         configs.extend(expand_zip_override(group_name, raw_config[key], base))
 
     return configs
+
+
+def resolve_override_yaml(
+    config_path: Path,
+    selector: str | None = None,
+) -> list[tuple[str, Any]]:
+    """Expand an override YAML into variants, preserving field order and comments.
+
+    Like :func:`generate_override_configs` but returns ``ruamel.yaml``
+    ``CommentedMap`` objects so the output can be serialised with comments
+    intact.
+
+    Field ordering rules (same as the merge):
+    - Base fields appear first, in base order.
+    - New fields from the override section are appended at the end.
+
+    For ``zip_override_*`` variants the per-variant values come from
+    :func:`expand_zip_override` (list slicing); base comments are preserved
+    while the zip section comments are not (they reference list elements).
+
+    Args:
+        config_path: Path to an override YAML file (must have a ``base`` key).
+        selector: Optional selector, same syntax as
+                  :func:`generate_override_configs`.
+
+    Returns:
+        List of ``(suffix, CommentedMap)`` tuples ready for
+        :func:`~srtctl.core.yaml_utils.dump_yaml_with_comments`.
+    """
+    from .yaml_utils import comment_aware_merge, load_yaml_with_comments
+
+    # Load twice: once with comment preservation, once as plain dicts for the
+    # existing expansion logic (zip slicing, wildcard, etc.).
+    raw_cm = load_yaml_with_comments(config_path)
+    with open(config_path) as f:
+        raw_plain = yaml.safe_load(f)
+
+    base_cm: Any = raw_cm["base"]
+
+    # Re-use the existing expansion to get fully merged plain dicts.
+    plain_variants = generate_override_configs(raw_plain, selector=selector)
+
+    results: list[tuple[str, Any]] = []
+    for suffix, merged_plain in plain_variants:
+        if suffix == "base":
+            # No override applied — return the base CommentedMap as-is.
+            results.append(("base", base_cm))
+            continue
+
+        override_key = f"override_{suffix}"
+        if override_key in raw_cm and isinstance(raw_cm[override_key], CommentedMap):
+            # Regular override: merge CommentedMaps so override comments are kept.
+            result_cm = comment_aware_merge(base_cm, raw_cm[override_key])
+        else:
+            # zip_override variant (values were lists → now scalars) or any
+            # other case: merge the plain resolved dict into the base CommentedMap
+            # so at least base field order and comments are preserved.
+            result_cm = comment_aware_merge(base_cm, merged_plain)
+
+        results.append((suffix, result_cm))
+
+    return results
+
+
+def validate_config_file(path: Path | str) -> list[str]:
+    """Validate a recipe YAML, handling both plain and override-format files.
+
+    For plain configs, validates the single config.
+    For override configs (has a ``base`` key), expands all variants and
+    validates each one.
+
+    Returns:
+        List of error strings. Empty list means all variants are valid.
+    """
+    path = Path(path)
+    if not path.exists():
+        return [f"{path}: file not found"]
+
+    with open(path) as f:
+        raw = yaml.safe_load(f)
+
+    if not isinstance(raw, dict):
+        return [f"{path}: not a YAML mapping"]
+
+    errors: list[str] = []
+
+    if "base" in raw:
+        # Override format — expand and validate each variant
+        try:
+            variants = generate_override_configs(raw)
+        except Exception as e:
+            return [f"{path}: failed to expand overrides: {e}"]
+
+        cluster_config = load_cluster_config()
+        schema = SrtConfig.Schema()
+        for suffix, config_dict in variants:
+            resolved = resolve_config_with_defaults(config_dict, cluster_config)
+            try:
+                schema.load(resolved)
+            except Exception as e:
+                errors.append(f"{path} [{suffix}]: {e}")
+    else:
+        # Plain config
+        try:
+            load_config(path)
+        except Exception as e:
+            errors.append(f"{path}: {e}")
+
+    return errors
 
 
 def get_srtslurm_setting(key: str, default: Any = None) -> Any:

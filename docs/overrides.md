@@ -9,6 +9,7 @@ Config overrides let you define a single YAML file with a shared `base` configur
 - [zip\_override\_\*](#zip_override_)
 - [Selector Syntax](#selector-syntax)
 - [Combining All Modes](#combining-all-modes)
+- [Resolving Overrides Without Submitting](#resolving-overrides-without-submitting)
 - [Output Files](#output-files)
 - [Tips](#tips)
 
@@ -220,6 +221,40 @@ zip_override_tp_sweep:
 ```
 
 `srtctl apply -f config.yaml` submits **3 jobs**: `lowmem` + `tp_sweep_0` + `tp_sweep_1` (base is excluded unless you pass `:base`).
+
+---
+
+## Resolving Overrides Without Submitting
+
+`srtctl resolve-override` expands an override file and writes the specialised YAML for each variant — without submitting any jobs. It is useful for inspecting exactly what config will be submitted, committing expanded configs to version control, or feeding them into other tooling.
+
+```bash
+# Write all variants next to the source file
+srtctl resolve-override -f config.yaml
+
+# Write a single variant
+srtctl resolve-override -f config.yaml:override_lowmem
+
+# Print to stdout instead of writing files
+srtctl resolve-override -f config.yaml --stdout
+
+# Preview a specific zip variant
+srtctl resolve-override -f config.yaml:zip_override_tp_sweep[0] --stdout
+```
+
+The resolved YAML preserves field order and comments from the source file:
+
+- **Field order** — base fields appear first, in their original order. Fields that are only present in an `override_*` section are appended at the end.
+- **Comments** — inline and block comments from both `base` and `override_*` sections are kept in the output. For `zip_override_*` variants, base comments are preserved; the zip section's list comments are not carried over (they reference list elements that no longer exist after slicing).
+
+Output files are written next to the source file using the same naming convention as `apply`:
+
+```
+config.yaml                 # source
+config_lowmem.yaml          # override_lowmem resolved
+config_tp_sweep_0.yaml      # zip_override_tp_sweep variant 0
+config_tp_sweep_1.yaml      # zip_override_tp_sweep variant 1
+```
 
 ---
 

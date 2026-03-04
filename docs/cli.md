@@ -17,6 +17,7 @@
 - [Commands](#commands)
   - [srtctl apply](#srtctl-apply)
   - [srtctl dry-run](#srtctl-dry-run)
+  - [srtctl resolve-override](#srtctl-resolve-override)
 - [Output](#output)
 - [Sweep Support](#sweep-support)
 - [Config Override Support](#config-override-support)
@@ -308,6 +309,41 @@ Dry-run output includes:
 - For sweeps: table of all jobs with parameters
 - Generated configs saved to `dry-runs/` folder
 
+### `srtctl resolve-override`
+
+Expand an override config and write the specialised YAML file(s) without submitting.
+
+```bash
+srtctl resolve-override -f <config.yaml> [options]
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `-f, --file` | Override YAML file, or `file:selector` to resolve a specific variant (required) |
+| `--stdout` | Print resolved YAML to stdout instead of writing files |
+
+**Examples:**
+
+```bash
+# Write all variants next to the source file
+srtctl resolve-override -f config.yaml
+
+# Write a single override variant
+srtctl resolve-override -f config.yaml:override_lowmem
+
+# Print to stdout
+srtctl resolve-override -f config.yaml:override_lowmem --stdout
+
+# Inspect a single zip variant
+srtctl resolve-override -f config.yaml:zip_override_tp_sweep[0] --stdout
+```
+
+The resolved YAML preserves the field order and comments from the source file. Base fields appear first in their original order; override-only fields are appended at the end. Output files follow the same `{stem}_{suffix}.yaml` naming convention used by `apply`.
+
+See [Config Overrides — Resolving Without Submitting](overrides.md#resolving-overrides-without-submitting) for details.
+
 ## Output
 
 When you submit a job, `srtctl` creates an output directory:
@@ -346,11 +382,17 @@ srtctl apply -f override-config.yaml:override_tp64
 srtctl apply -f override-config.yaml:base
 ```
 
-The `:selector` syntax works with both `apply` and `dry-run`. If the selector is used on a non-override config, a warning is logged and the config is processed normally.
+The `:selector` syntax works with `apply`, `dry-run`, and `resolve-override`. If the selector is used on a non-override config, a warning is logged and the config is processed normally.
 
 Override configs also work with directory submission — override files in the directory are auto-detected and expanded.
 
-See [Config Overrides](config-reference.md#config-overrides) for full YAML syntax and merge semantics.
+To inspect the resolved YAML before submitting (preserving field order and comments), use `resolve-override`:
+
+```bash
+srtctl resolve-override -f override-config.yaml --stdout
+```
+
+See [Config Overrides](overrides.md) for full YAML syntax, merge semantics, and field-order / comment-preservation behaviour.
 
 ## Debugging Running Jobs
 
