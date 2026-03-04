@@ -668,14 +668,15 @@ def parse_config_arg(arg: str) -> tuple[Path, str | None]:
         valid = bool(
             selector == "base"
             or re.fullmatch(r"override_\S+", selector)
-            or re.fullmatch(r"zip_override_[\w*?-]+", selector)
+            or re.fullmatch(r"zip_override_[\w-]+", selector)
             or re.fullmatch(r"zip_override_[\w-]+\[\d+\]", selector)
+            or ("*" in selector or "?" in selector)
         )
         if not valid:
             raise ValueError(
                 f"Invalid selector '{selector}'. "
                 "Must be 'base', 'override_<name>', 'zip_override_<name>', "
-                "'zip_override_<name>[N]', or a glob pattern like 'override_mtp*'."
+                "'zip_override_<name>[N]', or a glob pattern like '*mtp*'."
             )
         return Path(path_str), selector
     return Path(arg), None

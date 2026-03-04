@@ -185,22 +185,40 @@ class TestWildcardSelector:
         # mem group comes before scale alphabetically
         assert suffixes == ["mem_0", "mem_1", "scale_0", "scale_1", "scale_2"]
 
+    def test_generic_glob_matches_across_both_types(self) -> None:
+        """*maxtpt* matches override_maxtpt_* keys regardless of prefix."""
+        variants = generate_override_configs(_RAW_MULTI, selector="*maxtpt*")
+        assert [s for s, _ in variants] == ["maxtpt_1p1d", "maxtpt_1p2d"]
+
+    def test_generic_glob_matches_zip_and_override(self) -> None:
+        """*scale* matches both override_* and zip_override_* keys containing 'scale'."""
+        raw = {
+            "base": {"name": "job"},
+            "override_scale_big": {"resources": {"decode_nodes": 8}},
+            "zip_override_scale": {"resources": {"decode_nodes": [1, 2]}},
+        }
+        variants = generate_override_configs(raw, selector="*scale*")
+        # override_scale_big comes before zip_override_scale alphabetically
+        suffixes = [s for s, _ in variants]
+        assert "scale_big" in suffixes          # from override_scale_big
+        assert "scale_0" in suffixes            # from zip_override_scale
+        assert "scale_1" in suffixes
+
     def test_wildcard_no_match_raises(self) -> None:
         """A pattern that matches nothing raises ValueError."""
-        with pytest.raises(ValueError, match="No overrides match"):
+        with pytest.raises(ValueError, match="No variants match"):
             generate_override_configs(_RAW_MULTI, selector="override_nonexistent*")
-        with pytest.raises(ValueError, match="No zip groups match"):
+        with pytest.raises(ValueError, match="No variants match"):
             generate_override_configs(_RAW_MULTI, selector="zip_override_nonexistent*")
-
-    def test_wildcard_invalid_prefix_raises(self) -> None:
-        """A wildcard that doesn't start with override_/zip_override_ raises ValueError."""
-        with pytest.raises(ValueError, match="must start with"):
-            generate_override_configs(_RAW_MULTI, selector="base*")
+        with pytest.raises(ValueError, match="No variants match"):
+            generate_override_configs(_RAW_MULTI, selector="*nonexistent*")
 
     def test_parse_config_arg_accepts_wildcard(self) -> None:
-        """parse_config_arg passes wildcard selectors through."""
+        """parse_config_arg passes any wildcard selector through."""
         _, sel = parse_config_arg("config.yaml:override_mtp*")
         assert sel == "override_mtp*"
+        _, sel = parse_config_arg("config.yaml:*mtp*")
+        assert sel == "*mtp*"
         _, sel = parse_config_arg("config.yaml:zip_override_scale*")
         assert sel == "zip_override_scale*"
 

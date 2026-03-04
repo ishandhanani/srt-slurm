@@ -262,24 +262,32 @@ def _expand_wildcard(
     override_keys: list[str],
     zip_keys: list[str],
 ) -> list[tuple[str, dict[str, Any]]]:
-    """Expand a glob pattern selector against all matching override_* / zip_override_* keys."""
+    """Expand a glob pattern selector against all matching override_* / zip_override_* keys.
+
+    Matching rules:
+    - Pattern starting with 'zip_override_' → match only zip_override_* keys
+    - Pattern starting with 'override_'     → match only override_* keys
+    - Any other pattern (e.g. '*mtp*')      → match across all override_* and zip_override_* keys
+    """
     configs: list[tuple[str, dict[str, Any]]] = []
+    all_selectors = ", ".join([*override_keys, *[f"{k}[i]" for k in zip_keys]]) or "(none)"
 
     if pattern.startswith("zip_override_"):
-        matched = sorted(k for k in zip_keys if fnmatch.fnmatch(k, pattern))
-        if not matched:
-            available = ", ".join(zip_keys) or "(none)"
-            raise ValueError(f"No zip groups match '{pattern}'. Available: {available}")
-        for key in matched:
+        candidates = zip_keys
+    elif pattern.startswith("override_"):
+        candidates = override_keys
+    else:
+        candidates = sorted(override_keys + zip_keys)
+
+    matched = sorted(k for k in candidates if fnmatch.fnmatch(k, pattern))
+    if not matched:
+        raise ValueError(f"No variants match '{pattern}'. Available: {all_selectors}")
+
+    for key in matched:
+        if key.startswith("zip_override_"):
             group_name = key[len("zip_override_") :]
             configs.extend(expand_zip_override(group_name, raw_config[key], base))
-
-    elif pattern.startswith("override_"):
-        matched = sorted(k for k in override_keys if fnmatch.fnmatch(k, pattern))
-        if not matched:
-            all_selectors = ", ".join([*override_keys, *[f"{k}[i]" for k in zip_keys]]) or "(none)"
-            raise ValueError(f"No overrides match '{pattern}'. Available: {all_selectors}")
-        for key in matched:
+        else:
             suffix = key[len("override_") :]
             override_dict = raw_config[key]
             merged = deep_merge(base, override_dict)
@@ -287,9 +295,6 @@ def _expand_wildcard(
                 base_name = base.get("name", "unnamed")
                 merged["name"] = f"{base_name}_{suffix}"
             configs.append((suffix, merged))
-
-    else:
-        raise ValueError(f"Wildcard selector '{pattern}' must start with 'override_' or 'zip_override_'.")
 
     return configs
 

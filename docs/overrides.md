@@ -212,33 +212,37 @@ srtctl dry-run -f config.yaml:zip_override_tp_sweep
 Use shell-style glob patterns (`*`, `?`) to select multiple variants at once without listing each one individually.
 
 ```bash
-# all override_maxtpt_* variants
+# match by substring — works across both override_* and zip_override_* keys
+srtctl apply -f config.yaml:*mtp*
+
+# all override_maxtpt_* variants (prefix-anchored)
 srtctl apply -f config.yaml:override_maxtpt*
 
 # all override_* variants (same as no selector, but explicit)
 srtctl apply -f config.yaml:override_*
 
-# all zip groups whose name contains "scale"
-srtctl apply -f config.yaml:zip_override_*scale*
+# all zip groups
+srtctl apply -f config.yaml:zip_override_*
 
 # dry-run to preview before submitting
-srtctl dry-run -f config.yaml:override_maxtpt*
+srtctl dry-run -f config.yaml:*mtp*
 ```
 
 **Rules:**
 
 | Pattern | What it matches |
 |---------|----------------|
-| `override_<glob>` | All `override_*` keys matching the glob |
-| `zip_override_<glob>` | All `zip_override_*` keys matching the glob |
+| `override_<glob>` | Only `override_*` keys matching the glob |
+| `zip_override_<glob>` | Only `zip_override_*` keys matching the glob |
+| `<glob>` (no prefix) | All `override_*` **and** `zip_override_*` keys matching the glob |
 
-Wildcards must start with `override_` or `zip_override_` — patterns like `base*` are rejected. If no keys match the pattern, a clear error is raised listing the available keys.
+If no keys match the pattern, a clear error is raised listing the available keys.
 
-**Example** — a file with `override_lowlat_1d`, `override_maxtpt_1d`, `override_maxtpt_2d`:
+**Example** — a file with `override_lowlat_1d`, `override_maxtpt_1d`, `zip_override_maxtpt_sweep`:
 
 ```bash
-srtctl apply -f config.yaml:override_maxtpt*
-# submits: override_maxtpt_1d, override_maxtpt_2d
+srtctl apply -f config.yaml:*maxtpt*
+# submits: override_maxtpt_1d + all zip_override_maxtpt_sweep variants
 ```
 
 ---
