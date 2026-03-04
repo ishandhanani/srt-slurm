@@ -262,27 +262,14 @@ def _expand_wildcard(
     override_keys: list[str],
     zip_keys: list[str],
 ) -> list[tuple[str, dict[str, Any]]]:
-    """Expand a glob pattern selector against all matching override_* / zip_override_* keys.
-
-    Matching rules:
-    - Pattern starting with 'zip_override_' → match only zip_override_* keys
-    - Pattern starting with 'override_'     → match only override_* keys
-    - Any other pattern (e.g. '*mtp*')      → match across all override_* and zip_override_* keys
-    """
-    configs: list[tuple[str, dict[str, Any]]] = []
-    all_selectors = ", ".join([*override_keys, *[f"{k}[i]" for k in zip_keys]]) or "(none)"
-
-    if pattern.startswith("zip_override_"):
-        candidates = zip_keys
-    elif pattern.startswith("override_"):
-        candidates = override_keys
-    else:
-        candidates = sorted(override_keys + zip_keys)
-
-    matched = sorted(k for k in candidates if fnmatch.fnmatch(k, pattern))
+    """Expand a glob pattern against all override_* / zip_override_* keys (base always excluded)."""
+    all_keys = sorted(override_keys + zip_keys)
+    matched = [k for k in all_keys if fnmatch.fnmatch(k, pattern)]
     if not matched:
-        raise ValueError(f"No variants match '{pattern}'. Available: {all_selectors}")
+        available = ", ".join([*override_keys, *[f"{k}[i]" for k in zip_keys]]) or "(none)"
+        raise ValueError(f"No variants match '{pattern}'. Available: {available}")
 
+    configs: list[tuple[str, dict[str, Any]]] = []
     for key in matched:
         if key.startswith("zip_override_"):
             group_name = key[len("zip_override_") :]

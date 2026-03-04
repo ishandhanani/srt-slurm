@@ -8,7 +8,6 @@ Config overrides let you define a single YAML file with a shared `base` configur
 - [base + override\_\*](#base--override_)
 - [zip\_override\_\*](#zip_override_)
 - [Selector Syntax](#selector-syntax)
-- [Wildcard Selectors](#wildcard-selectors)
 - [Combining All Modes](#combining-all-modes)
 - [Output Files](#output-files)
 - [Tips](#tips)
@@ -197,52 +196,28 @@ srtctl apply -f config.yaml:zip_override_tp_sweep
 
 # single variant by 0-based index
 srtctl apply -f config.yaml:zip_override_tp_sweep[0]
-srtctl apply -f config.yaml:zip_override_tp_sweep[2]
 ```
 
-Always preview first with `dry-run`:
-```bash
-srtctl dry-run -f config.yaml:zip_override_tp_sweep
-```
+### Glob patterns
 
----
-
-## Wildcard Selectors
-
-Use shell-style glob patterns (`*`, `?`) to select multiple variants at once without listing each one individually.
+Selectors support shell-style glob patterns (`*`, `?`). The pattern is matched against all `override_*` and `zip_override_*` key names — `base` is always excluded regardless of the pattern.
 
 ```bash
-# match by substring — works across both override_* and zip_override_* keys
-srtctl apply -f config.yaml:*mtp*
+# all keys containing "maxtpt" (both override_* and zip_override_*)
+srtctl apply -f config.yaml:*maxtpt*
 
-# all override_maxtpt_* variants (prefix-anchored)
+# all override_maxtpt_* keys only
 srtctl apply -f config.yaml:override_maxtpt*
-
-# all override_* variants (same as no selector, but explicit)
-srtctl apply -f config.yaml:override_*
 
 # all zip groups
 srtctl apply -f config.yaml:zip_override_*
-
-# dry-run to preview before submitting
-srtctl dry-run -f config.yaml:*mtp*
 ```
 
-**Rules:**
+A pattern that matches nothing raises a clear error listing the available keys.
 
-| Pattern | What it matches |
-|---------|----------------|
-| `override_<glob>` | Only `override_*` keys matching the glob |
-| `zip_override_<glob>` | Only `zip_override_*` keys matching the glob |
-| `<glob>` (no prefix) | All `override_*` **and** `zip_override_*` keys matching the glob |
-
-If no keys match the pattern, a clear error is raised listing the available keys.
-
-**Example** — a file with `override_lowlat_1d`, `override_maxtpt_1d`, `zip_override_maxtpt_sweep`:
-
+Always preview first with `dry-run`:
 ```bash
-srtctl apply -f config.yaml:*maxtpt*
-# submits: override_maxtpt_1d + all zip_override_maxtpt_sweep variants
+srtctl dry-run -f config.yaml:*maxtpt*
 ```
 
 ---
