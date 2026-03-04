@@ -8,6 +8,7 @@ Config overrides let you define a single YAML file with a shared `base` configur
 - [base + override\_\*](#base--override_)
 - [zip\_override\_\*](#zip_override_)
 - [Selector Syntax](#selector-syntax)
+- [Wildcard Selectors](#wildcard-selectors)
 - [Combining All Modes](#combining-all-modes)
 - [Output Files](#output-files)
 - [Tips](#tips)
@@ -74,6 +75,19 @@ override_highconc:
 
 Running `srtctl apply -f config.yaml` submits **2 jobs**: `my-job_lowmem`, `my-job_highconc` (base excluded).
 To also submit the base config: `srtctl apply -f config.yaml:base`.
+
+### Naming
+
+If an `override_*` section includes a `name:` field, it is used as the job name. Otherwise, the name is auto-generated as `{base_name}_{suffix}`:
+
+```yaml
+override_maxtpt:
+  name: "my-job-max-throughput"   # used as-is
+  ...
+
+override_lowmem:                  # no name → auto-generates "my-job_lowmem"
+  ...
+```
 
 ### Deep merge rules
 
@@ -193,6 +207,42 @@ srtctl dry-run -f config.yaml:zip_override_tp_sweep
 
 ---
 
+## Wildcard Selectors
+
+Use shell-style glob patterns (`*`, `?`) to select multiple variants at once without listing each one individually.
+
+```bash
+# all override_maxtpt_* variants
+srtctl apply -f config.yaml:override_maxtpt*
+
+# all override_* variants (same as no selector, but explicit)
+srtctl apply -f config.yaml:override_*
+
+# all zip groups whose name contains "scale"
+srtctl apply -f config.yaml:zip_override_*scale*
+
+# dry-run to preview before submitting
+srtctl dry-run -f config.yaml:override_maxtpt*
+```
+
+**Rules:**
+
+| Pattern | What it matches |
+|---------|----------------|
+| `override_<glob>` | All `override_*` keys matching the glob |
+| `zip_override_<glob>` | All `zip_override_*` keys matching the glob |
+
+Wildcards must start with `override_` or `zip_override_` — patterns like `base*` are rejected. If no keys match the pattern, a clear error is raised listing the available keys.
+
+**Example** — a file with `override_lowlat_1d`, `override_maxtpt_1d`, `override_maxtpt_2d`:
+
+```bash
+srtctl apply -f config.yaml:override_maxtpt*
+# submits: override_maxtpt_1d, override_maxtpt_2d
+```
+
+---
+
 ## Combining All Modes
 
 You can mix `override_*` and `zip_override_*` in a single file:
@@ -246,3 +296,4 @@ outputs/6717/
 - Use `zip_override_*` when parameters belong together (e.g. tp-size + node count)
 - Use `override_*` for one-off named configurations
 - Broadcast (`[value]`) avoids repeating the same value across all list entries
+- Use `override_<glob>*` to run a named subset without listing each variant explicitly
