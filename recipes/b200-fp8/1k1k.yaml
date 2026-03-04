@@ -64,49 +64,79 @@ base:
       DYN_REQUEST_PLANE: nats
     sglang_config:
       prefill:
+        # Model configuration
         served-model-name: "deepseek-ai/DeepSeek-R1"
         trust-remote-code: true
         quantization: "fp8"
+
+        # Disaggregation mode
         disaggregation-mode: "prefill"
         disaggregation-transfer-backend: nixl
+
+        # Memory and token limits
         mem-fraction-static: 0.85
         max-prefill-tokens: 32768
         chunked-prefill-size: 32768
         context-length: 2200
         max-running-requests: 512
         disable-cuda-graph: true
+
+        # Parallelism
         tensor-parallel-size: 8
         data-parallel-size: 1
         expert-parallel-size: 8
+
+        # Attention
         attention-backend: "trtllm_mla"
         kv-cache-dtype: "fp8_e4m3"
+
+        # MoE
         moe-runner-backend: "flashinfer_trtllm"
+        # moe-dense-tp-size: 1
+
+        # Other flags
         stream-interval: 30
         watchdog-timeout: 1000000
         enable-flashinfer-allreduce-fusion: true
         disable-radix-cache: true
+
       decode:
+        # Model configuration
         served-model-name: "deepseek-ai/DeepSeek-R1"
         trust-remote-code: true
         quantization: "fp8"
+
+        # Disaggregation mode
         disaggregation-mode: "decode"
         disaggregation-transfer-backend: nixl
+
+        # Memory and token limits
         mem-fraction-static: 0.85
         max-prefill-tokens: 32768
         chunked-prefill-size: 32768
         context-length: 2200
         max-running-requests: 512
         cuda-graph-max-bs: 512
+
+        # Parallelism
         tensor-parallel-size: 8
         data-parallel-size: 1
         expert-parallel-size: 8
+
+        # Attention
         attention-backend: "trtllm_mla"
         kv-cache-dtype: "fp8_e4m3"
+
+        # MoE
         moe-runner-backend: "flashinfer_trtllm"
+        # moe-dense-tp-size: 1
+
+        # Other flags
         stream-interval: 30
         watchdog-timeout: 1000000
         enable-flashinfer-allreduce-fusion: true
         disable-radix-cache: true
+        # disable-chunked-prefix-cache: true
 
   health_check:
     max_attempts: 360
