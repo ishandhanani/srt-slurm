@@ -87,6 +87,15 @@ _RAW = {
     },
 }
 
+_RAW_MULTI = {
+    "base": {"name": "base-job", "resources": {"decode_nodes": 8}},
+    "override_maxtpt_1p1d": {"name": "max-1p1d", "resources": {"decode_nodes": 1}},
+    "override_maxtpt_1p2d": {"name": "max-1p2d", "resources": {"decode_nodes": 2}},
+    "override_lowlat_1d": {"name": "low-1d", "resources": {"decode_nodes": 1}},
+    "zip_override_scale": {"resources": {"decode_nodes": [3, 4, 5]}},
+    "zip_override_mem": {"resources": {"decode_nodes": [6, 7]}},
+}
+
 
 class TestGenerateOverrideConfigs:
     def test_full_expansion(self) -> None:
@@ -147,6 +156,53 @@ class TestGenerateOverrideConfigs:
         # Selector form also respects explicit name
         r = generate_override_configs(raw, selector="override_custom")
         assert r[0][1]["name"] == "my-custom-name"
+
+
+# =============================================================================
+# TestWildcardSelector
+# =============================================================================
+
+
+class TestWildcardSelector:
+    def test_override_glob_matches_subset(self) -> None:
+        """override_maxtpt* returns only the two maxtpt variants, in sorted order."""
+        variants = generate_override_configs(_RAW_MULTI, selector="override_maxtpt*")
+        assert [s for s, _ in variants] == ["maxtpt_1p1d", "maxtpt_1p2d"]
+        assert variants[0][1]["name"] == "max-1p1d"
+        assert variants[1][1]["resources"]["decode_nodes"] == 2
+
+    def test_override_glob_all(self) -> None:
+        """override_* returns all three override variants."""
+        variants = generate_override_configs(_RAW_MULTI, selector="override_*")
+        assert [s for s, _ in variants] == ["lowlat_1d", "maxtpt_1p1d", "maxtpt_1p2d"]
+
+    def test_zip_override_glob(self) -> None:
+        """zip_override_* returns all zip variants across matched groups."""
+        variants = generate_override_configs(_RAW_MULTI, selector="zip_override_*")
+        # scale has 3 variants, mem has 2 → 5 total, in key-sorted order
+        assert len(variants) == 5
+        suffixes = [s for s, _ in variants]
+        # mem group comes before scale alphabetically
+        assert suffixes == ["mem_0", "mem_1", "scale_0", "scale_1", "scale_2"]
+
+    def test_wildcard_no_match_raises(self) -> None:
+        """A pattern that matches nothing raises ValueError."""
+        with pytest.raises(ValueError, match="No overrides match"):
+            generate_override_configs(_RAW_MULTI, selector="override_nonexistent*")
+        with pytest.raises(ValueError, match="No zip groups match"):
+            generate_override_configs(_RAW_MULTI, selector="zip_override_nonexistent*")
+
+    def test_wildcard_invalid_prefix_raises(self) -> None:
+        """A wildcard that doesn't start with override_/zip_override_ raises ValueError."""
+        with pytest.raises(ValueError, match="must start with"):
+            generate_override_configs(_RAW_MULTI, selector="base*")
+
+    def test_parse_config_arg_accepts_wildcard(self) -> None:
+        """parse_config_arg passes wildcard selectors through."""
+        _, sel = parse_config_arg("config.yaml:override_mtp*")
+        assert sel == "override_mtp*"
+        _, sel = parse_config_arg("config.yaml:zip_override_scale*")
+        assert sel == "zip_override_scale*"
 
 
 # =============================================================================
