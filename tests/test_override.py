@@ -133,6 +133,21 @@ class TestGenerateOverrideConfigs:
         with pytest.raises(ValueError, match="out of range"):
             generate_override_configs(_RAW, selector="zip_override_tp[5]")
 
+    def test_override_explicit_name(self) -> None:
+        """An explicit 'name' in override_* is used instead of auto-generated name."""
+        raw = {
+            "base": {"name": "base-job", "resources": {"decode_nodes": 8}},
+            "override_custom": {"name": "my-custom-name", "resources": {"decode_nodes": 4}},
+        }
+        variants = generate_override_configs(raw)
+        assert len(variants) == 1
+        assert variants[0][1]["name"] == "my-custom-name"
+        assert variants[0][1]["resources"]["decode_nodes"] == 4
+
+        # Selector form also respects explicit name
+        r = generate_override_configs(raw, selector="override_custom")
+        assert r[0][1]["name"] == "my-custom-name"
+
 
 # =============================================================================
 # TestIsOverrideConfig

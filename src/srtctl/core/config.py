@@ -313,18 +313,22 @@ def generate_override_configs(
             all_selectors = ", ".join([*override_keys, *[f"{k}[i]" for k in zip_keys]]) or "(none)"
             raise ValueError(f"Override '{selector}' not found in config. Available: {all_selectors}")
         suffix = selector[len("override_") :]
-        merged = deep_merge(base, raw_config[selector])
-        base_name = base.get("name", "unnamed")
-        merged["name"] = f"{base_name}_{suffix}"
+        override_dict = raw_config[selector]
+        merged = deep_merge(base, override_dict)
+        if "name" not in override_dict:
+            base_name = base.get("name", "unnamed")
+            merged["name"] = f"{base_name}_{suffix}"
         return [(suffix, merged)]
 
     # selector=None: all overrides + all zip groups (sorted for determinism); base excluded
     configs: list[tuple[str, dict[str, Any]]] = []
     for key in override_keys:
         suffix = key[len("override_") :]
-        merged = deep_merge(base, raw_config[key])
-        base_name = base.get("name", "unnamed")
-        merged["name"] = f"{base_name}_{suffix}"
+        override_dict = raw_config[key]
+        merged = deep_merge(base, override_dict)
+        if "name" not in override_dict:
+            base_name = base.get("name", "unnamed")
+            merged["name"] = f"{base_name}_{suffix}"
         configs.append((suffix, merged))
     for key in zip_keys:
         group_name = key[len("zip_override_") :]
