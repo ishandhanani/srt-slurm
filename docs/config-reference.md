@@ -308,7 +308,7 @@ backend:
 
 | Field                     | Type        | Default | Description                             |
 | ------------------------- | ----------- | ------- | --------------------------------------- |
-| `type`                    | string      | sglang  | Backend type: "sglang" or "trtllm"      |
+| `type`                    | string      | sglang  | Backend type: "sglang"                  |
 | `gpu_type`                | string      | null    | GPU type override                       |
 | `prefill_environment`     | dict        | {}      | Environment variables for prefill       |
 | `decode_environment`      | dict        | {}      | Environment variables for decode        |
@@ -369,42 +369,6 @@ Each worker leader gets a globally unique port starting at 5550:
 | prefill_1 | 5551 |
 | decode_0  | 5552 |
 | decode_1  | 5553 |
-
-### TRTLLM Backend
-
-When using `type: trtllm`, the backend uses TRTLLM with MPI-style launching:
-
-```yaml
-backend:
-  type: trtllm
-
-  # Per-mode environment variables
-  prefill_environment:
-    CUDA_LAUNCH_BLOCKING: "1"
-  decode_environment:
-    CUDA_LAUNCH_BLOCKING: "1"
-
-  # TRTLLM CLI config per mode
-  trtllm_config:
-    prefill:
-      mem-fraction-static: 0.8
-      chunked-prefill-size: 8192
-    decode:
-      mem-fraction-static: 0.9
-```
-
-| Field                 | Type   | Default | Description                             |
-| --------------------- | ------ | ------- | --------------------------------------- |
-| `type`                | string | -       | Must be "trtllm"                        |
-| `prefill_environment` | dict   | {}      | Environment variables for prefill       |
-| `decode_environment`  | dict   | {}      | Environment variables for decode        |
-| `trtllm_config`       | object | null    | TRTLLM CLI configuration per mode       |
-
-**Key differences from SGLang backend**:
-- No aggregated mode support (prefill/decode only)
-- Uses MPI-style launching (one srun per endpoint with all nodes)
-- Uses `trtllm-llmapi-launch` for distributed launching
-- Automatically sets `TRTLLM_EPLB_SHM_NAME` with unique UUID per endpoint
 
 ---
 

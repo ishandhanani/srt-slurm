@@ -149,8 +149,7 @@ def check_dynamo_health(
             component = instance.get("component")
             if component == "prefill":
                 prefill_count += 1
-            # TRTLLM decode workers are reported as "tensorrt_llm"
-            elif component == "decode" or component == "tensorrt_llm":
+            elif component == "decode":
                 decode_count += 1
             elif component == "backend":
                 # In aggregated mode, workers report as "backend"

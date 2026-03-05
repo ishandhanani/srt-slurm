@@ -33,8 +33,6 @@ from marshmallow_dataclass import dataclass
 from srtctl.backends import (
     BackendConfig,
     SGLangProtocol,
-    TRTLLMProtocol,
-    VLLMProtocol,
 )
 from srtctl.core.formatting import (
     FormattablePath,
@@ -254,7 +252,7 @@ class BackendConfigField(fields.Field):
             # Default to SGLang
             return SGLangProtocol()
 
-        if isinstance(value, SGLangProtocol | TRTLLMProtocol | VLLMProtocol):
+        if isinstance(value, SGLangProtocol):
             return value
 
         if not isinstance(value, dict):
@@ -266,14 +264,8 @@ class BackendConfigField(fields.Field):
         if backend_type == "sglang":
             schema = SGLangProtocol.Schema()
             return schema.load(value)
-        elif backend_type == "trtllm":
-            schema = TRTLLMProtocol.Schema()
-            return schema.load(value)
-        elif backend_type == "vllm":
-            schema = VLLMProtocol.Schema()
-            return schema.load(value)
         else:
-            raise ValidationError(f"Unknown backend type: {backend_type!r}. Supported types: sglang, trtllm, vllm")
+            raise ValidationError(f"Unknown backend type: {backend_type!r}. Supported types: sglang")
 
     def _serialize(self, value: Any | None, attr: str | None, obj: Any, **kwargs) -> Any:
         """Serialize backend config to dict."""
@@ -281,10 +273,6 @@ class BackendConfigField(fields.Field):
             return None
         if isinstance(value, SGLangProtocol):
             return SGLangProtocol.Schema().dump(value)
-        if isinstance(value, TRTLLMProtocol):
-            return TRTLLMProtocol.Schema().dump(value)
-        if isinstance(value, VLLMProtocol):
-            return VLLMProtocol.Schema().dump(value)
         return value
 
 

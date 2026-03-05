@@ -36,7 +36,7 @@ class TestGetFrontend:
             get_frontend("unknown")
 
         with pytest.raises(ValueError, match="Unknown frontend type"):
-            get_frontend("vllm")
+            get_frontend("other")
 
 
 # ============================================================================

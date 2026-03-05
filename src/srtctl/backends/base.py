@@ -21,7 +21,6 @@ class BackendType(str, Enum):
     """Supported backend types."""
 
     SGLANG = "sglang"
-    TRTLLM = "trtllm"
 
 
 @dataclass
@@ -29,11 +28,11 @@ class SrunConfig:
     """Configuration for srun process launching.
 
     Attributes:
-        mpi: MPI type (e.g., "pmix" for TRTLLM). None for non-MPI backends.
+        mpi: MPI type. None for non-MPI backends.
         oversubscribe: Use --oversubscribe flag (for MPI jobs).
         launch_per_endpoint: If True, launch one srun per endpoint (all nodes together).
                             If False, launch one srun per process (per node).
-        cpu_bind: CPU binding mode (e.g., "verbose,none" for TRTLLM). None to omit.
+        cpu_bind: CPU binding mode. None to omit.
     """
 
     mpi: str | None = None

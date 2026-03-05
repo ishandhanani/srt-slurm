@@ -203,7 +203,7 @@ class RunLoader:
     def _load_benchmark_results(self, run: BenchmarkRun) -> None:
         """Load benchmark results from profiler output files.
 
-        Looks for directories like "sa-bench_isl_1024_osl_1024/" or "vllm_isl_1024_osl_1024/" and parses JSON files.
+        Looks for directories like "sa-bench_isl_1024_osl_1024/" and parses JSON files.
         Uses parquet caching to avoid re-parsing on subsequent loads.
 
         Checks both the run directory and the logs/ subdirectory for benchmark results.

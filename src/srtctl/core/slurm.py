@@ -175,9 +175,9 @@ def start_srun_process(
         srun_options: Additional srun options as dict
         overlap: Use --overlap flag (default: True)
         use_bash_wrapper: Wrap command in bash -c (default: True)
-        mpi: MPI type (e.g., "pmix" for TRTLLM)
+        mpi: MPI type (optional)
         oversubscribe: Use --oversubscribe flag (for MPI jobs)
-        cpu_bind: CPU binding mode (e.g., "verbose,none" for TRTLLM)
+        cpu_bind: CPU binding mode (optional)
 
     Returns:
         subprocess.Popen object for the srun process
@@ -202,7 +202,7 @@ def start_srun_process(
     if overlap:
         srun_cmd.append("--overlap")
 
-    # MPI options (for TRTLLM)
+    # MPI options
     if mpi:
         srun_cmd.extend(["--mpi", mpi])
     if oversubscribe:

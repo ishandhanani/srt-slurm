@@ -205,7 +205,6 @@ with patch.dict(os.environ, H100Rack.slurm_env()):
 
 **Current backends:**
 - **SGLang**: Per-process srun launching, supports prefill/decode/aggregated modes
-- **TRTLLM**: MPI-style launching (one srun per endpoint with all nodes), prefill/decode only
 
 ### Adding a New Benchmark
 

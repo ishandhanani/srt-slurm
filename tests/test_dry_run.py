@@ -158,27 +158,6 @@ class TestDryRunEnvironment:
         output = capsys.readouterr().out
         assert "No custom environment variables configured" in output
 
-    def test_trtllm_backend_environment(self, capsys):
-        config = _make_config({
-            "backend": {
-                "type": "trtllm",
-                "prefill_environment": {
-                    "TRTLLM_ENABLE_PDL": "1",
-                    "NCCL_GRAPH_MIXING_SUPPORT": "0",
-                },
-                "decode_environment": {
-                    "TRTLLM_SERVER_DISABLE_GC": "1",
-                },
-            },
-        })
-        show_config_details(config)
-        output = capsys.readouterr().out
-        assert "TRTLLM_ENABLE_PDL" in output
-        assert "prefill" in output
-        assert "TRTLLM_SERVER_DISABLE_GC" in output
-        assert "decode" in output
-
-
 class TestDryRunSrunOptions:
     """Test that srun options appear in dry-run output."""
 

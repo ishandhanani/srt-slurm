@@ -95,7 +95,7 @@ class CacheManager:
 
         Args:
             cache_name: Name of the cache (e.g., "benchmark_run", "node_metrics")
-            source_patterns: Glob patterns for source files (e.g., ["*.json", "vllm_*/"])
+            source_patterns: Glob patterns for source files (e.g., ["*.json", "sa-bench_*/"])
 
         Returns:
             True if cache is valid, False otherwise

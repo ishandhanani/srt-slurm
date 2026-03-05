@@ -1,13 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name={{ job_name }}
 #SBATCH --nodes={{ total_nodes }}
-{% if backend_type == "trtllm" %}
-#SBATCH --ntasks={{ gpus_per_node * total_nodes }}
-#SBATCH --ntasks-per-node={{ gpus_per_node }}
-{% else %}
 #SBATCH --ntasks={{ total_nodes }}
 #SBATCH --ntasks-per-node=1
-{% endif %}
 {% if use_gpus_per_node_directive %}
 #SBATCH --gpus-per-node={{ gpus_per_node }}
 {% endif %}

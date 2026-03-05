@@ -180,7 +180,7 @@ class WorkerStageMixin:
         )
 
     def start_endpoint_worker(self, endpoint_processes: list["Process"]) -> ManagedProcess:
-        """Start a worker using MPI-style launching (one srun per endpoint, used by TRTLLM).
+        """Start a worker using MPI-style launching (one srun per endpoint).
 
         This launches a single srun command that spans all nodes in the endpoint,
         with ntasks = total GPUs across all nodes.
@@ -303,7 +303,7 @@ class WorkerStageMixin:
         result: NamedProcesses = {}
 
         if launch_per_endpoint:
-            # MPI-style: one srun per endpoint (TRTLLM)
+            # MPI-style: one srun per endpoint
             for _endpoint_key, endpoint_processes in grouped.items():
                 managed = self.start_endpoint_worker(endpoint_processes)
                 result[managed.name] = managed
