@@ -59,11 +59,11 @@ backend:
       disaggregation-transfer-backend: nixl
 
       # Memory and token limits
-      mem-fraction-static: 0.6
-      max-prefill-tokens: 16384  # 8k x 16 / dp_size
-      chunked-prefill-size: 131072  # 8k x 16
+      mem-fraction-static: 0.85
+      max-prefill-tokens: 32768
+      chunked-prefill-size: 32768
       context-length: 9600
-      max-running-requests: 16
+      max-running-requests: 1024
       disable-cuda-graph: true
 
       # Parallelism
@@ -98,9 +98,9 @@ backend:
       disaggregation-transfer-backend: nixl
 
       # Memory and token limits
-      mem-fraction-static: 0.6
-      max-prefill-tokens: 1048576  # 8k x 1024 / dp_size
-      chunked-prefill-size: 8388608 # 8k x 1024
+      mem-fraction-static: 0.85
+      max-prefill-tokens: 32768
+      chunked-prefill-size: 32768
       context-length: 9600
       max-running-requests: 1024
       cuda-graph-max-bs: 1024

@@ -96,7 +96,7 @@ echo ""
 # The orchestrator will spawn containerized workers
 # Output goes to SLURM's --output (sweep_%j.log)
 set +e  # Temporarily disable exit-on-error to capture exit code
-python3 -u -m srtctl.cli.do_sweep "{{ config_path }}"
+python3 -u -m srtctl.cli.do_sweep "${OUTPUT_DIR}/config.yaml"
 EXIT_CODE=$?
 set -e  # Re-enable exit-on-error
 
