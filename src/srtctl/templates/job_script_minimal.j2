@@ -62,6 +62,9 @@ echo "Start: $(date)"
 echo "=========================================="
 echo ""
 
+# Copy config to output directory (snapshot at submission time to avoid race conditions)
+cp "{{ config_path }}" "${OUTPUT_DIR}/config.yaml"
+
 # Get head node
 HEAD_NODE=$(scontrol show hostnames ${SLURM_NODELIST} | head -n1)
 echo "Head node: ${HEAD_NODE}"
@@ -94,7 +97,7 @@ echo ""
 # Output goes to SLURM's --output (sweep_%j.log)
 set +e  # Temporarily disable exit-on-error to capture exit code
 cd "${SRTCTL_SOURCE}"
-uv run --python 3.12 --no-dev -m srtctl.cli.do_sweep "{{ config_path }}"
+uv run --python 3.12 --no-dev -m srtctl.cli.do_sweep "${OUTPUT_DIR}/config.yaml"
 EXIT_CODE=$?
 set -e  # Re-enable exit-on-error
 
