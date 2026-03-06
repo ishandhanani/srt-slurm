@@ -62,8 +62,7 @@ echo "Start: $(date)"
 echo "=========================================="
 echo ""
 
-# Copy config to output directory (snapshot at submission time to avoid race conditions)
-cp "{{ config_path }}" "${OUTPUT_DIR}/config.yaml"
+# Config already copied to OUTPUT_DIR/config.yaml by Python at submission time (submit.py)
 
 # Get head node
 HEAD_NODE=$(scontrol show hostnames ${SLURM_NODELIST} | head -n1)
