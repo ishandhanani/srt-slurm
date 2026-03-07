@@ -205,7 +205,7 @@ def preview_sbatch(config_path: Path, config: dict) -> None:
     from srtctl.core.config import load_config
 
     typed_config = load_config(config_path)
-    script = generate_minimal_sbatch_script(typed_config, config_path)
+    script, _ = generate_minimal_sbatch_script(typed_config, config_path)
     display_sbatch_script(script)
 
 

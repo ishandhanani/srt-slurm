@@ -456,7 +456,7 @@ class TestSetupScript:
         )
 
         # Without setup_script
-        script = generate_minimal_sbatch_script(
+        script, _ = generate_minimal_sbatch_script(
             config=config,
             config_path=Path("/tmp/test.yaml"),
             setup_script=None,
@@ -464,7 +464,7 @@ class TestSetupScript:
         assert "SRTCTL_SETUP_SCRIPT" not in script
 
         # With setup_script
-        script = generate_minimal_sbatch_script(
+        script, _ = generate_minimal_sbatch_script(
             config=config,
             config_path=Path("/tmp/test.yaml"),
             setup_script="install-sglang-main.sh",
@@ -851,7 +851,7 @@ class TestSbatchNodeCount:
             infra=InfraConfig(etcd_nats_dedicated_node=True),
         )
 
-        script = generate_minimal_sbatch_script(config, Path("/tmp/test.yaml"))
+        script, _ = generate_minimal_sbatch_script(config, Path("/tmp/test.yaml"))
 
         # Should request 3 nodes: 2 workers + 1 infra
         assert "#SBATCH --nodes=3" in script
@@ -878,7 +878,7 @@ class TestSbatchNodeCount:
             infra=InfraConfig(etcd_nats_dedicated_node=False),
         )
 
-        script = generate_minimal_sbatch_script(config, Path("/tmp/test.yaml"))
+        script, _ = generate_minimal_sbatch_script(config, Path("/tmp/test.yaml"))
 
         # Should request 2 nodes: just the workers
         assert "#SBATCH --nodes=2" in script
