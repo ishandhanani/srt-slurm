@@ -37,9 +37,7 @@ from rich.table import Table
 from srtctl.core.config import (
     generate_override_configs,
     get_srtslurm_setting,
-    load_cluster_config,
     load_config,
-    resolve_config_with_defaults,
 )
 from srtctl.core.schema import SrtConfig
 from srtctl.core.status import create_job_record
@@ -156,6 +154,7 @@ def generate_minimal_sbatch_script(
     config_path: Path,
     setup_script: str | None = None,
     output_dir: Path | None = None,
+    runtime_config_filename: str = "config.yaml",
 ) -> str:
     """Generate minimal sbatch script that calls the Python orchestrator.
 
@@ -167,6 +166,7 @@ def generate_minimal_sbatch_script(
         config_path: Path to the YAML config file
         setup_script: Optional setup script override (passed via env var)
         output_dir: Custom output directory (CLI flag, highest priority)
+        runtime_config_filename: Config file name under OUTPUT_DIR used by do_sweep
 
     Returns:
         Rendered sbatch script as string
@@ -215,6 +215,7 @@ def generate_minimal_sbatch_script(
         partition=config.slurm.partition or os.environ.get("SLURM_PARTITION", "default"),
         time_limit=config.slurm.time_limit or "01:00:00",
         config_path=str(config_path.resolve()),
+        runtime_config_filename=runtime_config_filename,
         timestamp=timestamp,
         use_gpus_per_node_directive=get_srtslurm_setting("use_gpus_per_node_directive", True),
         use_segment_sbatch_directive=get_srtslurm_setting("use_segment_sbatch_directive", True),
@@ -252,8 +253,8 @@ def submit_with_orchestrator(
         output_dir: Custom output directory (CLI flag, highest priority)
         variant_suffix: If set (e.g. "base", "lowmem"), also save config_path
                         as config_{variant_suffix}.yaml in the job output dir.
-        source_config_path: If set, saved as config.yaml instead of config_path.
-                            Used for override jobs to preserve the original file.
+        source_config_path: If set, save the original source YAML as config.yaml
+                            while the job executes a resolved variant config.
 
     Returns:
         job_id string on success, None for dry_run.
@@ -262,11 +263,16 @@ def submit_with_orchestrator(
     if config is None:
         config = load_config(config_path)
 
+    runtime_config_filename = "config.yaml"
+    if source_config_path:
+        runtime_config_filename = f"config_{variant_suffix}.yaml" if variant_suffix else "config_resolved.yaml"
+
     script_content = generate_minimal_sbatch_script(
         config=config,
         config_path=config_path,
         setup_script=setup_script,
         output_dir=output_dir,
+        runtime_config_filename=runtime_config_filename,
     )
 
     if dry_run:
@@ -322,6 +328,8 @@ def submit_with_orchestrator(
         shutil.copy(source_config_path or config_path, job_output_dir / "config.yaml")
         if variant_suffix:
             shutil.copy(config_path, job_output_dir / f"config_{variant_suffix}.yaml")
+        elif source_config_path:
+            shutil.copy(config_path, job_output_dir / runtime_config_filename)
         shutil.copy(script_path, job_output_dir / "sbatch_script.sh")
 
         job_name = get_job_name(config)
@@ -417,7 +425,8 @@ def submit_single(
         tags: Optional list of tags
         output_dir: Custom output directory (CLI flag, highest priority)
         variant_suffix: If set, also save config as config_{suffix}.yaml in job output dir.
-        source_config_path: If set, saved as config.yaml (original file for override jobs).
+        source_config_path: If set, saved as config.yaml while execution uses the
+                            resolved variant config.
 
     Returns:
         job_id string on success, None for dry_run.
@@ -733,26 +742,29 @@ def submit_override(
         )
         console.print()
 
-    cluster_config = load_cluster_config()
+    from srtctl.core.config import resolve_override_yaml
+    from srtctl.core.yaml_utils import dump_yaml_with_comments
 
-    for i, (suffix, config_dict) in enumerate(override_configs, 1):
+    resolved_variants = resolve_override_yaml(config_path, selector=selector)
+
+    for i, (suffix, config_cm) in enumerate(resolved_variants, 1):
         variant_label = "base" if suffix == "base" else f"override_{suffix}"
-        job_name = config_dict.get("name", "unnamed")
+        job_name = config_cm.get("name", "unnamed")
 
         if dry_run:
             console.print(f"[bold cyan][{i}/{len(override_configs)}][/] {variant_label}: {job_name}")
 
-        resolved = resolve_config_with_defaults(config_dict, cluster_config)
-
         logger.info(f"Override variant: {variant_label} -> {job_name}")
 
-        # Write resolved config next to the original override YAML so the
-        # SLURM job can read it when it starts (sbatch script embeds the path).
+        # Write the comment-preserving resolved config next to the original
+        # override YAML so the SLURM job can execute that exact variant.
         variant_file = config_path.parent / f"{config_path.stem}_{suffix}.yaml"
         with open(variant_file, "w") as f:
-            yaml.dump(resolved, f, default_flow_style=False, sort_keys=False)
+            dump_yaml_with_comments(config_cm, f)
 
-        if "sweep" in resolved:
+        config = load_config(variant_file)
+
+        if "sweep" in config_cm:
             try:
                 submit_sweep(
                     config_path=variant_file,
@@ -766,7 +778,6 @@ def submit_override(
                 with contextlib.suppress(OSError):
                     variant_file.unlink()
         else:
-            config = SrtConfig.Schema().load(resolved)
             submit_single(
                 config_path=variant_file,
                 config=config,

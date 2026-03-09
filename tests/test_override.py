@@ -3,21 +3,20 @@
 
 """Tests for config override (base + override_* + zip_override_*) functionality."""
 
+import textwrap
+from io import StringIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
-
-import textwrap
-
+from ruamel.yaml import YAML as RuamelYAML
 from ruamel.yaml.comments import CommentedMap
 
-from srtctl.cli.submit import is_override_config, parse_config_arg, resolve_override_cmd, submit_override
+from srtctl.cli.submit import is_override_config, parse_config_arg, resolve_override_cmd, submit_override, submit_single
 from srtctl.core.config import deep_merge, expand_zip_override, generate_override_configs, resolve_override_yaml
-from srtctl.core.yaml_utils import comment_aware_merge, load_yaml_with_comments
-
+from srtctl.core.yaml_utils import comment_aware_merge
 
 # =============================================================================
 # TestDeepMerge
@@ -35,20 +34,20 @@ class TestDeepMerge:
             "extra_mount": ["/data:/data"],
         }
         override = {
-            "resources": {"decode_nodes": 4},                          # scalar override
-            "benchmark": {"concurrencies": [4096]},                    # list replace
+            "resources": {"decode_nodes": 4},  # scalar override
+            "benchmark": {"concurrencies": [4096]},  # list replace
             "backend": {"sglang_config": {"prefill": {"tp-size": 64}}},  # nested merge
-            "extra_mount": None,                                        # null → delete
-            "environment": {"NEW_VAR": "value"},                        # new key
+            "extra_mount": None,  # null → delete
+            "environment": {"NEW_VAR": "value"},  # new key
         }
         result = deep_merge(base, override)
-        assert result["name"] == "old"                                             # untouched
-        assert result["resources"]["decode_nodes"] == 4                            # scalar
-        assert result["benchmark"]["concurrencies"] == [4096]                      # list replace
-        assert result["backend"]["sglang_config"]["prefill"]["tp-size"] == 64      # nested
+        assert result["name"] == "old"  # untouched
+        assert result["resources"]["decode_nodes"] == 4  # scalar
+        assert result["benchmark"]["concurrencies"] == [4096]  # list replace
+        assert result["backend"]["sglang_config"]["prefill"]["tp-size"] == 64  # nested
         assert result["backend"]["sglang_config"]["prefill"]["trust-remote-code"] is True  # preserved
-        assert "extra_mount" not in result                                         # null delete
-        assert result["environment"]["NEW_VAR"] == "value"                         # new key
+        assert "extra_mount" not in result  # null delete
+        assert result["environment"]["NEW_VAR"] == "value"  # new key
 
     def test_immutability(self) -> None:
         """Neither base nor override is mutated."""
@@ -185,8 +184,8 @@ class TestWildcardSelector:
         }
         variants = generate_override_configs(raw, selector="*scale*")
         suffixes = [s for s, _ in variants]
-        assert "scale_big" in suffixes   # from override_scale_big
-        assert "scale_0" in suffixes     # from zip_override_scale
+        assert "scale_big" in suffixes  # from override_scale_big
+        assert "scale_0" in suffixes  # from zip_override_scale
         assert "scale_1" in suffixes
 
     def test_glob_all_overrides(self) -> None:
@@ -257,8 +256,8 @@ class TestExpandZipOverride:
                 "sglang_config": {
                     "prefill": {
                         "tensor-parallel-size": [4, 8],
-                        "mem-fraction-static": [0.85],    # broadcast
-                        "trust-remote-code": False,        # scalar passthrough
+                        "mem-fraction-static": [0.85],  # broadcast
+                        "trust-remote-code": False,  # scalar passthrough
                     }
                 }
             },
@@ -274,10 +273,10 @@ class TestExpandZipOverride:
         assert v1["backend"]["sglang_config"]["prefill"]["tensor-parallel-size"] == 8
         assert v0["backend"]["sglang_config"]["prefill"]["mem-fraction-static"] == 0.85  # broadcast
         assert v1["backend"]["sglang_config"]["prefill"]["mem-fraction-static"] == 0.85
-        assert v0["backend"]["sglang_config"]["prefill"]["trust-remote-code"] is False   # scalar
-        assert v0["benchmark"]["concurrencies"] == [4, 8]    # literal list
+        assert v0["backend"]["sglang_config"]["prefill"]["trust-remote-code"] is False  # scalar
+        assert v0["benchmark"]["concurrencies"] == [4, 8]  # literal list
         assert v1["benchmark"]["concurrencies"] == [4, 8, 16]
-        assert v0["resources"]["decode_nodes"] == 8          # base key preserved
+        assert v0["resources"]["decode_nodes"] == 8  # base key preserved
 
     def test_naming_and_immutability(self) -> None:
         """Auto-name, explicit name list, and base not mutated."""
@@ -299,14 +298,18 @@ class TestExpandZipOverride:
     def test_errors(self) -> None:
         """Incompatible lengths and no lists both raise ValueError."""
         with pytest.raises(ValueError, match="Incompatible zip lengths"):
-            expand_zip_override("bad", {
-                "backend": {
-                    "sglang_config": {
-                        "prefill": {"tensor-parallel-size": [4, 8]},
-                        "decode": {"tensor-parallel-size": [4, 8, 16]},
+            expand_zip_override(
+                "bad",
+                {
+                    "backend": {
+                        "sglang_config": {
+                            "prefill": {"tensor-parallel-size": [4, 8]},
+                            "decode": {"tensor-parallel-size": [4, 8, 16]},
+                        }
                     }
-                }
-            }, _ZIP_BASE)
+                },
+                _ZIP_BASE,
+            )
 
         with pytest.raises(ValueError, match="no list values"):
             expand_zip_override("empty", {"backend": {"tp": 4}}, _ZIP_BASE)
@@ -344,43 +347,47 @@ def _write_config(tmp_path: Path, extra: dict[str, Any] | None = None, filename:
 class TestSubmitOverride:
     def test_dry_run(self, tmp_path: Path, capsys: Any) -> None:
         """Dry-run shows correct variant counts for base-only, overrides, zip, and selectors."""
-        cfg = _write_config(tmp_path, {
-            "override_small": {"resources": {"decode_nodes": 2}},
-            "zip_override_tp": {"resources": {"decode_nodes": [1, 2]}},
-        })
+        cfg = _write_config(
+            tmp_path,
+            {
+                "override_small": {"resources": {"decode_nodes": 2}},
+                "zip_override_tp": {"resources": {"decode_nodes": [1, 2]}},
+            },
+        )
 
-        with patch("srtctl.cli.submit.load_cluster_config", return_value=None):
-            # all variants (no selector): override_small + zip_tp_0 + zip_tp_1 = 3 (base excluded)
-            submit_override(cfg, dry_run=True)
-            assert "3 variants" in capsys.readouterr().out
+        # all variants (no selector): override_small + zip_tp_0 + zip_tp_1 = 3 (base excluded)
+        submit_override(cfg, dry_run=True)
+        assert "3 variants" in capsys.readouterr().out
 
-            # zip group only
-            submit_override(cfg, selector="zip_override_tp", dry_run=True)
-            assert "2 variants" in capsys.readouterr().out
+        # zip group only
+        submit_override(cfg, selector="zip_override_tp", dry_run=True)
+        assert "2 variants" in capsys.readouterr().out
 
-            # single zip variant
-            submit_override(cfg, selector="zip_override_tp[0]", dry_run=True)
-            assert "1 variant" in capsys.readouterr().out
+        # single zip variant
+        submit_override(cfg, selector="zip_override_tp[0]", dry_run=True)
+        assert "1 variant" in capsys.readouterr().out
 
-            # single override
-            submit_override(cfg, selector="override_small", dry_run=True)
-            out = capsys.readouterr().out
-            assert "1 variant" in out
-            assert "test-job_small" in out
+        # single override
+        submit_override(cfg, selector="override_small", dry_run=True)
+        out = capsys.readouterr().out
+        assert "1 variant" in out
+        assert "test-job_small" in out
 
     def test_sbatch_call_counts(self, tmp_path: Path) -> None:
         """submit_override calls sbatch the right number of times for each selector."""
-        cfg = _write_config(tmp_path, {
-            "override_small": {"resources": {"decode_nodes": 2}},
-            "zip_override_tp": {"resources": {"decode_nodes": [1, 2]}},
-        })
+        cfg = _write_config(
+            tmp_path,
+            {
+                "override_small": {"resources": {"decode_nodes": 2}},
+                "zip_override_tp": {"resources": {"decode_nodes": [1, 2]}},
+            },
+        )
 
         mock_result = MagicMock()
         mock_result.stdout = "Submitted batch job 99999"
 
         def sbatch_count(selector: str | None = None) -> int:
             with (
-                patch("srtctl.cli.submit.load_cluster_config", return_value=None),
                 patch("subprocess.run", return_value=mock_result) as mock_run,
                 patch("srtctl.cli.submit.get_srtslurm_setting", return_value=None),
                 patch("srtctl.cli.submit.create_job_record"),
@@ -388,11 +395,111 @@ class TestSubmitOverride:
                 submit_override(cfg, selector=selector, output_dir=tmp_path)
             return sum(1 for c in mock_run.call_args_list if c[0][0][0] == "sbatch")
 
-        assert sbatch_count() == 3               # small + tp_0 + tp_1 (base excluded by default)
+        assert sbatch_count() == 3  # small + tp_0 + tp_1 (base excluded by default)
         assert sbatch_count("base") == 1
         assert sbatch_count("override_small") == 1
         assert sbatch_count("zip_override_tp") == 2
         assert sbatch_count("zip_override_tp[1]") == 1
+
+    def test_selector_submission_keeps_source_and_executes_resolved_variant(self, tmp_path: Path) -> None:
+        """A selected zip override keeps source config.yaml and runs config_<variant>.yaml."""
+        cfg = _write_config(
+            tmp_path,
+            {
+                "zip_override_tp": {"resources": {"decode_nodes": [1, 2]}},
+            },
+        )
+
+        mock_result = MagicMock()
+        mock_result.stdout = "Submitted batch job 99999"
+
+        with (
+            patch("subprocess.run", return_value=mock_result),
+            patch("srtctl.cli.submit.get_srtslurm_setting", return_value=None),
+            patch("srtctl.cli.submit.create_job_record"),
+        ):
+            submit_override(cfg, selector="zip_override_tp[1]", output_dir=tmp_path)
+
+        job_dir = tmp_path / "99999"
+        source_config = yaml.safe_load((job_dir / "config.yaml").read_text())
+        runtime_config = yaml.safe_load((job_dir / "config_tp_1.yaml").read_text())
+        sbatch_script = (job_dir / "sbatch_script.sh").read_text()
+
+        assert "base" in source_config
+        assert "zip_override_tp" in source_config
+
+        assert runtime_config["name"] == "test-job_tp_1"
+        assert runtime_config["resources"]["decode_nodes"] == 2
+        assert "base" not in runtime_config
+        assert "zip_override_tp" not in runtime_config
+        assert 'do_sweep "${OUTPUT_DIR}/config_tp_1.yaml"' in sbatch_script
+
+    def test_selector_submission_preserves_comments_in_resolved_variant(self, tmp_path: Path) -> None:
+        """Override submission reuses resolve_override_yaml so runtime config keeps comments."""
+        cfg = tmp_path / "submit_override.yaml"
+        cfg.write_text(textwrap.dedent("""\
+            base:
+              name: "test-job"
+              model:
+                path: /models/test-model
+                container: test-container.sqsh
+                precision: fp8
+              # resource section
+              resources:
+                gpu_type: h100
+                gpus_per_node: 8
+                prefill_nodes: 1
+                prefill_workers: 1
+                decode_nodes: 1  # one decoder
+                decode_workers: 1
+              benchmark:
+                type: manual
+
+            override_lowmem:
+              resources:
+                decode_nodes: 4
+        """))
+
+        mock_result = MagicMock()
+        mock_result.stdout = "Submitted batch job 99999"
+
+        with (
+            patch("subprocess.run", return_value=mock_result),
+            patch("srtctl.cli.submit.get_srtslurm_setting", return_value=None),
+            patch("srtctl.cli.submit.create_job_record"),
+        ):
+            submit_override(cfg, selector="override_lowmem", output_dir=tmp_path)
+
+        job_dir = tmp_path / "99999"
+        runtime_text = (job_dir / "config_lowmem.yaml").read_text()
+        assert "resource section" in runtime_text
+        assert "decode_nodes: 4" in runtime_text
+
+
+class TestSubmitSingleCompatibility:
+    def test_plain_config_submission_still_uses_config_yaml(self, tmp_path: Path) -> None:
+        """Non-override submissions keep using OUTPUT_DIR/config.yaml at runtime."""
+        cfg = tmp_path / "plain.yaml"
+        cfg.write_text(yaml.dump(MINIMAL_CONFIG, default_flow_style=False))
+
+        mock_result = MagicMock()
+        mock_result.stdout = "Submitted batch job 99999"
+
+        with (
+            patch("subprocess.run", return_value=mock_result),
+            patch("srtctl.cli.submit.get_srtslurm_setting", return_value=None),
+            patch("srtctl.cli.submit.create_job_record"),
+        ):
+            submit_single(config_path=cfg, output_dir=tmp_path)
+
+        job_dir = tmp_path / "99999"
+        copied_config = yaml.safe_load((job_dir / "config.yaml").read_text())
+        sbatch_script = (job_dir / "sbatch_script.sh").read_text()
+
+        assert copied_config["name"] == MINIMAL_CONFIG["name"]
+        assert copied_config["resources"]["decode_nodes"] == MINIMAL_CONFIG["resources"]["decode_nodes"]
+        assert 'do_sweep "${OUTPUT_DIR}/config.yaml"' in sbatch_script
+        assert not (job_dir / "config_base.yaml").exists()
 
 
 # =============================================================================
@@ -403,6 +510,7 @@ class TestSubmitOverride:
 def _cm(src: str) -> CommentedMap:
     """Parse a YAML string into a CommentedMap."""
     from ruamel.yaml import YAML
+
     y = YAML()
     return y.load(src)
 
@@ -440,10 +548,8 @@ class TestCommentAwareMerge:
         """)
         base = _cm(src)
         result = comment_aware_merge(base, {"b": 99})
-        from io import StringIO
-        from ruamel.yaml import YAML
         buf = StringIO()
-        YAML().dump(result, buf)
+        RuamelYAML().dump(result, buf)
         out = buf.getvalue()
         assert "inline a" in out
         assert "inline b" in out
@@ -493,13 +599,11 @@ class TestResolveOverrideYaml:
 
     def test_comments_in_output(self, tmp_path: Path) -> None:
         """Resolved YAML preserves inline and block comments from base."""
-        from io import StringIO
-        from ruamel.yaml import YAML
         path = _write_commented_config(tmp_path)
         variants = resolve_override_yaml(path, selector="override_lowmem")
         _, cm = variants[0]
         buf = StringIO()
-        YAML().dump(cm, buf)
+        RuamelYAML().dump(cm, buf)
         out = buf.getvalue()
         assert "resource section" in out
         assert "eight decoders" in out
@@ -530,7 +634,7 @@ class TestResolveOverrideYaml:
         assert out.exists()
         text = out.read_text()
         assert "resource section" in text  # comment preserved
-        assert "decode_nodes: 4" in text   # override value applied
+        assert "decode_nodes: 4" in text  # override value applied
 
     def test_resolve_override_cmd_stdout(self, tmp_path: Path, capsys: Any) -> None:
         """resolve_override_cmd --stdout prints YAML to stdout."""
@@ -557,11 +661,9 @@ class TestResolveOverrideYaml:
         path = tmp_path / "sep.yaml"
         path.write_text(src)
         variants = resolve_override_yaml(path)
-        from io import StringIO
-        from ruamel.yaml import YAML as _YAML
         for _, cm in variants:
             buf = StringIO()
-            _YAML().dump(cm, buf)
+            RuamelYAML().dump(cm, buf)
             out = buf.getvalue()
             # separator comment must not appear in the resolved output
             assert "separator comment" not in out

@@ -62,7 +62,9 @@ echo "Start: $(date)"
 echo "=========================================="
 echo ""
 
-# Config already copied to OUTPUT_DIR/config.yaml by Python at submission time (submit.py)
+# submit.py always copies the original submission config to OUTPUT_DIR/config.yaml.
+# For override jobs it also writes the resolved runtime config below.
+echo "Runtime config: ${OUTPUT_DIR}/{{ runtime_config_filename }}"
 
 # Get head node
 HEAD_NODE=$(scontrol show hostnames ${SLURM_NODELIST} | head -n1)
@@ -96,7 +98,7 @@ echo ""
 # Output goes to SLURM's --output (sweep_%j.log)
 set +e  # Temporarily disable exit-on-error to capture exit code
 cd "${SRTCTL_SOURCE}"
-uv run --python 3.12 --no-dev -m srtctl.cli.do_sweep "${OUTPUT_DIR}/config.yaml"
+uv run --python 3.12 --no-dev -m srtctl.cli.do_sweep "${OUTPUT_DIR}/{{ runtime_config_filename }}"
 EXIT_CODE=$?
 set -e  # Re-enable exit-on-error
 

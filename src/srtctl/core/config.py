@@ -427,6 +427,10 @@ def resolve_override_yaml(
         if override_key in raw_cm and isinstance(raw_cm[override_key], CommentedMap):
             # Regular override: merge CommentedMaps so override comments are kept.
             result_cm = comment_aware_merge(base_cm, raw_cm[override_key])
+            # Preserve auto-generated fields from the existing override expansion,
+            # such as the synthesized name when the override does not set one.
+            if "name" in merged_plain:
+                result_cm["name"] = merged_plain["name"]
         else:
             # zip_override variant (values were lists → now scalars) or any
             # other case: merge the plain resolved dict into the base CommentedMap
