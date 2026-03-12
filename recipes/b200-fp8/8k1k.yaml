@@ -136,7 +136,6 @@ base:
 
         # MoE
         moe-runner-backend: "flashinfer_trtllm"
-        # moe-dense-tp-size: 1
 
         # Other flags
         stream-interval: 30
