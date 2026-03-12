@@ -167,8 +167,8 @@ zip_override_stp_lowlat:
     sglang_config:
       decode:
         expert-parallel-size: 1
-        max-running-requests: [16, 11]
-        cuda-graph-max-bs: [16, 11]
+        max-running-requests: [16, 16]
+        cuda-graph-max-bs: [16, 16]
   benchmark:
     concurrencies: ["64", "8x16x32x64"]
 
