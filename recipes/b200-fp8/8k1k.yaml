@@ -155,7 +155,7 @@ base:
     req_rate: "inf"
 
 
-# STP low-latency: tp8 decode (DP=1), scale sweep 1p4d/1p6d
+# STP low-latency: tp8 decode (DP=1), scale sweep 1p3d/1p4d/1p6d
 zip_override_stp_lowlat:
   name:
     - "b200-fp8-stp-low-latency-tp8-1p-3d"
@@ -177,9 +177,9 @@ zip_override_stp_lowlat:
 # MTP low-latency: same scales as STP, adds EAGLE speculative decoding
 zip_override_mtp_lowlat:
   name:
-    - "b200-fp8-mtp-low-latency-tep8-1p-1d"
-    - "b200-fp8-mtp-low-latency-tep8-1p-4d"
-    - "b200-fp8-mtp-low-latency-tep8-1p-6d"
+    - "b200-fp8-mtp-low-latency-tp8-1p-3d"
+    - "b200-fp8-mtp-low-latency-tp8-1p-4d"
+    - "b200-fp8-mtp-low-latency-tp8-1p-6d"
   resources:
     decode_nodes: [3, 4, 6]
     decode_workers: [3, 4, 6]
@@ -201,7 +201,7 @@ zip_override_mtp_lowlat:
     concurrencies: ["128", "128", "8x16x32x64x128"]
 
 
-# STP max-throughput: dep8 decode (DP=8), scale sweep 1p1d and 2p1d
+# STP max-throughput: dep8 decode (DP=8), scale sweep 1p2d/1p1d/2p1d/3p1d
 zip_override_stp_maxtpt:
   name:
     - "b200-fp8-stp-max-tpt-dep8-1p-2d"
@@ -226,12 +226,12 @@ zip_override_stp_maxtpt:
     concurrencies: ["288", "160x288", "512", "1024"]
 
 
-# MTP max-throughput: dep8 decode, scale sweep 1p1d/1p2d/2p1d, adds EAGLE speculative decoding
+# MTP max-throughput: dep8 decode, scale sweep 1p2d/1p1d/2p1d/3p1d, adds EAGLE speculative decoding
 # Note: max-running-requests stays at 512 for MTP (unlike STP which raises to 1024)
 zip_override_mtp_maxtpt:
   name:
-    - "b200-fp8-mtp-max-tpt-dep8-1p-1d"
     - "b200-fp8-mtp-max-tpt-dep8-1p-2d"
+    - "b200-fp8-mtp-max-tpt-dep8-1p-1d"
     - "b200-fp8-mtp-max-tpt-dep8-2p-1d"
     - "b200-fp8-mtp-max-tpt-dep8-3p-1d"
   resources:
