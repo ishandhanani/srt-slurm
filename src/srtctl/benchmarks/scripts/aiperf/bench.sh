@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Aiperf: Throughput/latency benchmark using the aiperf profiler
-# Expects: endpoint isl osl concurrencies req_rate model_path model_name is_disaggregated total_gpus prefill_gpus decode_gpus
+# Expects: endpoint isl osl concurrencies req_rate model_path model_name is_disaggregated total_gpus prefill_gpus decode_gpus isl_stddev osl_stddev request_count
 
 set -e
 
@@ -25,6 +25,9 @@ IS_DISAGGREGATED=${8:-false}
 TOTAL_GPUS=${9:-0}
 PREFILL_GPUS=${10:-0}
 DECODE_GPUS=${11:-0}
+ISL_STDDEV=${12:-0}
+OSL_STDDEV=${13:-0}
+REQUEST_COUNT_OVERRIDE=${14:-}  # Optional: explicit request count or empty for default formula
 
 # Optional: extra Prometheus endpoints for AIPerf server metrics
 SERVER_METRICS_ARGS=()
@@ -38,7 +41,7 @@ fi
 # Parse concurrency list (x-separated)
 IFS='x' read -r -a CONCURRENCY_LIST <<< "$CONCURRENCIES"
 
-echo "Aiperf Config: endpoint=${ENDPOINT}; isl=${ISL}; osl=${OSL}; concurrencies=${CONCURRENCIES}; req_rate=${REQ_RATE:-closed-loop}; model=${MODEL_NAME}"
+echo "Aiperf Config: endpoint=${ENDPOINT}; isl=${ISL}; osl=${OSL}; isl_stddev=${ISL_STDDEV}; osl_stddev=${OSL_STDDEV}; concurrencies=${CONCURRENCIES}; req_rate=${REQ_RATE:-closed-loop}; request_count=${REQUEST_COUNT_OVERRIDE:-auto}; model=${MODEL_NAME}"
 
 # Wait for model to be ready
 wait_for_model_ready() {
@@ -59,16 +62,25 @@ run_perf() {
     local isl=$2
     local osl=$3
     local result_dir=$4
+    local isl_stddev=$5
+    local osl_stddev=$6
+    local request_count_override=$7
     
     local key="concurrency_${concurrency}"
     local artifact_dir="${result_dir}/${key}"
     mkdir -p "$artifact_dir"
     
-    # Scale request counts based on concurrency
+    # Scale request counts based on concurrency (can be overridden via config)
     local warmup_count=$((concurrency * 1))
-    local request_count=$((concurrency * 2))
+    local request_count
+    if [ -n "${request_count_override}" ]; then
+        # Evaluate the request count override (can be a number or expression like "concurrency * 30")
+        request_count=$(python3 -c "concurrency=${concurrency}; print(int(${request_count_override}))")
+    else
+        request_count=$((concurrency * 2))
+    fi
     
-    echo "Running aiperf: concurrency=$concurrency, isl=$isl, osl=$osl, warmup=$warmup_count, requests=$request_count"
+    echo "Running aiperf: concurrency=$concurrency, isl=$isl, osl=$osl, isl_stddev=$isl_stddev, osl_stddev=$osl_stddev, warmup=$warmup_count, requests=$request_count"
     echo "Artifact dir: $artifact_dir"
     echo "$(date '+%Y-%m-%d %H:%M:%S')"
     
@@ -82,14 +94,15 @@ run_perf() {
     aiperf profile --artifact-dir "$artifact_dir" \
         --model "$MODEL_NAME" \
         --tokenizer "$MODEL_PATH" \
+        --tokenizer-trust-remote-code \
         --endpoint-type chat \
         --endpoint /v1/chat/completions \
         --streaming \
         --url "$ENDPOINT" \
         --synthetic-input-tokens-mean "$isl" \
-        --synthetic-input-tokens-stddev 0 \
+        --synthetic-input-tokens-stddev "$isl_stddev" \
         --output-tokens-mean "$osl" \
-        --output-tokens-stddev 0 \
+        --output-tokens-stddev "$osl_stddev" \
         --extra-inputs "max_tokens:$osl" \
         --extra-inputs "min_tokens:$osl" \
         --extra-inputs "ignore_eos:true" \
@@ -98,7 +111,7 @@ run_perf() {
         ${REQUEST_RATE_ARGS} \
         --request-count "$request_count" \
         --warmup-request-count "$warmup_count" \
-        --random-seed 100 \
+        --random-seed 42 \
         --workers-max 200 \
         --request-timeout-seconds 1000 \
         --profile-export-level records \
@@ -106,7 +119,7 @@ run_perf() {
         -H 'Accept: text/event-stream' \
         --record-processors 8 \
         "${SERVER_METRICS_ARGS[@]}" \
-        --ui none
+        --ui dashboard
     
     echo "$(date '+%Y-%m-%d %H:%M:%S')"
     echo "Completed benchmark with concurrency: $concurrency"
@@ -136,6 +149,9 @@ cat > "${result_dir}/input_config.json" <<EOF
     "concurrencies": "${CONCURRENCIES}",
     "isl": ${ISL},
     "osl": ${OSL},
+    "isl_stddev": ${ISL_STDDEV},
+    "osl_stddev": ${OSL_STDDEV},
+    "request_count_override": "${REQUEST_COUNT_OVERRIDE:-auto}",
     "endpoint": "${ENDPOINT}",
     "model": "${MODEL_NAME}",
     "model_path": "${MODEL_PATH}",
@@ -148,7 +164,7 @@ EOF
 
 # Run benchmark for each concurrency level
 for concurrency in "${CONCURRENCY_LIST[@]}"; do
-    run_perf "$concurrency" "$ISL" "$OSL" "$result_dir"
+    run_perf "$concurrency" "$ISL" "$OSL" "$result_dir" "$ISL_STDDEV" "$OSL_STDDEV" "$REQUEST_COUNT_OVERRIDE"
 done
 
 echo "Aiperf benchmark complete. Results in $result_dir"

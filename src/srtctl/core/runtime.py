@@ -104,6 +104,9 @@ class RuntimeContext:
     gpus_per_node: int
     network_interface: str | None
 
+    # Optional speculative model path (for Eagle decoding)
+    speculative_model_path: Path | None = None
+
     # Container mounts: host_path -> container_path
     container_mounts: dict[Path, Path] = field(default_factory=dict)
 
@@ -182,11 +185,24 @@ class RuntimeContext:
             # Image name (e.g., nvcr.io/nvidia/pytorch:23.12) - keep as string, convert to Path for type compatibility
             container_image = Path(container_image_str)
 
+        # Resolve speculative model path (optional, for Eagle decoding)
+        speculative_model_path: Path | None = None
+        if config.model.speculative_model:
+            speculative_model_path = Path(os.path.expandvars(config.model.speculative_model)).resolve()
+            if not speculative_model_path.exists():
+                raise FileNotFoundError(f"Speculative model path does not exist: {speculative_model_path}")
+            if not speculative_model_path.is_dir():
+                raise ValueError(f"Speculative model path is not a directory: {speculative_model_path}")
+
         # Build container mounts
         container_mounts: dict[Path, Path] = {
             model_path: Path("/model"),
             log_dir: Path("/logs"),
         }
+
+        # Add speculative model mount if specified
+        if speculative_model_path:
+            container_mounts[speculative_model_path] = Path("/speculative-model")
 
         # Add configs directory (NATS, etcd binaries) from source root
         # SRTCTL_SOURCE_DIR is set by the sbatch script
@@ -227,6 +243,7 @@ class RuntimeContext:
             log_dir=log_dir,
             model_path=model_path,
             container_image=container_image,
+            speculative_model_path=speculative_model_path,
             gpus_per_node=config.resources.gpus_per_node,
             network_interface=get_srtslurm_setting("network_interface", "eth0"),
             container_mounts={},
@@ -249,6 +266,7 @@ class RuntimeContext:
             log_dir=log_dir,
             model_path=model_path,
             container_image=container_image,
+            speculative_model_path=speculative_model_path,
             gpus_per_node=config.resources.gpus_per_node,
             network_interface=get_srtslurm_setting("network_interface", "eth0"),
             container_mounts=container_mounts,

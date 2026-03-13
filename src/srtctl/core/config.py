@@ -124,6 +124,13 @@ def resolve_config_with_defaults(user_config: dict[str, Any], cluster_config: di
         model["path"] = resolved_path
         logger.debug(f"Resolved model alias '{model_path}' -> '{resolved_path}'")
 
+    # Resolve speculative model path alias (uses same model_paths dict)
+    speculative_model = model.get("speculative_model", "")
+    if model_paths and speculative_model and speculative_model in model_paths:
+        resolved_speculative = model_paths[speculative_model]
+        model["speculative_model"] = resolved_speculative
+        logger.debug(f"Resolved speculative model alias '{speculative_model}' -> '{resolved_speculative}'")
+
     # Resolve container alias
     container = model.get("container", "")
 

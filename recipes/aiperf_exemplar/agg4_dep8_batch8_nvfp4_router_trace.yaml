@@ -1,15 +1,14 @@
-name: base_agg1_dep8_batch8_nvfp4  # 4 agg workers
+name: agg4_dep8_batch8_nvfp4_router_trace  # 4 agg workers, round robin
 
 model:
   path: "deepseek-v32-nvfp4"
-  # container: "nvcr.io#nvidia/ai-dynamo/tensorrtllm-runtime:0.8.0"
-  container: "dyn-090-with-adp-trtllm"
+  container: "dyn-090-with-adp-trtllm"  # agg mode doesn't use kvrouter anyways
   precision: "fp4"
 
 resources:
   gpu_type: "gb200"
-  agg_nodes: 2            
-  agg_workers: 1
+  agg_nodes: 8            
+  agg_workers: 4
   gpus_per_agg: 8
 
   gpus_per_node: 4
@@ -33,7 +32,7 @@ backend:
       allreduce_strategy: MNNVL
       cache_transceiver_config:
         backend: UCX
-        max_tokens_in_buffer: 40000 # must be greater than max isl
+        max_tokens_in_buffer: 120000 # must be greater than max isl
       max_num_tokens: 8192
       enable_chunked_prefill: true
       disable_overlap_scheduler: true
@@ -43,11 +42,11 @@ backend:
       enable_attention_dp: true
       kv_cache_config:
         dtype: fp8
-        enable_block_reuse: false
+        enable_block_reuse: true
         free_gpu_memory_fraction: 0.9 
         tokens_per_block: 64
       max_batch_size: 8                  
-      max_seq_len: 48000                   # 8k osl
+      max_seq_len: 121000                  
       moe_config:
         backend: TRTLLM
         use_low_precision_moe_combine: true
@@ -60,21 +59,22 @@ backend:
       moe_expert_parallel_size: 8          # EP8
       num_postprocess_workers: 8           # increased from 4
       print_iter_log: true
-      stream_interval: 10                  # reduced from 100
+      stream_interval: 10                   
       tensor_parallel_size: 8              # TP8 (gets ignored with dep=true)
 
 
 benchmark:
-  type: "aiperf"                     
-  isl: 36000 
-  osl: 8000
-  concurrencies: ['4','16','32','64','128','256']
-  req_rate: 100
+  type: "trace-replay"                     
+  trace_file: "traces/conversation_trace_synth_16.00x1+10.00_speedup1_maxisl110000.jsonl" # should have trace in srt-slurm/traces/
+  ttft_threshold_ms: 20000  # 20 seconds
+  itl_threshold_ms: 50
 
 frontend:
-  type: "dynamo"
+  type: dynamo
   enable_multiple_frontends: false
-
+  args:
+    router-mode: "kv"
+    router-reset-states: true
 
 health_check:
   max_attempts: 500

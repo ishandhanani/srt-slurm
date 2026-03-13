@@ -60,10 +60,9 @@ echo "ITL Threshold: ${ITL_THRESHOLD}ms"
 echo "=============================================="
 
 # Install aiperf if not present
-if ! command -v aiperf &> /dev/null; then
-    echo "Installing aiperf..."
-    pip install aiperf
-fi
+echo "Installing aiperf..."
+pip install "aiperf @ git+https://github.com/ai-dynamo/aiperf.git@8db6e96e978720fc597293bd84e705aa82db233e"  
+pip install tiktoken
 
 # Get trace file stats
 TRACE_LINES=$(wc -l < "${TRACE_FILE}")
@@ -75,6 +74,7 @@ echo "Running warmup benchmark..."
 aiperf profile \
     -m "${MODEL_NAME}" \
     --tokenizer "/model/" \
+    --tokenizer-trust-remote-code \
     --url "${ENDPOINT}" \
     --streaming \
     --ui simple \
@@ -98,23 +98,29 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Starting benchmark"
 
 # Run aiperf profile with fixed-schedule to replay at original timestamps
 # Use /model/ as tokenizer path (mounted model directory) to avoid HuggingFace download
-aiperf profile \
-    -m "${MODEL_NAME}" \
-    --tokenizer "/model/" \
-    --input-file "${TRACE_FILE}" \
-    --custom-dataset-type mooncake_trace \
-    --fixed-schedule \
-    --url "${ENDPOINT}" \
-    --streaming \
-    --random-seed 42 \
-    --ui simple \
-    --artifact-dir "${RUN_ARTIFACT_DIR}" \
-    --workers-max 200 \
-    --request-timeout-seconds 1000 \
-    --profile-export-level records \
-    --record-processors 8 \
-    "${SERVER_METRICS_ARGS[@]}" \
-    --goodput "time_to_first_token:${TTFT_THRESHOLD} inter_token_latency:${ITL_THRESHOLD}"
+for concurrency in 1 5 25 50; do
+    aiperf profile \
+        -m "${MODEL_NAME}" \
+        --tokenizer "${MODEL_NAME}" \
+        --tokenizer-trust-remote-code \
+        --url "${ENDPOINT}" \
+        --streaming \
+        --input-file "${TRACE_FILE}" \
+        --custom-dataset-type mooncake_trace \
+        --prompt-corpus coding \
+        --concurrency "${concurrency}" \
+        --concurrency-ramp-duration 60 \
+        --benchmark-duration 1200 \
+        --benchmark-grace-period 60 \
+        --workers-max 200 \
+        --request-timeout-seconds 1200 \
+        --record-processors 8 \
+        --profile-export-level raw \
+        --export-http-trace \
+        --goodput "time_to_first_token:${TTFT_THRESHOLD} inter_token_latency:${ITL_THRESHOLD}" \
+        --ui dashboard \
+        --artifact-dir "${RUN_ARTIFACT_DIR}/concurrency_${concurrency}"
+    done
 
 BENCH_EXIT_CODE=$?
 

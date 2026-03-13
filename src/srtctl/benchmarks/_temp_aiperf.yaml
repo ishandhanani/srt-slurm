@@ -1,0 +1,240 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${DEPLOYMENT_NAME}-bench
+spec:
+  backoffLimit: 1
+  completions: 1
+  parallelism: 1
+  template:
+    metadata:
+      labels:
+        app: ${DEPLOYMENT_NAME}-bench
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: nvidia.com/dynamo-graph-deployment-name
+                    operator: In
+                    values:
+                      - ${DEPLOYMENT_NAME}
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - command:
+        - /bin/sh
+        - -c
+        - |
+          ulimit -n 600000
+          echo "File descriptor limit set to: $(ulimit -n)"
+          echo 2097152 > /proc/sys/fs/inotify/max_user_watches
+          echo 1024 > /proc/sys/fs/inotify/max_user_instances
+          echo "Inotify watches: $(cat /proc/sys/fs/inotify/max_user_watches)"
+          echo "Inotify instances: $(cat /proc/sys/fs/inotify/max_user_instances)"
+          apt-get update && apt-get install -y curl jq procps git && apt-get clean
+          pip install git+https://github.com/ai-dynamo/aiperf.git;
+          echo "aiperf installation completed";
+          sysctl -w net.ipv4.ip_local_port_range="1024 65000"
+          cat /proc/sys/net/ipv4/ip_local_port_range
+          export COLUMNS=200
+          EPOCH=$(date +%s)
+          ## utility functions -- can be moved to a bash script / configmap
+          wait_for_model_ready() {
+            echo "Waiting for model '$TARGET_MODEL' at $ENDPOINT/v1/models (checking every 5s)..."
+            while ! curl -s "http://$ENDPOINT/v1/models" | jq -e --arg model "$TARGET_MODEL" '.data[]? | select(.id == $model)' >/dev/null 2>&1; do
+                echo "[$(date '+%H:%M:%S')] Model not ready yet, sleeping 5s before checking again http://$ENDPOINT/v1/models"
+                sleep 5
+            done
+            echo "✅ Model '$TARGET_MODEL' is now available!"
+            echo "Model '$TARGET_MODEL' is now available!"
+            curl -s "http://$ENDPOINT/v1/models" | jq .
+          }
+          run_perf() {
+            local concurrency=$1
+            local isl=$2
+            local osl=$3
+            key=concurrency_${concurrency}
+            export ARTIFACT_DIR="${ROOT_ARTIFACT_DIR}/${EPOCH}_${JOB_NAME}/${key}"
+            mkdir -p "$ARTIFACT_DIR"
+            echo "ARTIFACT_DIR: $ARTIFACT_DIR"
+            echo "Running synthetic load test: concurrency=$concurrency, isl=$isl, osl=$osl"
+            # If REQUEST_RATE is set, run open-loop at a fixed arrival rate. Otherwise run closed-loop at the given concurrency.
+            REQUEST_RATE_ARGS=""
+            if [ -n "${REQUEST_RATE:-}" ]; then
+              REQUEST_RATE_ARGS="--request-rate ${REQUEST_RATE} --request-rate-mode ${REQUEST_RATE_MODE:-constant}"
+            fi
+            aiperf profile --artifact-dir $ARTIFACT_DIR \
+                --model $TARGET_MODEL \
+                --tokenizer $TARGET_MODEL  \
+                --endpoint-type chat  \
+                --endpoint /v1/chat/completions \
+                --streaming \
+                --url http://$ENDPOINT \
+                --synthetic-input-tokens-mean $isl \
+                --synthetic-input-tokens-stddev 0 \
+                --output-tokens-mean $osl \
+                --output-tokens-stddev 0 \
+                --extra-inputs "max_tokens:$osl" \
+                --extra-inputs "min_tokens:$osl" \
+                --extra-inputs "ignore_eos:true" \
+                --extra-inputs "{\"nvext\":{\"ignore_eos\":true}}" \
+                --concurrency $concurrency \
+                ${REQUEST_RATE_ARGS} \
+                --request-count 100 \
+                --warmup-request-count 2 \
+                --random-seed 100 \
+                --workers-max 200 \
+                --request-timeout-seconds 1200 \
+                --profile-export-level records \
+                -H 'Authorization: Bearer NOT USED' \
+                -H 'Accept: text/event-stream' \
+                --record-processors 8 \
+                --ui simple
+            echo "ARTIFACT_DIR: $ARTIFACT_DIR"
+            ls -la $ARTIFACT_DIR
+          }
+          run_multiturn_perf() {
+            local concurrency=$1
+            local isl=$2
+            local osl=$3
+            local num_conversations=$4
+            local turns_per_conversation=$5
+            local turn_delay_mean=$6
+            key=multiturn_c${concurrency}_t${turns_per_conversation}_d${turn_delay_mean}
+            export ARTIFACT_DIR="${ROOT_ARTIFACT_DIR}/${EPOCH}_${JOB_NAME}/${key}"
+            mkdir -p "$ARTIFACT_DIR"
+            echo "ARTIFACT_DIR: $ARTIFACT_DIR"
+            REQUEST_RATE_ARGS=""
+            if [ -n "${REQUEST_RATE:-}" ]; then
+              REQUEST_RATE_ARGS="--request-rate ${REQUEST_RATE} --request-rate-mode ${REQUEST_RATE_MODE:-constant}"
+            fi
+            echo "Running MULTI-TURN synthetic test: conversations=$num_conversations, turns=$turns_per_conversation, delay_mean=$turn_delay_mean, isl=$isl, osl=$osl"
+            aiperf profile --artifact-dir $ARTIFACT_DIR \
+                --model $TARGET_MODEL \
+                --tokenizer $TARGET_MODEL  \
+                --endpoint-type chat  \
+                --endpoint /v1/chat/completions \
+                --streaming \
+                --url http://$ENDPOINT \
+                --synthetic-input-tokens-mean $isl \
+                --synthetic-input-tokens-stddev 0 \
+                --output-tokens-mean $osl \
+                --output-tokens-stddev 0 \
+                --conversation-num $num_conversations \
+                --conversation-turn-mean $turns_per_conversation \
+                --conversation-turn-stddev 0 \
+                --conversation-turn-delay-mean $turn_delay_mean \
+                --concurrency $concurrency \
+                ${REQUEST_RATE_ARGS} \
+                --random-seed 100 \
+                --workers-max 50 \
+                --request-timeout-seconds 300 \
+                --profile-export-level records \
+                -H 'Authorization: Bearer NOT USED' \
+                -H 'Accept: text/event-stream' \
+                --record-processors 8 \
+                --ui dashboard 
+            echo "ARTIFACT_DIR: $ARTIFACT_DIR"
+            ls -la $ARTIFACT_DIR
+          }
+          #### Actual execution ####
+          wait_for_model_ready
+          mkdir -p "${ROOT_ARTIFACT_DIR}/${EPOCH}_${JOB_NAME}"
+          # Write input_config.json
+          cat > "${ROOT_ARTIFACT_DIR}/${EPOCH}_${JOB_NAME}/input_config.json" <<EOF
+          {
+            "gpu_count": $DEPLOYMENT_GPU_COUNT,
+            "concurrencies": "$CHOSEN_CONCURRENCIES",
+            "isl": $ISL,
+            "osl": $OSL,
+            "conversation_num": ${CONVERSATION_NUM:-25},
+            "conversation_turn_mean": ${CONVERSATION_TURN_MEAN:-4},
+            "conversation_turn_delay_mean": ${CONVERSATION_TURN_DELAY_MEAN:-100},
+            "endpoint": "$ENDPOINT",
+            "model endpoint": "$TARGET_MODEL",
+            "container_image": "$CONTAINER_IMAGE",
+            "request_rate": "${REQUEST_RATE:-}",
+            "request_rate_mode": "${REQUEST_RATE_MODE:-}",
+            "deploy_file": "${DEPLOY_FILE:-}"
+          }
+          EOF
+
+
+          # Multi-turn test (scaled up)
+          echo "Starting MULTI-TURN synthetic test..."
+          # CHOSEN_CONCURRENCIES supports a comma-separated list, e.g. "8,16,32".
+          CONCURRENCY_LIST="$(echo "${CHOSEN_CONCURRENCIES:-16}" | tr ',' ' ')"
+          for c in ${CONCURRENCY_LIST}; do
+            run_multiturn_perf \
+              "$c" \
+              "${ISL:-1000}" \
+              "${OSL:-500}" \
+              "${CONVERSATION_NUM:-25}" \
+              "${CONVERSATION_TURN_MEAN:-4}" \
+              "${CONVERSATION_TURN_DELAY_MEAN:-100}"
+              "${REQUEST_RATE:-}" \
+              "${REQUEST_RATE_MODE:-}"
+          done
+          
+          echo "✅ Multi-turn benchmark complete!"
+        env:
+        - name: TARGET_MODEL
+          value: openai/gpt-oss-120b
+        - name: ENDPOINT
+          value: ${DEPLOYMENT_NAME}-frontend:8000
+        - name: CHOSEN_CONCURRENCIES
+          # Comma-separated list to sweep, e.g. "8,16,32,64"
+          value: "10, 25, 50"
+        - name: DEPLOYMENT_GPU_COUNT
+          value: "8"
+        - name: ISL
+          value: "100000"
+        - name: OSL
+          value: "500"
+        - name: CONVERSATION_NUM
+          value: "100"
+        - name: CONVERSATION_TURN_MEAN
+          value: "1"
+        - name: CONVERSATION_TURN_DELAY_MEAN
+          value: "3000"
+        # Optional open-loop arrival rate. If unset, aiperf runs closed-loop at the requested concurrency.
+        - name: REQUEST_RATE
+          value: "0.3"
+        - name: REQUEST_RATE_MODE
+          value: "poisson"
+        - name: CONTAINER_IMAGE
+          value: "${CONTAINER_IMAGE}"
+        - name: DEPLOY_FILE
+          value: ${DEPLOY_FILE}
+        - name: AIPERF_HTTP_CONNECTION_LIMIT
+          value: "200"
+        - name: JOB_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.labels['job-name']
+        - name: ROOT_ARTIFACT_DIR
+          value: /model-cache/perf
+        - name: HF_HOME
+          value: /model-cache
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        image: python:3.12-slim
+        imagePullPolicy: IfNotPresent
+        name: perf
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: model-cache
+          mountPath: /model-cache
+        workingDir: /workspace
+      imagePullSecrets:
+      - name: nvcrimagepullsecret
+      restartPolicy: Never
+      volumes:
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: model-cache

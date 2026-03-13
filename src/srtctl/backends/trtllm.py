@@ -193,6 +193,12 @@ class TRTLLMProtocol:
         mode = process.endpoint_mode
         config = self.get_config_for_mode(mode)
 
+        # Transform speculative_model_dir to container path if present
+        # Users specify speculative_model in ModelConfig, which gets mounted at /speculative-model
+        if "speculative_config" in config and runtime.speculative_model_path:
+            config["speculative_config"] = dict(config["speculative_config"])
+            config["speculative_config"]["speculative_model_dir"] = "/speculative-model"
+
         # Write config to host path (log_dir)
         config_filename = f"trtllm_config_{mode}.yaml"
         host_config_path = runtime.log_dir / config_filename

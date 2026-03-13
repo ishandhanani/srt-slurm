@@ -102,4 +102,7 @@ class AiperfRunner(AIPerfBenchmarkRunner):
             str(total_gpus),
             str(prefill_gpus),
             str(decode_gpus),
+            str(b.isl_stddev),
+            str(b.osl_stddev),
+            str(b.request_count) if b.request_count is not None else "",
         ]

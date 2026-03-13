@@ -363,11 +363,20 @@ class SweepConfig:
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """Model configuration."""
+    """Model configuration.
+
+    Attributes:
+        path: Model path (alias from srtslurm.yaml or absolute path)
+        container: Container image (alias or path)
+        precision: Model precision (fp4, fp8, fp16, bf16)
+        speculative_model: Optional speculative model path for Eagle decoding
+            (alias from srtslurm.yaml or absolute path). Mounted at /speculative-model.
+    """
 
     path: str
     container: str
     precision: str
+    speculative_model: str | None = None
 
     Schema: ClassVar[type[Schema]] = Schema
 
@@ -509,6 +518,9 @@ class BenchmarkConfig:
     type: str = "manual"
     isl: int | None = None
     osl: int | None = None
+    isl_stddev: int = 0
+    osl_stddev: int = 0
+    request_count: int | str | None = None  # Explicit count or formula like "concurrency * 30"
     concurrencies: list[int] | str | None = None
     req_rate: str | int | None = "inf"
     sweep: Annotated[SweepConfig, SweepConfigField()] | None = None

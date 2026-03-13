@@ -1,0 +1,135 @@
+name: tep4_tep4_egl_trace   
+
+model:
+  path: "kimi-k25-nvfp4"
+  container: "kimi-bench-trtllm"  # trtllm container with attention dp
+  precision: "fp4"
+  speculative_model: "kimi-eagle"  # Mounted at /speculative-model in container
+
+resources:
+  gpu_type: "gb200"
+  prefill_nodes: 1         
+  prefill_workers: 1
+  gpus_per_prefill: 4
+
+  decode_nodes: 1            
+  decode_workers: 1
+  gpus_per_decode: 4
+
+  gpus_per_node: 4
+
+backend:
+  type: trtllm
+
+  prefill_environment:
+    TLLM_LOG_LEVEL: "INFO"
+    TRTLLM_SERVER_DISABLE_GC: "1"
+    TRTLLM_WORKER_DISABLE_GC: "1"
+    TRTLLM_ENABLE_PDL: "1"
+    ENROOT_ALLOW_DEV: "yes"
+    NCCL_GRAPH_MIXING_SUPPORT: "0"
+    TLLM_OVERRIDE_LAYER_NUM: "61"
+    TLLM_SPEC_DECODE_FORCE_NUM_ACCEPTED_TOKENS: "2"
+
+  decode_environment:
+    TLLM_LOG_LEVEL: "INFO"
+    TRTLLM_SERVER_DISABLE_GC: "1"
+    TRTLLM_WORKER_DISABLE_GC: "1"
+    TRTLLM_ENABLE_PDL: "1"
+    ENROOT_ALLOW_DEV: "yes"
+    NCCL_GRAPH_MIXING_SUPPORT: "0"
+    TRTLLM_FORCE_COMM_METHOD: "NVLINK_TWO_SIDED"
+    ENABLE_CONFIGURABLE_MOE: "1"
+    TLLM_OVERRIDE_LAYER_NUM: "61"
+    TLLM_SPEC_DECODE_FORCE_NUM_ACCEPTED_TOKENS: "2"
+
+  trtllm_config:
+    prefill: 
+      cache_transceiver_config:
+        backend: UCX
+        max_tokens_in_buffer: 240000
+      max_num_tokens: 4096
+      enable_chunked_prefill: false
+      cuda_graph_config:
+        batch_sizes:
+        - 1
+        - 2
+        - 4
+        - 8
+        enable_padding: true
+      disable_overlap_scheduler: true
+      enable_attention_dp: false
+      kv_cache_config:
+        dtype: fp8
+        enable_block_reuse: true
+        free_gpu_memory_fraction: 0.7
+        tokens_per_block: 32
+      max_batch_size: 8
+      max_seq_len: 240000
+      moe_config:
+        backend: TRTLLM
+        max_num_tokens: 4096  # chunked moe only, no chunked prefill
+        use_low_precision_moe_combine: true
+      # torch_compile_config:
+      #   enable_piecewise_cuda_graph: true
+      #   capture_num_tokens: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
+      moe_expert_parallel_size: 4
+      num_postprocess_workers: 8
+      print_iter_log: true
+      stream_interval: 10
+      tensor_parallel_size: 4
+      trust_remote_code: true
+      speculative_config:
+        decoding_type: Eagle
+        max_draft_len: 3
+        allow_advanced_sampling: true
+        # speculative_model_dir is auto-set to /speculative-model from model.speculative_model
+    decode:
+      allreduce_strategy: MNNVL
+      cache_transceiver_config:
+        backend: UCX
+        max_tokens_in_buffer: 240000
+      max_num_tokens: 32
+      cuda_graph_config:
+        max_batch_size: 16
+        enable_padding: true
+      enable_attention_dp: false
+      kv_cache_config:
+        dtype: fp8
+        enable_block_reuse: false
+        free_gpu_memory_fraction: 0.7
+        tokens_per_block: 32
+      max_batch_size: 16
+      max_seq_len: 240000
+      moe_config:
+          backend: TRTLLM
+      moe_expert_parallel_size: 4
+      num_postprocess_workers: 8
+      print_iter_log: true
+      stream_interval: 10
+      tensor_parallel_size: 4
+      trust_remote_code: true
+      speculative_config:
+        decoding_type: Eagle
+        max_draft_len: 3
+        allow_advanced_sampling: true
+
+benchmark:
+  type: "trace-replay"                     
+  trace_file: "traces/dataset.jsonl" # should have trace in srt-slurm/traces/
+  ttft_threshold_ms: 5000
+  itl_threshold_ms: 20
+
+frontend:
+  type: dynamo
+  enable_multiple_frontends: false
+  args:
+    router-mode: "round-robin"
+    router-reset-states: true
+
+health_check:
+  max_attempts: 500
+  interval_seconds: 10
+
+dynamo:
+  install: false
