@@ -67,7 +67,15 @@ def render(df: pd.DataFrame, selected_runs: list[str], run_legend_labels: dict, 
     if len(points) == 1:
         st.info("Shift+click another point to compare performance.")
     elif len(points) == 2:
-        a, b = points[0], points[1]
+        # Track swap state so user can flip baseline
+        if "pareto_swapped" not in st.session_state:
+            st.session_state.pareto_swapped = False
+
+        if st.session_state.pareto_swapped:
+            a, b = points[1], points[0]
+        else:
+            a, b = points[0], points[1]
+
         a_name, a_conc, a_tps_user, a_tps_gpu = a["customdata"]
         b_name, b_conc, b_tps_user, b_tps_gpu = b["customdata"]
 
@@ -86,13 +94,18 @@ def render(df: pd.DataFrame, selected_runs: list[str], run_legend_labels: dict, 
             sign = "+" if pct >= 0 else ""
             return f":{color}[{sign}{pct:.1f}%]"
 
-        col_a, col_delta, col_b = st.columns([2, 1, 2])
+        col_a, col_swap, col_delta, col_b = st.columns([2, 0.5, 1, 2])
         with col_a:
             st.markdown("**Point A (baseline)**")
             st.markdown(
                 f"**{a_name}** @ concurrency {a_conc}  \n"
                 f"TPS/User: `{a_tps_user:.2f}` · {y_axis_metric}: `{a_tps_gpu:.2f}`"
             )
+        with col_swap:
+            st.markdown("&nbsp;", unsafe_allow_html=True)
+            if st.button("Swap", key="swap_pareto_points"):
+                st.session_state.pareto_swapped = not st.session_state.pareto_swapped
+                st.rerun()
         with col_delta:
             st.markdown("**% Change (A→B)**")
             st.markdown(f"TPS/User: {_fmt_delta(pct_tps_user)}")
@@ -110,6 +123,7 @@ def render(df: pd.DataFrame, selected_runs: list[str], run_legend_labels: dict, 
     if len(points) >= 1:
         if st.button("Clear selection", key="clear_pareto_selection"):
             st.session_state.pareto_chart_gen += 1
+            st.session_state.pareto_swapped = False
             st.rerun()
 
     # Debug info for frontier
