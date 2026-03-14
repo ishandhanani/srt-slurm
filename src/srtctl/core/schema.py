@@ -675,12 +675,12 @@ class DynamoConfig:
     """Dynamo installation configuration.
 
     Only one of version, hash, or top_of_tree should be specified.
-    Defaults to version="0.8.0" (pip install).
+    Defaults to version="1.0.0" (pip install).
 
     Options:
         install: Whether to install dynamo at all (default: True). Set to False
                  if your container already has dynamo pre-installed.
-        version: Install specific version from PyPI (e.g., "0.8.0")
+        version: Install specific version from PyPI (e.g., "1.0.0")
         hash: Clone repo and checkout specific commit hash
         top_of_tree: Clone repo at HEAD (latest)
 
@@ -688,7 +688,7 @@ class DynamoConfig:
     """
 
     install: bool = True
-    version: str | None = "0.8.0"
+    version: str | None = "1.0.0"
     hash: str | None = None
     top_of_tree: bool = False
 
@@ -721,18 +721,14 @@ class DynamoConfig:
 
         return (
             f"echo 'Installing dynamo from source ({git_ref})...' && "
-            "apt-get update -qq && apt-get install -y -qq libclang-dev > /dev/null 2>&1 && "
-            "cd /sgl-workspace/ && "
+            "( command -v git > /dev/null 2>&1 || "
+            "(apt-get update -qq && apt-get install -y -qq git > /dev/null 2>&1) ) && "
+            "cd /tmp && "
             "git clone https://github.com/ai-dynamo/dynamo.git && "
             "cd dynamo && "
             f"{checkout_cmd + ' && ' if checkout_cmd else ''}"
-            "cd lib/bindings/python/ && "
-            'export RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=native" && '
-            "maturin build -o /tmp && "
-            "pip install /tmp/ai_dynamo_runtime*.whl && "
-            "cd /sgl-workspace/dynamo/ && "
-            "pip install -e . && "
-            "cd /sgl-workspace/sglang/ && "
+            "pip install --break-system-packages --quiet ai-dynamo-runtime && "
+            "pip install --break-system-packages --quiet -e . && "
             f"echo 'Dynamo installed from source ({git_ref})'"
         )
 
