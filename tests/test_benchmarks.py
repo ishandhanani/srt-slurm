@@ -80,6 +80,65 @@ class TestSABenchRunner:
         assert errors == []
 
 
+class TestPrefillRunner:
+    """Test prefill benchmark runner."""
+
+    def test_benchmark_type_exists(self):
+        """BenchmarkType.PREFILL is registered."""
+        from srtctl.core.schema import BenchmarkType
+
+        assert BenchmarkType.PREFILL == "prefill"
+
+    def test_prefill_registered(self):
+        """Prefill runner is registered."""
+        benchmarks = list_benchmarks()
+        assert "prefill" in benchmarks
+
+    def test_validate_config_missing_fields(self):
+        """Validates that prefill_concurrencies and prefill_dataset_dir are required."""
+        from srtctl.benchmarks.prefill import PrefillRunner
+        from srtctl.core.schema import BenchmarkConfig, ModelConfig, ResourceConfig, SrtConfig
+
+        runner = PrefillRunner()
+        config = SrtConfig(
+            name="test",
+            model=ModelConfig(path="/model", container="/image", precision="fp4"),
+            resources=ResourceConfig(gpu_type="gb200"),
+            benchmark=BenchmarkConfig(type="prefill"),
+        )
+        errors = runner.validate_config(config)
+        assert any("prefill_concurrencies" in e for e in errors)
+        assert any("prefill_dataset_dir" in e for e in errors)
+
+    def test_validate_config_missing_dataset_dir(self):
+        """Validates that prefill_dataset_dir is required even when concurrencies are set."""
+        from srtctl.benchmarks.prefill import PrefillRunner
+        from srtctl.core.schema import BenchmarkConfig, ModelConfig, ResourceConfig, SrtConfig
+
+        runner = PrefillRunner()
+        config = SrtConfig(
+            name="test",
+            model=ModelConfig(path="/model", container="/image", precision="fp4"),
+            resources=ResourceConfig(gpu_type="gb200"),
+            benchmark=BenchmarkConfig(type="prefill", prefill_concurrencies=[1, 10, 25]),
+        )
+        errors = runner.validate_config(config)
+        assert any("prefill_dataset_dir" in e for e in errors)
+
+    def test_recipe_loads(self):
+        """tep8_egl_decode_only2 recipe parses without error."""
+        from pathlib import Path
+
+        from srtctl.core.schema import SrtConfig
+
+        recipe = Path(__file__).parent.parent / "recipes" / "sprint" / "tep8_egl_decode_only2.yaml"
+        config = SrtConfig.from_yaml(recipe)
+        assert config.name == "tep8_egl_decode_only2"
+        assert config.benchmark.type == "prefill"
+        assert config.benchmark.prefill_concurrencies == [1, 2, 4, 8, 16, 32, 64]
+        assert config.benchmark.prefill_dataset_dir == "together-ai-basic-no-delays_1osl/splits"
+
+
 class TestScriptsExist:
     """Test that benchmark scripts exist."""
 

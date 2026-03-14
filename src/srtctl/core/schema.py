@@ -224,6 +224,7 @@ class BenchmarkType(str, Enum):
     MMLU = "mmlu"
     GPQA = "gpqa"
     LONGBENCHV2 = "longbenchv2"
+    PREFILL = "prefill"
 
 
 class ProfilingType(str, Enum):
@@ -540,6 +541,9 @@ class BenchmarkConfig:
     ttft_threshold_ms: int | None = None  # Goodput TTFT threshold in ms (default: 2000)
     itl_threshold_ms: int | None = None  # Goodput ITL threshold in ms (default: 25)
     trace_file: str | None = None  # Custom trace file path (overrides mooncake_workload)
+    # Prefill benchmark fields (long ISL, short OSL — measures prefill throughput)
+    prefill_concurrencies: list[int] | None = None  # Concurrency levels for prefill benchmark
+    prefill_dataset_dir: str | None = None  # Path to dir containing conc_N.jsonl split files
 
     def get_concurrency_list(self) -> list[int]:
         if self.concurrencies is None:

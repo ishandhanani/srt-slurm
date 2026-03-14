@@ -10,6 +10,7 @@ from srtctl.benchmarks import (
     longbenchv2,
     mmlu,
     mooncake_router,
+    prefill,
     profiling,
     router,
     sa_bench,
@@ -39,4 +40,5 @@ __all__ = [
     "profiling",
     "aiperf",
     "trace_replay",
+    "prefill",
 ]

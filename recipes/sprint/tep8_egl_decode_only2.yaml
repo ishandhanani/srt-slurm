@@ -1,0 +1,81 @@
+name: tep8_egl_decode_only2
+
+model:
+  path: "kimi-k25-nvfp4"
+  container: "kimi-bench-trtllm"
+  precision: "fp4"
+  speculative_model: "kimi-eagle"
+
+resources:
+  gpu_type: "gb200"
+  agg_nodes: 2
+  agg_workers: 1
+  gpus_per_agg: 8
+  gpus_per_node: 4
+
+backend:
+  type: trtllm
+  aggregated_environment:
+    TLLM_LOG_LEVEL: "INFO"
+    TRTLLM_SERVER_DISABLE_GC: "1"
+    TRTLLM_WORKER_DISABLE_GC: "1"
+    TRTLLM_ENABLE_PDL: "1"
+    ENROOT_ALLOW_DEV: "yes"
+    NCCL_GRAPH_MIXING_SUPPORT: "0"
+    TRTLLM_FORCE_COMM_METHOD: "NVLINK_TWO_SIDED"
+    ENABLE_CONFIGURABLE_MOE: "1"
+    TLLM_OVERRIDE_LAYER_NUM: "61"
+    TLLM_SPEC_DECODE_FORCE_NUM_ACCEPTED_TOKENS: "2"
+  trtllm_config:
+    aggregated:
+      allreduce_strategy: AUTO
+      max_num_tokens: 4096
+      enable_chunked_prefill: true
+      disable_overlap_scheduler: false
+      cuda_graph_config:
+        batch_sizes: [1, 2, 4, 8, 16]
+        enable_padding: true
+      enable_attention_dp: false
+      kv_cache_config:
+        dtype: fp8
+        enable_block_reuse: true
+        free_gpu_memory_fraction: 0.7
+        tokens_per_block: 32
+      max_batch_size: 8
+      max_seq_len: 167200
+      moe_config:
+        backend: CUTEDSL
+        max_num_tokens: 4096
+        use_low_precision_moe_combine: true
+      nvfp4_gemm_config:
+        allowed_backends: [cutlass, cublaslt, cutedsl, cuda_core]
+      moe_expert_parallel_size: 8
+      num_postprocess_workers: 8
+      print_iter_log: true
+      stream_interval: 100
+      tensor_parallel_size: 8
+      trust_remote_code: true
+      speculative_config:
+        decoding_type: Eagle
+        max_draft_len: 3
+        speculative_model_dir: /speculative-model
+        allow_advanced_sampling: true
+
+benchmark:
+  type: "prefill"
+  prefill_concurrencies: [1, 2, 4, 8, 16, 32, 64]
+  prefill_dataset_dir: "together-ai-basic-no-delays_1osl/splits"
+
+frontend:
+  type: dynamo
+  enable_multiple_frontends: false
+  args:
+    router-mode: "round-robin"
+    router-reset-states: true
+
+health_check:
+  max_attempts: 500
+  interval_seconds: 10
+
+dynamo:
+  install: false
