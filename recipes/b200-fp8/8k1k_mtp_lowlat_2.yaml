@@ -130,7 +130,7 @@ backend:
       speculative-eagle-topk: 1
       speculative-num-draft-tokens: 3
 health_check:
-  max_attempts: 360
+  max_attempts: 720
   interval_seconds: 10
 
 benchmark:
