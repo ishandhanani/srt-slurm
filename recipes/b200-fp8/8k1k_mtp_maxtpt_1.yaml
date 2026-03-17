@@ -106,7 +106,7 @@ backend:
       mem-fraction-static: 0.75
       context-length: 9600
       max-running-requests: 256
-      cuda-graph-max-bs: 256
+      cuda-graph-max-bs: 32
 
         # Parallelism
       tensor-parallel-size: 8
