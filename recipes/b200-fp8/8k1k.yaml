@@ -13,7 +13,7 @@
 #   srtctl apply  -f recipes/b200-fp8/8k1k.yaml:*mtp*                        # all MTP variants
 #   srtctl apply  -f recipes/b200-fp8/8k1k.yaml:zip_override_stp_lowlat[0]   # STP fisrt config only
 #   srtctl dry-run -f recipes/b200-fp8/8k1k.yaml                             # preview
-#   srtctl reslove-override -f recipes/b200-fp8/8k1k.yaml                    # generate separate yaml files for each override
+#   srtctl resolve-override -f recipes/b200-fp8/8k1k.yaml                    # generate separate yaml files for each override
 base:
   name: "b200-fp8-stp-8k1k"
 
