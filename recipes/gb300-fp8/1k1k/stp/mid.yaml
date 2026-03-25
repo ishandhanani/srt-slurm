@@ -68,6 +68,7 @@ backend:
       dp-size: 8
       ep-size: 8 
       enable-dp-attention: true
+      numa-node: [0, 0, 1, 1]
 
       # KV cache and attention
       attention-backend: "trtllm_mla"
@@ -121,6 +122,7 @@ backend:
       dp-size: 32 
       ep-size: 32 
       enable-dp-attention: true
+      numa-node: [0, 0, 1, 1]
 
       # KV cache and attention
       attention-backend: "trtllm_mla"

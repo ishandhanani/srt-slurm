@@ -85,6 +85,7 @@ backend:
       tensor-parallel-size: 4
       data-parallel-size: 1
       expert-parallel-size: 1
+      numa-node: [0, 0, 1, 1]
       disaggregation-transfer-backend: "nixl"
       speculative-algorithm: "EAGLE"
       speculative-num-steps: 2
@@ -114,6 +115,7 @@ backend:
       tensor-parallel-size: 8
       data-parallel-size: 1
       expert-parallel-size: 1
+      numa-node: [0, 0, 1, 1]
       disaggregation-transfer-backend: "nixl"
       speculative-algorithm: "EAGLE"
       speculative-num-steps: 2

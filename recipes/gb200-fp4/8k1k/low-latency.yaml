@@ -83,6 +83,7 @@ backend:
       fp4-gemm-backend: "flashinfer_trtllm"
       tensor-parallel-size: 4
       expert-parallel-size: 1
+      numa-node: [0, 0, 1, 1]
       enable-dp-attention: false
  
     decode:
@@ -108,6 +109,7 @@ backend:
       fp4-gemm-backend: "flashinfer_trtllm"
       tensor-parallel-size: 4
       expert-parallel-size: 1
+      numa-node: [0, 0, 1, 1]
       enable-dp-attention: false
 
 benchmark:

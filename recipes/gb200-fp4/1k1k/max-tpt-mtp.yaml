@@ -117,6 +117,7 @@ backend:
       # Performance optimizations
       disable-cuda-graph: true
       enable-dp-attention: true
+      numa-node: [0, 0, 1, 1]
       enable-single-batch-overlap: true
 
       # Parallelism
@@ -184,6 +185,7 @@ backend:
       enable-dp-lm-head: true
       prefill-round-robin-balance: true
       enable-dp-attention: true
+      numa-node: [0, 0, 1, 1]
       enable-single-batch-overlap: true
 
       # Parallelism
