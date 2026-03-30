@@ -1,0 +1,326 @@
+# GB200-FP8 8k1k consolidated config
+#
+# Structure:
+#   override_lowlat       - STP low-latency
+#   override_lowlat_mtp   - MTP low-latency
+#   zip_override_stp_curve - STP mid-curve + max-throughput
+#   override_midcurve_mtp - MTP mid-curve
+#
+# Principle:
+#   base only keeps fields shared by all variants.
+
+base:
+  name: "gb200-fp8-8k1k"
+
+  dynamo:
+    version: "0.8.1"
+
+  frontend:
+    type: dynamo
+    nginx_container: nginx
+
+  model:
+    path: "dsr1-fp8"
+    container: "dynamo-sglang"
+    precision: "fp8"
+
+  resources:
+    # Cluster topology
+    gpu_type: "gb200"
+    gpus_per_node: 4
+
+  backend:
+    prefill_environment:
+      TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
+      PYTHONUNBUFFERED: "1"
+      DYN_SKIP_SGLANG_LOG_FORMATTING: "1"
+      SGLANG_JIT_DEEPGEMM_FAST_WARMUP: "1"
+      SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+      SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+      SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+      SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
+      SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
+      SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
+      MC_TE_METRIC: "true"
+      MC_FORCE_MNNVL: "1"
+      NCCL_MNNVL_ENABLE: "1"
+      NCCL_CUMEM_ENABLE: "1"
+
+    decode_environment:
+      TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
+      PYTHONUNBUFFERED: "1"
+      DYN_SKIP_SGLANG_LOG_FORMATTING: "1"
+      SGLANG_JIT_DEEPGEMM_FAST_WARMUP: "1"
+      SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+      SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+      SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+      SGLANG_DECODE_BOOTSTRAP_TIMEOUT: "1000"
+      SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
+      SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
+      SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
+      MC_TE_METRIC: "true"
+      MC_FORCE_MNNVL: "1"
+      NCCL_MNNVL_ENABLE: "1"
+      NCCL_CUMEM_ENABLE: "1"
+
+    sglang_config:
+      prefill:
+        # Model / runtime
+        served-model-name: "deepseek-ai/DeepSeek-R1"
+        trust-remote-code: true
+        quantization: "fp8"
+        kv-cache-dtype: "fp8_e4m3"
+        attention-backend: "trtllm_mla"
+        disable-radix-cache: true
+        stream-interval: 50
+        context-length: 9600
+        watchdog-timeout: 1000000
+
+        # Disagg
+        disaggregation-mode: "prefill"
+        disaggregation-transfer-backend: "nixl"
+        disaggregation-bootstrap-port: 30001
+
+        # Size limits
+        mem-fraction-static: 0.75
+        max-total-tokens: 524288
+        chunked-prefill-size: 131072
+        max-running-requests: 30000
+
+        # Parallel
+        tensor-parallel-size: 8
+        data-parallel-size: 8
+        expert-parallel-size: 8
+        enable-dp-attention: true
+        moe-dense-tp-size: 1
+        enable-dp-lm-head: true
+
+        # MoE 
+        disable-shared-experts-fusion: true
+        moe-a2a-backend: "deepep"
+        deepep-mode: "normal"
+        ep-dispatch-algorithm: "dynamic"
+        eplb-algorithm: "deepseek"
+        ep-num-redundant-experts: 32
+        deepep-config: "/configs/deepep_config.json"
+
+        load-balance-method: "round_robin"
+
+      decode:
+        # Model / runtime
+        served-model-name: "deepseek-ai/DeepSeek-R1"
+        trust-remote-code: true
+        disable-radix-cache: true
+        stream-interval: 50
+        watchdog-timeout: 1000000
+
+        quantization: "fp8"
+        kv-cache-dtype: "fp8_e4m3"
+
+        attention-backend: "trtllm_mla"
+        context-length: 9600
+
+        # Disagg
+        disaggregation-mode: "decode"
+        disaggregation-transfer-backend: "nixl"
+        prefill-round-robin-balance: true
+
+        # Size limits
+        mem-fraction-static: 0.75
+
+        # Scheduling
+        eplb-algorithm: "deepseek"
+
+  benchmark:
+    # Benchmark workload
+    type: "sa-bench"
+    isl: 8192
+    osl: 1024
+
+
+override_stp_lowlat:
+  name: "gb200-fp8-8k1k-low-latency"
+
+  frontend:
+    enable_multiple_frontends: true
+    num_additional_frontends: 2
+
+  resources:
+    # 1P + 2D low-latency topology
+    prefill_nodes: 2
+    prefill_workers: 1
+    decode_nodes: 2
+    decode_workers: 1
+
+  backend:
+    sglang_config:
+      decode:
+        # Size limits
+        cuda-graph-max-bs: 512
+        max-running-requests: 512
+
+        # Parallel
+        tensor-parallel-size: 8
+        data-parallel-size: 1
+        expert-parallel-size: 1
+
+        # Runtime / kernels
+        scheduler-recv-interval: 10
+        enable-symm-mem: true
+        moe-runner-backend: "flashinfer_trtllm"
+        fp8-gemm-backend: "flashinfer_trtllm"
+
+  benchmark:
+    concurrencies: "4x8x16"
+
+zip_override_stp_max_tpt:
+  name:
+    - "gb200-8k1k-fp8-5p1d"
+    - "gb200-8k1k-fp8-6p1d"
+
+  frontend:
+    enable_multiple_frontends: true
+    num_additional_frontends: 9
+
+  resources:
+    # [5P + 8D mid-curve, 6P + 6D max-throughput]
+    prefill_nodes: [10, 12]
+    prefill_workers: [5, 6]
+    decode_nodes: [8, 6]
+    decode_workers: 1
+
+  backend:
+    decode_environment:
+      # DeepEP dispatch sizing
+      SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK: ["256", "512"]
+
+    sglang_config:
+      decode:
+        # Size limits
+        cuda-graph-max-bs: [256, 512]
+        max-running-requests: 8192
+
+        # Parallel
+        tensor-parallel-size: [32, 24]
+        data-parallel-size: [32, 24]
+        expert-parallel-size: [32, 24]
+        moe-dense-tp-size: 1
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+
+        # MoE 
+        disable-shared-experts-fusion: true
+        moe-a2a-backend: "deepep"
+        deepep-mode: "low_latency"
+        deepep-config: "/configs/deepep_config.json"
+        ep-dispatch-algorithm: "static"
+        ep-num-redundant-experts: 32
+
+  benchmark:
+    req_rate: "300"
+    concurrencies:
+      - "512x1024x2048x6144"
+      - "2048x4096x6144"
+
+
+override_lowlat_mtp:
+  name: "gb200-fp8-8k1k-1p-1d-low-latency-mtp"
+
+  resources:
+    # 1P + 2D low-latency topology
+    prefill_nodes: 1
+    prefill_workers: 1
+    decode_nodes: 2
+    decode_workers: 1
+
+  backend:
+    prefill_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+      SGLANG_NCCL_ALL_GATHER_IN_OVERLAP_SCHEDULER_SYNC_BATCH: "1"
+      SGLANG_ENABLE_FLASHINFER_GEMM: "1"
+
+    decode_environment:
+      SGLANG_ENABLE_SPEC_V2: "1"
+      SGLANG_HACK_SEQ_BOOTSTRAP_ROOM: "1"
+      SGLANG_NCCL_ALL_GATHER_IN_OVERLAP_SCHEDULER_SYNC_BATCH: "1"
+      SGLANG_ENABLE_FLASHINFER_GEMM: "1"
+
+    sglang_config:
+      decode:
+        # Size limits
+        cuda-graph-max-bs: 256
+        max-running-requests: 256
+
+        # Parallel
+        tensor-parallel-size: 8
+        data-parallel-size: 1
+        expert-parallel-size: 1
+
+        # Runtime / kernels
+        scheduler-recv-interval: 10
+        enable-symm-mem: true
+        moe-runner-backend: "flashinfer_trtllm"
+
+        # Spec decode for MTP
+        speculative-algorithm: "EAGLE"
+        speculative-num-steps: 1
+        speculative-eagle-topk: 1
+        speculative-num-draft-tokens: 2
+
+  benchmark:
+    concurrencies: "4x8x16x32"
+
+
+override_midcurve_mtp:
+  name: "gb200-8k1k-fp8-mid-tpt-mtp"
+
+  resources:
+    # 5P + 8D mid-curve topology
+    prefill_nodes: 10
+    prefill_workers: 5
+    decode_nodes: 8
+    decode_workers: 1
+
+  backend:
+    prefill_environment:
+      # MTP runtime flags
+      SGLANG_ENABLE_SPEC_V2: "1"
+      SGLANG_NCCL_ALL_GATHER_IN_OVERLAP_SCHEDULER_SYNC_BATCH: "1"
+
+    decode_environment:
+      # MTP runtime flags + DeepEP dispatch sizing
+      SGLANG_ENABLE_SPEC_V2: "1"
+      SGLANG_HACK_SEQ_BOOTSTRAP_ROOM: "1"
+      SGLANG_NCCL_ALL_GATHER_IN_OVERLAP_SCHEDULER_SYNC_BATCH: "1"
+      SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK: "512"
+
+    sglang_config:
+      decode:
+        # Size limits
+        cuda-graph-max-bs: 256
+        max-running-requests: 8192
+
+        # Parallel
+        tensor-parallel-size: 32
+        data-parallel-size: 32
+        expert-parallel-size: 32
+        enable-dp-lm-head: true
+        enable-dp-attention: true
+        moe-dense-tp-size: 1
+
+        # MoE / disagg
+        disable-shared-experts-fusion: true
+        moe-a2a-backend: "deepep"
+        deepep-mode: "low_latency"
+        ep-dispatch-algorithm: "static"
+        deepep-config: "/configs/deepep_config.json"
+
+        # Spec decode for MTP
+        speculative-algorithm: "EAGLE"
+        speculative-num-steps: 1
+        speculative-eagle-topk: 1
+        speculative-num-draft-tokens: 2
+
+  benchmark:
+    req_rate: "300"
+    concurrencies: "512x1024x2048x6144"
