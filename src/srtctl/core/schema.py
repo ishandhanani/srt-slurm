@@ -573,6 +573,7 @@ class ProfilingConfig:
     isl: int | None = None  # Input sequence length for profiling workload
     osl: int | None = None  # Output sequence length for profiling workload
     concurrency: int | None = None  # Batch size / concurrency
+    continue_benchmark_after_profiling: bool = False  # If true, does not kill benchmark when nsys profiling finishes 
 
     # Phase-specific profiling step configs
     prefill: ProfilingPhaseConfig | None = None
@@ -641,6 +642,11 @@ class ProfilingConfig:
         if self.is_torch:
             env["SGLANG_TORCH_PROFILER_DIR"] = f"{profile_dir}/{mode}"
 
+        # TRTLLM nsys: set TLLM_PROFILE_START_STOP so PyExecutor triggers cudaProfilerStart/Stop
+        if self.is_nsys and phase_config and phase_config.start_step is not None and phase_config.stop_step is not None:
+            env["TLLM_PROFILE_START_STOP"] = f"{phase_config.start_step}-{phase_config.stop_step}"
+            env["TLLM_LLMAPI_ENABLE_NVTX"] = "1"
+
         return env
 
     def get_nsys_prefix(self, output_file: str) -> list[str]:
@@ -655,21 +661,26 @@ class ProfilingConfig:
         if not self.is_nsys:
             return []
 
-        return [
+        cmd = [
             "nsys",
             "profile",
             "-t",
-            "cuda,nvtx",
+            "cuda,nvtx,ucx",
             "--cuda-graph-trace=node",
             "-c",
             "cudaProfilerApi",
             "--capture-range-end",
             "stop",
-            "--force-overwrite",
-            "true",
-            "-o",
-            output_file,
         ]
+
+        if self.continue_benchmark_after_profiling:
+            # Keep benchmark alive post-profiling until process exits 
+            # (used for TRTLLM where profiling stopped by TLLM_PROFILE_START_STOP env var)
+            cmd += ["--sample=none", "--kill", "none", "--wait", "all"]
+
+        cmd += ["--force-overwrite", "true", "-o", output_file]
+
+        return cmd
 
     Schema: ClassVar[builtins.type[Schema]] = Schema
 
@@ -858,6 +869,9 @@ class SrtConfig:
         prof = self.profiling
         if not prof.enabled:
             return
+
+        if prof.is_torch and self.backend.type == "trtllm":
+            raise ValidationError("torch profiling is not supported for the trtllm backend; use nsys instead")
 
         # Traffic generator params are required when profiling is enabled
         if prof.isl is None or prof.osl is None or prof.concurrency is None:

@@ -11,6 +11,8 @@
 model_name="${PROFILE_MODEL_NAME:-deepseek-ai/DeepSeek-R1}"
 head_node="${HEAD_NODE:-127.0.0.1}"
 head_port="${HEAD_PORT:-8000}"
+export AIPERF_RECORD_EXPORT_BATCH_SIZE=1  # Flush profile_export.jsonl after every x requests
+
 
 # Parse arguments
 n_prefill=$1
@@ -130,27 +132,57 @@ done
 if [[ "${PROFILING_MODE}" == "prefill" ]]; then
     echo ""
     echo "Generating profiling traffic..."
-    python3 -m sglang.bench_serving \
-        --backend sglang \
-        --model "${model_name}" \
-        --host "${head_node}" --port "${head_port}" \
-        --dataset-name random \
-        --max-concurrency "${PROFILE_CONCURRENCY}" \
-        --num-prompts 128 \
-        --random-input-len "${PROFILE_ISL}" \
-        --random-output-len "${PROFILE_OSL}" \
-        --random-range-ratio 1 \
-        --warmup-request 0
 
-    # Run lm-eval for additional profiling coverage
-    echo ""
-    echo "Running lm-eval..."
-    pip install lm-eval tenacity > /dev/null 2>&1
-    python -m lm_eval \
-        --model local-completions \
-        --tasks gsm8k \
-        --model_args "base_url=http://${head_node}:${head_port}/v1/completions,model=${model_name},tokenized_requests=False,tokenizer_backend=None,num_concurrent=${PROFILE_CONCURRENCY},timeout=6000,max_retries=1" \
-        --limit 10
+    mkdir -p /logs/artifacts/nsys_profile
+
+    if [[ "${PROFILING_BACKEND:-sglang}" == "trtllm" ]]; then
+        # TRTLLM: use aiperf (OpenAI-compatible), capture range is managed by
+        # TLLM_PROFILE_START_STOP on the worker side — no /start_profile call needed
+        aiperf profile \
+            --model "${model_name}" \
+            --tokenizer /model/ \
+            --tokenizer-trust-remote-code \
+            --endpoint-type chat \
+            --endpoint /v1/chat/completions \
+            --streaming \
+            --url "http://${head_node}:${head_port}" \
+            --synthetic-input-tokens-mean "${PROFILE_ISL}" \
+            --output-tokens-mean "${PROFILE_OSL}" \
+            --extra-inputs "max_tokens:${PROFILE_OSL}" \
+            --extra-inputs "min_tokens:${PROFILE_OSL}" \
+            --extra-inputs "ignore_eos:true" \
+            --concurrency "${PROFILE_CONCURRENCY}" \
+            --profile-export-level raw \
+            --artifact-dir /logs/artifacts/nsys_profile \
+            --request-count 50 \
+            --random-seed 42 \
+            -H 'Authorization: Bearer NOT USED'
+
+    else
+        # SGLang: use sglang.bench_serving
+        python3 -m sglang.bench_serving \
+            --backend sglang \
+            --model "${model_name}" \
+            --host "${head_node}" --port "${head_port}" \
+            --dataset-name random \
+            --max-concurrency "${PROFILE_CONCURRENCY}" \
+            --num-prompts 128 \
+            --random-input-len "${PROFILE_ISL}" \
+            --random-output-len "${PROFILE_OSL}" \
+            --random-range-ratio 1 \
+            --warmup-request 0
+
+            
+        # lm-eval for additional coverage (uses OpenAI /v1/completions — works for both backends)
+        echo ""
+        echo "Running lm-eval..."
+        pip install lm-eval tenacity > /dev/null 2>&1
+        python -m lm_eval \
+            --model local-completions \
+            --tasks gsm8k \
+            --model_args "base_url=http://${head_node}:${head_port}/v1/completions,model=${model_name},tokenized_requests=False,tokenizer_backend=None,num_concurrent=${PROFILE_CONCURRENCY},timeout=6000,max_retries=1" \
+            --limit 10
+    fi
 fi
 
 exit_code=$?

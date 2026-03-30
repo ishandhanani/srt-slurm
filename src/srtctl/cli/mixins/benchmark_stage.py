@@ -254,6 +254,7 @@ class BenchmarkStageMixin:
 
             # The profile.sh script only generates traffic when PROFILING_MODE=prefill
             env["PROFILING_MODE"] = "prefill"
+            env["PROFILING_BACKEND"] = self.config.backend.type
 
         return env
 
