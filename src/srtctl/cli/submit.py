@@ -37,7 +37,9 @@ from rich.table import Table
 from srtctl.core.config import (
     generate_override_configs,
     get_srtslurm_setting,
+    load_cluster_config,
     load_config,
+    resolve_config_with_defaults,
 )
 from srtctl.core.schema import SrtConfig
 from srtctl.core.status import create_job_record
@@ -239,6 +241,7 @@ def submit_with_orchestrator(
     output_dir: Path | None = None,
     variant_suffix: str | None = None,
     source_config_path: Path | None = None,
+    runtime_config_text: str | None = None,
 ) -> str | None:
     """Submit job using the new Python orchestrator.
 
@@ -255,6 +258,8 @@ def submit_with_orchestrator(
                         as config_{variant_suffix}.yaml in the job output dir.
         source_config_path: If set, save the original source YAML as config.yaml
                             while the job executes a resolved variant config.
+        runtime_config_text: If set, write this YAML into the runtime config under
+                             OUTPUT_DIR instead of copying config_path.
 
     Returns:
         job_id string on success, None for dry_run.
@@ -327,9 +332,17 @@ def submit_with_orchestrator(
 
         shutil.copy(source_config_path or config_path, job_output_dir / "config.yaml")
         if variant_suffix:
-            shutil.copy(config_path, job_output_dir / f"config_{variant_suffix}.yaml")
+            runtime_config_path = job_output_dir / f"config_{variant_suffix}.yaml"
+            if runtime_config_text is not None:
+                runtime_config_path.write_text(runtime_config_text)
+            else:
+                shutil.copy(config_path, runtime_config_path)
         elif source_config_path:
-            shutil.copy(config_path, job_output_dir / runtime_config_filename)
+            runtime_config_path = job_output_dir / runtime_config_filename
+            if runtime_config_text is not None:
+                runtime_config_path.write_text(runtime_config_text)
+            else:
+                shutil.copy(config_path, runtime_config_path)
         shutil.copy(script_path, job_output_dir / "sbatch_script.sh")
 
         job_name = get_job_name(config)
@@ -412,6 +425,7 @@ def submit_single(
     output_dir: Path | None = None,
     variant_suffix: str | None = None,
     source_config_path: Path | None = None,
+    runtime_config_text: str | None = None,
 ) -> str | None:
     """Submit a single job from YAML config.
 
@@ -427,6 +441,8 @@ def submit_single(
         variant_suffix: If set, also save config as config_{suffix}.yaml in job output dir.
         source_config_path: If set, saved as config.yaml while execution uses the
                             resolved variant config.
+        runtime_config_text: If set, write this YAML into the runtime config under
+                             OUTPUT_DIR instead of copying config_path.
 
     Returns:
         job_id string on success, None for dry_run.
@@ -447,6 +463,7 @@ def submit_single(
         output_dir=output_dir,
         variant_suffix=variant_suffix,
         source_config_path=source_config_path,
+        runtime_config_text=runtime_config_text,
     )
 
 
@@ -750,36 +767,34 @@ def submit_override(
     for i, (suffix, config_cm) in enumerate(resolved_variants, 1):
         variant_label = "base" if suffix == "base" else f"override_{suffix}"
         job_name = config_cm.get("name", "unnamed")
+        runtime_config_text = dump_yaml_with_comments(config_cm)
 
         if dry_run:
             console.print(f"[bold cyan][{i}/{len(override_configs)}][/] {variant_label}: {job_name}")
 
         logger.info(f"Override variant: {variant_label} -> {job_name}")
 
-        # Write the comment-preserving resolved config next to the original
-        # override YAML so the SLURM job can execute that exact variant.
-        variant_file = config_path.parent / f"{config_path.stem}_{suffix}.yaml"
-        with open(variant_file, "w") as f:
-            dump_yaml_with_comments(config_cm, f)
-
-        config = load_config(variant_file)
+        resolved_config = resolve_config_with_defaults(yaml.safe_load(runtime_config_text), load_cluster_config())
+        config = SrtConfig.Schema().load(resolved_config)
 
         if "sweep" in config_cm:
+            fd, temp_config_path = tempfile.mkstemp(suffix=".yaml", prefix="srtctl_override_", text=True)
             try:
+                with os.fdopen(fd, "w") as f:
+                    f.write(runtime_config_text)
                 submit_sweep(
-                    config_path=variant_file,
+                    config_path=Path(temp_config_path),
                     dry_run=dry_run,
                     setup_script=setup_script,
                     tags=tags,
                     output_dir=output_dir,
                 )
             finally:
-                # sweep writes its own per-job configs; pending file is always safe to remove
                 with contextlib.suppress(OSError):
-                    variant_file.unlink()
+                    os.remove(temp_config_path)
         else:
             submit_single(
-                config_path=variant_file,
+                config_path=config_path,
                 config=config,
                 dry_run=dry_run,
                 setup_script=setup_script,
@@ -787,13 +802,8 @@ def submit_override(
                 output_dir=output_dir,
                 variant_suffix=suffix,
                 source_config_path=config_path,
+                runtime_config_text=runtime_config_text,
             )
-            if dry_run:
-                with contextlib.suppress(OSError):
-                    variant_file.unlink()
-            # NOTE: for real submissions, variant_file must NOT be deleted —
-            # the sbatch script references it via config_path and do_sweep
-            # reads it at job start.
 
 
 def resolve_override_cmd(
