@@ -9,7 +9,7 @@ dynamo:
   version: 1.0.1
   install: true
 
-setup_script: install-deps.sh
+setup_script: vllm-container-deps.sh
 
 resources:
   gpu_type: "gb200"
