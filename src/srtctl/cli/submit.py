@@ -258,8 +258,8 @@ def submit_with_orchestrator(
                         as config_{variant_suffix}.yaml in the job output dir.
         source_config_path: If set, save the original source YAML as config.yaml
                             while the job executes a resolved variant config.
-        runtime_config_text: If set, write this YAML into the runtime config under
-                             OUTPUT_DIR instead of copying config_path.
+        runtime_config_text: Resolved runtime YAML written under OUTPUT_DIR when
+                             source_config_path is set.
 
     Returns:
         job_id string on success, None for dry_run.
@@ -269,7 +269,11 @@ def submit_with_orchestrator(
         config = load_config(config_path)
 
     runtime_config_filename = "config.yaml"
+    resolved_runtime_config_text: str | None = None
     if source_config_path:
+        if runtime_config_text is None:
+            raise ValueError("runtime_config_text is required when source_config_path is set")
+        resolved_runtime_config_text = runtime_config_text
         runtime_config_filename = f"config_{variant_suffix}.yaml" if variant_suffix else "config_resolved.yaml"
 
     script_content = generate_minimal_sbatch_script(
@@ -331,18 +335,10 @@ def submit_with_orchestrator(
         job_output_dir.mkdir(parents=True, exist_ok=True)
 
         shutil.copy(source_config_path or config_path, job_output_dir / "config.yaml")
-        if variant_suffix:
-            runtime_config_path = job_output_dir / f"config_{variant_suffix}.yaml"
-            if runtime_config_text is not None:
-                runtime_config_path.write_text(runtime_config_text)
-            else:
-                shutil.copy(config_path, runtime_config_path)
-        elif source_config_path:
+        if source_config_path:
+            assert resolved_runtime_config_text is not None
             runtime_config_path = job_output_dir / runtime_config_filename
-            if runtime_config_text is not None:
-                runtime_config_path.write_text(runtime_config_text)
-            else:
-                shutil.copy(config_path, runtime_config_path)
+            runtime_config_path.write_text(resolved_runtime_config_text)
         shutil.copy(script_path, job_output_dir / "sbatch_script.sh")
 
         job_name = get_job_name(config)
@@ -441,8 +437,8 @@ def submit_single(
         variant_suffix: If set, also save config as config_{suffix}.yaml in job output dir.
         source_config_path: If set, saved as config.yaml while execution uses the
                             resolved variant config.
-        runtime_config_text: If set, write this YAML into the runtime config under
-                             OUTPUT_DIR instead of copying config_path.
+        runtime_config_text: Resolved runtime YAML written under OUTPUT_DIR for
+                             override submissions.
 
     Returns:
         job_id string on success, None for dry_run.
