@@ -768,6 +768,8 @@ def submit_override(
         variant_label = "base" if suffix == "base" else f"override_{suffix}"
         job_name = config_cm.get("name", "unnamed")
         runtime_config_text = dump_yaml_with_comments(config_cm)
+        if runtime_config_text is None:
+            raise RuntimeError("dump_yaml_with_comments returned None unexpectedly")
 
         if dry_run:
             console.print(f"[bold cyan][{i}/{len(override_configs)}][/] {variant_label}: {job_name}")
