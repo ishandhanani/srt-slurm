@@ -1,0 +1,62 @@
+# MiniMax-M2 NVFP4 B200 — 8K/1K ISL/OSL
+# Aggregated vLLM, single-node, TP=2 and TP=4 variants
+#
+# Usage:
+#   srtctl apply  -f recipes/minimax-m2/b200/8k1k/minimax-m2-nvfp4-b200.yaml   # both variants
+#   srtctl apply  -f recipes/minimax-m2/b200/8k1k/minimax-m2-nvfp4-b200.yaml:zip_override_tp[0]  # TP=2 only
+#   srtctl apply  -f recipes/minimax-m2/b200/8k1k/minimax-m2-nvfp4-b200.yaml:zip_override_tp[1]  # TP=4 only
+#   srtctl dry-run -f recipes/minimax-m2/b200/8k1k/minimax-m2-nvfp4-b200.yaml  # preview
+
+base:
+  name: "minimax-m2-nvfp4-b200-8k1k"
+
+  model:
+    path: "minimaxm2"
+    container: "vllm/vllm-openai:nightly-5b8c30d62b754b575e043ce2fc0dcbf8a64f6306"
+    precision: "fp4"
+
+  resources:
+    gpu_type: "b200"
+    gpus_per_node: 8
+    agg_nodes: 1
+    agg_workers: 4
+    gpus_per_agg: 2
+
+  frontend:
+    type: dynamo
+    enable_multiple_frontends: false
+
+  backend:
+    type: vllm
+    connector: nixl
+
+    aggregated_environment:
+      DYN_HEALTH_CHECK_ENABLED: "false"
+      PYTHONUNBUFFERED: "1"
+
+    vllm_config:
+      aggregated:
+        served-model-name: "nvidia/MiniMax-M2.5-NVFP4"
+        tensor-parallel-size: 2
+
+  benchmark:
+    type: "sa-bench"
+    isl: 8192
+    osl: 1024
+    req_rate: "inf"
+
+
+# TP=2 (4 workers × 2 GPUs) and TP=4 (2 workers × 4 GPUs) on a single B200 node
+zip_override_tp:
+  name:
+    - "minimax-m2-nvfp4-b200-8k1k-tp2"
+    - "minimax-m2-nvfp4-b200-8k1k-tp4"
+  resources:
+    agg_workers: [4, 2]
+    gpus_per_agg: [2, 4]
+  backend:
+    vllm_config:
+      aggregated:
+        tensor-parallel-size: [2, 4]
+  benchmark:
+    concurrencies: ["4x8x16x32x64x128x256", "4x8x16x32x64x128x256"]
