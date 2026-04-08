@@ -178,8 +178,8 @@ get_node_ip() {
 
     # Execute the script on target node with single srun command
     local result
-    result=$(srun --jobid $slurm_job_id --nodes=1 --ntasks=1 --nodelist=$node bash -c "$ip_script" 2>&1)
-    local rc=$?
+    result=$(srun --jobid $slurm_job_id --nodes=1 --ntasks=1 --nodelist=$node bash -c "$ip_script" 2>&1 | grep -oP '^\d+\.\d+\.\d+\.\d+$' | tail -1)
+    local rc=${PIPESTATUS[0]}
 
     if [ $rc -eq 0 ] && [ -n "$result" ]; then
         echo "$result"
