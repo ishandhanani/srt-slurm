@@ -293,24 +293,27 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
 
         download_log = self.runtime.log_dir / "model_download.out"
 
-        proc = start_srun_process(
-            command=download_cmd,
-            nodelist=[download_node],
-            output=str(download_log),
-            container_image=str(self.runtime.container_image),
-            container_mounts=self.runtime.container_mounts,
-            use_bash_wrapper=False,  # command is already bash -c
-        )
-
-        rc = proc.wait()
-        if rc != 0:
-            logger.warning(
-                "Model pre-download exited with code %d (workers will retry at startup). Log: %s",
-                rc,
-                download_log,
+        try:
+            proc = start_srun_process(
+                command=download_cmd,
+                nodelist=[download_node],
+                output=str(download_log),
+                container_image=str(self.runtime.container_image),
+                container_mounts=self.runtime.container_mounts,
+                use_bash_wrapper=False,  # command is already bash -c
             )
-        else:
-            logger.info("Model pre-download complete")
+
+            rc = proc.wait()
+            if rc != 0:
+                logger.warning(
+                    "Model pre-download exited with code %d (workers will retry at startup). Log: %s",
+                    rc,
+                    download_log,
+                )
+            else:
+                logger.info("Model pre-download complete")
+        except Exception:
+            logger.warning("Model pre-download failed (workers will retry at startup)", exc_info=True)
 
     def run(self) -> int:
         """Run the complete sweep."""
@@ -345,8 +348,9 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
             # 1. Clean stale lock files from previous crashed downloads
             # 2. Download model on a single node (blocks until complete)
             # This prevents lock contention when multiple workers start.
-            self._clean_stale_hf_locks()
-            self._ensure_model_cached()
+            if self.runtime.is_hf_model:
+                self._clean_stale_hf_locks()
+                self._ensure_model_cached()
 
             # Stage 2: Workers
             reporter.report(JobStatus.WORKERS, JobStage.WORKERS, "Starting workers")

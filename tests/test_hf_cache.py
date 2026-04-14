@@ -473,3 +473,91 @@ resources:
         with patch("srtctl.cli.do_sweep.start_srun_process", return_value=mock_proc):
             # Should NOT raise, just log a warning
             orch._ensure_model_cached()
+
+    def test_handles_srun_launch_exception_gracefully(self, tmp_path: Path):
+        """Exception from start_srun_process should be caught, not abort the sweep."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            f"""
+name: test
+model:
+  path: "hf:nvidia/Kimi-K2.5-NVFP4"
+  container: "test-image:latest"
+  precision: fp4
+backend:
+  type: vllm
+  prefill_environment:
+    HF_HOME: "{tmp_path / 'cache'}"
+  vllm_config:
+    prefill:
+      tensor-parallel-size: 1
+    decode:
+      tensor-parallel-size: 1
+resources:
+  gpu_type: gb200
+  prefill_nodes: 1
+  prefill_workers: 1
+  decode_nodes: 4
+  decode_workers: 4
+  gpus_per_node: 4
+"""
+        )
+        orch = _make_orchestrator(str(config_file))
+
+        with patch("srtctl.cli.do_sweep.start_srun_process", side_effect=OSError("srun not found")):
+            # Should NOT raise — best-effort pre-download
+            orch._ensure_model_cached()
+
+
+# ── Tests for run() guard on is_hf_model ──
+
+
+class TestRunHfModelGuard:
+    """Tests that run() only triggers HF cache operations for HF models."""
+
+    def test_local_model_skips_hf_cache_operations(self, tmp_path: Path):
+        """Local model paths should not trigger _clean_stale_hf_locks or _ensure_model_cached."""
+        model_dir = tmp_path / "local_model"
+        model_dir.mkdir()
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            f"""
+name: test
+model:
+  path: "{model_dir}"
+  container: "test-image:latest"
+  precision: fp16
+backend:
+  type: vllm
+  prefill_environment:
+    HF_HOME: "{tmp_path / 'cache'}"
+  vllm_config:
+    prefill:
+      tensor-parallel-size: 1
+    decode:
+      tensor-parallel-size: 1
+resources:
+  gpu_type: gb200
+  prefill_nodes: 1
+  prefill_workers: 1
+  decode_nodes: 4
+  decode_workers: 4
+  gpus_per_node: 4
+"""
+        )
+        orch = _make_orchestrator(str(config_file))
+
+        with (
+            patch.object(orch, "_clean_stale_hf_locks") as mock_clean,
+            patch.object(orch, "_ensure_model_cached") as mock_ensure,
+            patch.object(orch, "start_head_infrastructure"),
+            patch.object(orch, "start_all_workers", return_value=[]),
+            patch.object(orch, "start_frontend", return_value=[]),
+            patch.object(orch, "run_benchmark", return_value=0),
+            patch.object(orch, "run_postprocess"),
+            patch("srtctl.cli.do_sweep.StatusReporter"),
+        ):
+            orch.run()
+            mock_clean.assert_not_called()
+            mock_ensure.assert_not_called()
