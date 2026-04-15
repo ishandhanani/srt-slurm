@@ -434,8 +434,91 @@ resources:
             # Should use the container image
             assert kwargs["container_image"] == "test-image:latest"
 
-            # Should wait for completion
+            # Should pass HF env vars to srun
+            assert "HF_HOME" in kwargs["env_to_set"]
+
+            # Should wait with a timeout
             mock_proc.wait.assert_called_once()
+            assert mock_proc.wait.call_args.kwargs.get("timeout") is not None
+
+    def test_passes_hf_token_to_srun(self, tmp_path: Path):
+        """HF_TOKEN from backend env should be passed to the pre-download srun."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            f"""
+name: test
+model:
+  path: "hf:nvidia/Kimi-K2.5-NVFP4"
+  container: "test-image:latest"
+  precision: fp4
+backend:
+  type: vllm
+  prefill_environment:
+    HF_HOME: "{tmp_path / 'cache'}"
+    HF_TOKEN: "hf_secret_token_123"
+  vllm_config:
+    prefill:
+      tensor-parallel-size: 1
+    decode:
+      tensor-parallel-size: 1
+resources:
+  gpu_type: gb200
+  prefill_nodes: 1
+  prefill_workers: 1
+  decode_nodes: 4
+  decode_workers: 4
+  gpus_per_node: 4
+"""
+        )
+        orch = _make_orchestrator(str(config_file))
+
+        mock_proc = MagicMock()
+        mock_proc.wait.return_value = 0
+
+        with patch("srtctl.cli.do_sweep.start_srun_process", return_value=mock_proc) as mock_srun:
+            orch._ensure_model_cached()
+
+            kwargs = mock_srun.call_args.kwargs
+            assert kwargs["env_to_set"]["HF_TOKEN"] == "hf_secret_token_123"
+
+    def test_handles_download_timeout_gracefully(self, tmp_path: Path):
+        """Timed-out pre-download should kill the process and continue."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            f"""
+name: test
+model:
+  path: "hf:nvidia/Kimi-K2.5-NVFP4"
+  container: "test-image:latest"
+  precision: fp4
+backend:
+  type: vllm
+  prefill_environment:
+    HF_HOME: "{tmp_path / 'cache'}"
+  vllm_config:
+    prefill:
+      tensor-parallel-size: 1
+    decode:
+      tensor-parallel-size: 1
+resources:
+  gpu_type: gb200
+  prefill_nodes: 1
+  prefill_workers: 1
+  decode_nodes: 4
+  decode_workers: 4
+  gpus_per_node: 4
+"""
+        )
+        orch = _make_orchestrator(str(config_file))
+
+        mock_proc = MagicMock()
+        mock_proc.wait.side_effect = [subprocess.TimeoutExpired("srun", 3600), None]
+
+        with patch("srtctl.cli.do_sweep.start_srun_process", return_value=mock_proc):
+            # Should NOT raise
+            orch._ensure_model_cached()
+            # Should have killed the process
+            mock_proc.kill.assert_called_once()
 
     def test_handles_download_failure_gracefully(self, tmp_path: Path):
         """Failed pre-download should warn but not raise."""

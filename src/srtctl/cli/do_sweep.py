@@ -16,6 +16,7 @@ import argparse
 import functools
 import logging
 import os
+import subprocess
 import sys
 import threading
 from dataclasses import dataclass
@@ -187,6 +188,20 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
                 return env["HF_HOME"]
         return None
 
+    def _get_hf_env(self) -> dict[str, str]:
+        """Collect HF-related environment variables from backend config.
+
+        Merges environment from all modes (prefill/decode/agg), keeping
+        only HuggingFace-relevant keys (HF_*, HUGGING_FACE_*) so the
+        pre-download srun runs with the same auth/endpoint context as workers.
+        """
+        hf_env: dict[str, str] = {}
+        for mode in ("prefill", "decode", "agg"):
+            for key, val in self.config.backend.get_environment_for_mode(mode).items():
+                if key.startswith(("HF_", "HUGGING_FACE_")):
+                    hf_env[key] = val
+        return hf_env
+
     def _clean_stale_hf_locks(self) -> None:
         """Clean stale HuggingFace download lock files from shared cache.
 
@@ -293,6 +308,10 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
 
         download_log = self.runtime.log_dir / "model_download.out"
 
+        # Pass all HF-related env vars (HF_TOKEN, HF_ENDPOINT, etc.) so the
+        # pre-download runs with the same auth/endpoint context as workers.
+        hf_env = self._get_hf_env()
+
         try:
             proc = start_srun_process(
                 command=download_cmd,
@@ -300,10 +319,23 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
                 output=str(download_log),
                 container_image=str(self.runtime.container_image),
                 container_mounts=self.runtime.container_mounts,
+                env_to_set=hf_env,
                 use_bash_wrapper=False,  # command is already bash -c
             )
 
-            rc = proc.wait()
+            timeout_sec = 60 * 60  # 1 hour; large models can take a while
+            try:
+                rc = proc.wait(timeout=timeout_sec)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "Model pre-download timed out after %d seconds, killing (workers will retry at startup). Log: %s",
+                    timeout_sec,
+                    download_log,
+                )
+                proc.kill()
+                proc.wait()
+                return
+
             if rc != 0:
                 logger.warning(
                     "Model pre-download exited with code %d (workers will retry at startup). Log: %s",
