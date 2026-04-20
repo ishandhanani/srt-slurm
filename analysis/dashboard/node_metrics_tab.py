@@ -81,7 +81,7 @@ def render(filtered_runs: list, logs_dir: str):
     if not all_node_metrics:
         st.warning("No log files found for the selected runs.")
         st.info(
-            "Node metrics are extracted from files like `*_prefill_*.err`, `*_decode_*.err`, `*_prefill_*.out`, or `*_decode_*.out`"
+            "Node metrics are extracted from files like `*_prefill_*.out`, `*_decode_*.out`, or `*_agg_*.out`"
         )
         return
 

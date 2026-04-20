@@ -226,8 +226,12 @@ class RunLoader:
         profiler_type = run.profiler.profiler_type
         pattern_strs = [f"{profiler_type}_isl_{run.profiler.isl}_osl_{run.profiler.osl}"]
 
-        # Define source patterns for cache validation (check all possible patterns)
-        source_patterns = [f"{pattern}/*.json" for pattern in pattern_strs]
+        # Define source patterns for cache validation
+        # Include both direct and logs/ subdirectory paths since results could be in either
+        source_patterns = []
+        for pattern in pattern_strs:
+            source_patterns.append(f"{pattern}/*.json")
+            source_patterns.append(f"logs/{pattern}/*.json")
 
         # Try to load from cache first
         if cache_mgr.is_cache_valid("benchmark_results", source_patterns):
@@ -531,9 +535,10 @@ class RunLoader:
         rows = []
 
         for run in runs:
-            run_id = (
-                f"{run.job_id}_{run.metadata.prefill_workers}P_{run.metadata.decode_workers}D_{run.metadata.run_date}"
-            )
+            if run.metadata.is_aggregated:
+                run_id = f"{run.job_id}_{run.metadata.agg_workers}A_{run.metadata.run_date}"
+            else:
+                run_id = f"{run.job_id}_{run.metadata.prefill_workers}P_{run.metadata.decode_workers}D_{run.metadata.run_date}"
             total_gpus = run.total_gpus
 
             # Create a row for each concurrency level

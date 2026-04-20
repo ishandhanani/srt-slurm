@@ -304,6 +304,14 @@ def render_sidebar(logs_dir, runs):
         if run.metadata.gpu_type:
             label += f" | {run.metadata.gpu_type}"
 
+        # Use folder name suffix (YAML file name) instead of YAML's internal name field
+        dirname = os.path.basename(run.metadata.path)
+        if "-" in dirname:
+            folder_suffix = dirname.split("-", 1)[1]
+            label += f" | {folder_suffix}"
+        elif run.metadata.job_name:
+            label += f" | {run.metadata.job_name}"
+
         run_legend_labels[run_id] = label
 
     # Get dataframe

@@ -66,7 +66,7 @@ class NodeAnalyzer:
         parsed_successfully = 0
 
         for file in os.listdir(run_path):
-            if (file.endswith(".err") or file.endswith(".out")) and ("prefill" in file or "decode" in file):
+            if (file.endswith(".err") or file.endswith(".out")) and ("prefill" in file or "decode" in file or "agg" in file):
                 total_err_files += 1
                 filepath = os.path.join(run_path, file)
                 node = self.parse_single_log(filepath)
@@ -446,10 +446,11 @@ class NodeAnalyzer:
     def _parse_dp_tp_ep_tag(self, line: str) -> tuple[int | None, int | None, int | None, str | None]:
         """Extract DP, TP, EP indices and timestamp from log line.
 
-        Supports three formats:
+        Supports four formats:
         - Full: [2025-11-04 05:31:43 DP0 TP0 EP0]
         - Simple TP: [2025-11-04 07:05:55 TP0] (defaults DP=0, EP=0)
         - Pipeline: [2025-12-08 14:34:44 PP0] (defaults DP=0, EP=0, TP=PP value)
+        - Agg/ANSI: [2m2026-02-23T22:33:43.664588Z[0m ... (ISO timestamp in ANSI codes, defaults DP=0, TP=0, EP=0)
 
         Args:
             line: Log line to parse
@@ -475,6 +476,14 @@ class NodeAnalyzer:
             timestamp, pp = match.groups()
             return 0, int(pp), 0, timestamp  # Map PP to TP slot, default DP=0, EP=0
 
+        # Try ANSI-escaped ISO timestamp format (agg mode logs)
+        # Example: [2m2026-02-23T22:33:43.664588Z[0m
+        match = re.search(r"\[2m(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})", line)
+        if match:
+            date_part, time_part = match.groups()
+            timestamp = f"{date_part} {time_part}"
+            return 0, 0, 0, timestamp
+
         return None, None, None, None
 
     def _parse_prefill_batch_line(self, line: str) -> dict | None:
@@ -491,12 +500,12 @@ class NodeAnalyzer:
 
         metrics = {"timestamp": timestamp, "dp": dp, "tp": tp, "ep": ep, "type": "prefill"}
 
-        # Extract metrics using regex
+        # Extract metrics using regex (support both disagg and agg log formats)
         patterns = {
             "new_seq": r"#new-seq:\s*(\d+)",
             "new_token": r"#new-token:\s*(\d+)",
             "cached_token": r"#cached-token:\s*(\d+)",
-            "token_usage": r"token usage:\s*([\d.]+)",
+            "token_usage": r"(?:full )?token usage:\s*([\d.]+)",
             "running_req": r"#running-req:\s*(\d+)",
             "queue_req": r"#queue-req:\s*(\d+)",
             "prealloc_req": r"#prealloc-req:\s*(\d+)",
@@ -526,11 +535,11 @@ class NodeAnalyzer:
 
         metrics = {"timestamp": timestamp, "dp": dp, "tp": tp, "ep": ep, "type": "decode"}
 
-        # Extract metrics using regex
+        # Extract metrics using regex (support both disagg and agg log formats)
         patterns = {
             "running_req": r"#running-req:\s*(\d+)",
-            "num_tokens": r"#token:\s*(\d+)",
-            "token_usage": r"token usage:\s*([\d.]+)",
+            "num_tokens": r"#(?:full )?token:\s*(\d+)",
+            "token_usage": r"(?:full )?token usage:\s*([\d.]+)",
             "preallocated_usage": r"pre-allocated usage:\s*([\d.]+)",
             "prealloc_req": r"#prealloc-req:\s*(\d+)",
             "transfer_req": r"#transfer-req:\s*(\d+)",
@@ -597,8 +606,8 @@ class NodeAnalyzer:
         Example: watchtower-navy-cn01_prefill_w0.err or r02-p01-dgx-c11_prefill_w0.out
         Returns: {'node': 'watchtower-navy-cn01', 'worker_type': 'prefill', 'worker_id': 'w0'}
         """
-        # Use greedy match for node name up to _(prefill|decode|frontend)_
-        match = re.match(r"(.+)_(prefill|decode|frontend)_([^.]+)\.(err|out)", os.path.basename(filename))
+        # Use greedy match for node name up to _(prefill|decode|frontend|agg)_
+        match = re.match(r"(.+)_(prefill|decode|frontend|agg)_([^.]+)\.(err|out)", os.path.basename(filename))
         if match:
             return {
                 "node": match.group(1),
