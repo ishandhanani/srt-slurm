@@ -1,5 +1,9 @@
 # srtctl
 
+> [!IMPORTANT]
+> This repository has been sunset and archived. Active development has moved to
+> [NVIDIA/srt-slurm](https://github.com/NVIDIA/srt-slurm).
+
 Command-line tool for distributed LLM inference benchmarks on SLURM clusters using SGLang. Replace complex shell scripts and 50+ CLI flags with declarative YAML configuration.
 
 ## Quick Start
