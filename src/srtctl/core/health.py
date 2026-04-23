@@ -346,11 +346,14 @@ def wait_for_model(
     report_every: float = 60.0,
     frontend_type: str = "dynamo",
     stop_event: threading.Event | None = None,
+    stability_duration: float = 30.0,
 ) -> bool:
     """Wait for model to be ready with expected worker counts.
 
     This is the pure Python replacement for the bash wait_for_model function.
     It polls the appropriate health endpoint and validates worker counts.
+    The model must remain healthy for stability_duration seconds consecutively
+    before being considered truly ready.
 
     Args:
         host: Model server hostname or IP
@@ -362,6 +365,7 @@ def wait_for_model(
         report_every: Log progress every N seconds
         frontend_type: Frontend type - "sglang" uses /workers, "dynamo" uses /health
         stop_event: Optional threading.Event to abort waiting
+        stability_duration: Seconds the model must remain healthy consecutively (default: 30s)
 
     Returns:
         True if model is ready with expected workers, False if timeout/aborted
@@ -385,8 +389,15 @@ def wait_for_model(
             n_decode,
         )
 
+    if stability_duration > 0:
+        logger.info(
+            "Requiring %ds of consecutive healthy checks before declaring ready",
+            int(stability_duration),
+        )
+
     start_time = time.time()
     last_report_time = start_time
+    healthy_since: float | None = None  # Track when model first became healthy
 
     while True:
         # Check for abort
@@ -401,6 +412,7 @@ def wait_for_model(
             return False
 
         # Try to fetch health
+        is_healthy = False
         try:
             response = requests.get(health_url, timeout=5.0)
             if response.status_code == 200:
@@ -413,13 +425,39 @@ def wait_for_model(
                     result = check_dynamo_health(response_json, n_prefill, n_decode)
 
                 if result.ready:
-                    logger.info(result.message)
-                    return True
+                    is_healthy = True
+                    if healthy_since is None:
+                        healthy_since = time.time()
+                        logger.info(
+                            "%s Starting stability check (need %ds consecutive)...",
+                            result.message,
+                            int(stability_duration),
+                        )
 
-                # Report progress periodically
-                if time.time() - last_report_time >= report_every:
-                    logger.info(result.message)
-                    last_report_time = time.time()
+                    # Check if we've been healthy long enough
+                    healthy_duration = time.time() - healthy_since
+                    if stability_duration <= 0 or healthy_duration >= stability_duration:
+                        logger.info(
+                            "Server is healthy (stable for %.1fs). %s",
+                            healthy_duration,
+                            result.message,
+                        )
+                        return True
+                    else:
+                        # Report stability progress periodically
+                        if time.time() - last_report_time >= report_every:
+                            logger.info(
+                                "Stability check: %.1fs / %.1fs - %s",
+                                healthy_duration,
+                                stability_duration,
+                                result.message,
+                            )
+                            last_report_time = time.time()
+                else:
+                    # Report progress periodically
+                    if time.time() - last_report_time >= report_every:
+                        logger.info(result.message)
+                        last_report_time = time.time()
 
         except requests.exceptions.RequestException as e:
             # Report connection errors periodically
@@ -428,5 +466,14 @@ def wait_for_model(
                 last_report_time = time.time()
         except Exception as e:
             logger.debug("Unexpected error during health check: %s", e)
+
+        # Reset healthy_since if not healthy this check
+        if not is_healthy:
+            if healthy_since is not None:
+                logger.warning(
+                    "Model became unhealthy after %.1fs, resetting stability check",
+                    time.time() - healthy_since,
+                )
+            healthy_since = None
 
         time.sleep(poll_interval)
