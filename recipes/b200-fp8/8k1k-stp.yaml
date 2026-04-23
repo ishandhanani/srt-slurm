@@ -1,0 +1,156 @@
+# B200-FP8 8k1k STP — all scale variants in one file
+#
+# Two parallelism modes:
+#   tep8 (low-latency): DP=1 decode — base config
+#   dep8 (max-tpt):     DP=8 decode — zip_override_maxtpt adds DP settings
+#
+# Usage:
+#   srtctl apply  -f recipes/b200-fp8/8k1k-stp.yaml                          # all 5 variants
+#   srtctl apply  -f recipes/b200-fp8/8k1k-stp.yaml:zip_override_lowlat[0]  # 1p1d low-lat only
+#   srtctl dry-run -f recipes/b200-fp8/8k1k-stp.yaml                        # preview
+
+base:
+  name: "b200-fp8-stp-8k1k"
+
+  model:
+    path: "dsr1-fp8"
+    container: "dynamo-sglang"
+    precision: "fp8"
+
+  resources:
+    gpu_type: "b200"
+    prefill_nodes: 1
+    prefill_workers: 1
+    decode_nodes: 1
+    decode_workers: 1
+    gpus_per_node: 8
+
+  backend:
+    prefill_environment:
+      TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
+      PYTHONUNBUFFERED: "1"
+      DYN_SKIP_SGLANG_LOG_FORMATTING: "1"
+      SGLANG_ENABLE_JIT_DEEPGEMM: "false"
+      SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+      SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+      SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+      SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
+      SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
+      SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
+      MC_FORCE_MNNVL: "1"
+      NCCL_MNNVL_ENABLE: "1"
+      NCCL_CUMEM_ENABLE: "1"
+      DYN_REQUEST_PLANE: nats
+    decode_environment:
+      TORCH_DISTRIBUTED_DEFAULT_TIMEOUT: "1800"
+      PYTHONUNBUFFERED: "1"
+      DYN_SKIP_SGLANG_LOG_FORMATTING: "1"
+      SGLANG_ENABLE_JIT_DEEPGEMM: "false"
+      SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE: "100000"
+      SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT: "100000"
+      SGLANG_DISAGGREGATION_WAITING_TIMEOUT: "100000"
+      SGLANG_DECODE_BOOTSTRAP_TIMEOUT: "1000"
+      SGLANG_MOONCAKE_CUSTOM_MEM_POOL: "True"
+      SGLANG_USE_MESSAGE_QUEUE_BROADCASTER: "0"
+      SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK: "1"
+      MC_FORCE_MNNVL: "1"
+      NCCL_MNNVL_ENABLE: "1"
+      NCCL_CUMEM_ENABLE: "1"
+      DYN_REQUEST_PLANE: nats
+    sglang_config:
+      prefill:
+        served-model-name: "deepseek-ai/DeepSeek-R1"
+        trust-remote-code: true
+        quantization: "fp8"
+        disaggregation-mode: "prefill"
+        disaggregation-transfer-backend: nixl
+        mem-fraction-static: 0.85
+        max-prefill-tokens: 32768
+        chunked-prefill-size: 32768
+        context-length: 9600
+        max-running-requests: 512
+        disable-cuda-graph: true
+        tensor-parallel-size: 8
+        data-parallel-size: 1
+        expert-parallel-size: 8
+        attention-backend: "trtllm_mla"
+        kv-cache-dtype: "fp8_e4m3"
+        moe-runner-backend: "flashinfer_trtllm"
+        stream-interval: 30
+        watchdog-timeout: 1000000
+        enable-flashinfer-allreduce-fusion: true
+        disable-radix-cache: true
+      decode:
+        served-model-name: "deepseek-ai/DeepSeek-R1"
+        trust-remote-code: true
+        quantization: "fp8"
+        disaggregation-mode: "decode"
+        disaggregation-transfer-backend: nixl
+        mem-fraction-static: 0.85
+        max-prefill-tokens: 32768
+        chunked-prefill-size: 32768
+        context-length: 9600
+        max-running-requests: 512
+        cuda-graph-max-bs: 512
+        tensor-parallel-size: 8
+        data-parallel-size: 1
+        expert-parallel-size: 8
+        attention-backend: "trtllm_mla"
+        kv-cache-dtype: "fp8_e4m3"
+        moe-runner-backend: "flashinfer_trtllm"
+        stream-interval: 30
+        watchdog-timeout: 1000000
+        enable-flashinfer-allreduce-fusion: true
+        disable-radix-cache: true
+
+  health_check:
+    max_attempts: 360
+    interval_seconds: 10
+
+  benchmark:
+    type: "sa-bench"
+    isl: 8192
+    osl: 1024
+    req_rate: "inf"
+
+
+# Low-latency variants: tep8 decode (DP=1), scale sweep 1p1d/1p4d/1p6d
+zip_override_lowlat:
+  name:
+    - "b200-fp8-low-latency-tep8-1p-1d"
+    - "b200-fp8-low-latency-tep8-1p-4d"
+    - "b200-fp8-low-latency-tep8-1p-6d"
+  resources:
+    decode_nodes: [1, 4, 6]
+    decode_workers: [1, 4, 6]
+  benchmark:
+    concurrencies: ["4x32x64", "64", "32"]
+
+
+# Max-throughput variants: dep8 decode (DP=8), scale sweep 1p1d and 2p1d
+zip_override_maxtpt:
+  name:
+    - "b200-fp8-max-tpt-dep8-1p-1d"
+    - "b200-fp8-max-tpt-dep8-2p-1d"
+  resources:
+    prefill_nodes: [1, 2]
+    prefill_workers: [1, 2]
+    decode_nodes: [1, 1]
+    decode_workers: [1, 1]
+  backend:
+    sglang_config:
+      prefill:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+        max-running-requests: 1024
+      decode:
+        data-parallel-size: 8
+        enable-dp-attention: true
+        enable-dp-lm-head: true
+        moe-dense-tp-size: 1
+        max-running-requests: 1024
+        cuda-graph-max-bs: 1024
+  benchmark:
+    concurrencies: ["128", "256"]
