@@ -1,0 +1,48 @@
+name: "b200-bf16-1k1k-low-latency"
+
+model:
+  path: "qwen3.5-397B"
+  container: "sglang-nightly"
+  precision: "bf16"
+
+resources:
+  gpu_type: "b200"
+  agg_nodes: 1
+  agg_workers: 1
+  gpus_per_node: 8
+
+backend:
+  aggregated_environment:
+    NCCL_NVLS_ENABLE: "1"
+    SGL_ENABLE_JIT_DEEPGEMM: "false"
+    SGLANG_ENABLE_FLASHINFER_GEMM: "true"
+    PYTHONUNBUFFERED: "1"
+
+  sglang_config:
+    aggregated:
+      served-model-name: "Qwen/Qwen3.5-397B-A17B"
+      trust-remote-code: true
+
+      tp-size: 8
+
+      attention-backend: "trtllm_mha"
+      moe-runner-backend: "flashinfer_trtllm"
+
+      disable-radix-cache: true
+
+      mem-fraction-static: 0.82
+      chunked-prefill-size: 32768
+      max-prefill-tokens: 32768
+      cuda-graph-max-bs: 16
+      max-running-requests: 16
+
+      stream-interval: 10
+      scheduler-recv-interval: 10
+      enable-flashinfer-allreduce-fusion: true
+
+benchmark:
+  type: "sa-bench"
+  isl: 1024
+  osl: 1024
+  concurrencies: "4x8"
+  req_rate: "inf"
