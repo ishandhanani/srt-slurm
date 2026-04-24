@@ -730,8 +730,8 @@ class DynamoConfig:
             "cd dynamo && "
             f"{checkout_cmd + ' && ' if checkout_cmd else ''}"
             "cd lib/bindings/python/ && "
-            'export RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=native --cfg tokio_unstable" && '
-            "maturin build -o /tmp && "
+            'export RUSTFLAGS="${RUSTFLAGS:-} --cfg tokio_unstable" && '
+            "maturin build --release -o /tmp && "
             "pip install /tmp/ai_dynamo_runtime*.whl && "
             "cd /sgl-workspace/dynamo/ && "
             "pip install -e . && "
