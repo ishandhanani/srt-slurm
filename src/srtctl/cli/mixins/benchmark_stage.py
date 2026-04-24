@@ -78,7 +78,7 @@ class BenchmarkStageMixin:
         hc = self.config.health_check
         if not wait_for_model(
             host=self.runtime.nodes.head,
-            port=8000,
+            port=self.runtime.frontend_port,
             n_prefill=n_prefill,
             n_decode=n_decode,
             poll_interval=float(hc.interval_seconds),
@@ -106,7 +106,7 @@ class BenchmarkStageMixin:
 
         if benchmark_type == "manual":
             logger.info("Benchmark type is 'manual' - server is ready for testing")
-            logger.info("Frontend URL: http://%s:8000", self.runtime.nodes.head)
+            logger.info("Frontend URL: http://%s:%d", self.runtime.nodes.head, self.runtime.frontend_port)
             logger.info("Press Ctrl+C to stop the job")
 
             while not stop_event.is_set():

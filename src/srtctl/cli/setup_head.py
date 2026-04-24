@@ -17,13 +17,35 @@ import sys
 import time
 from pathlib import Path
 
-# Network configurations
-ETCD_CLIENT_PORT = 2379
-ETCD_PEER_PORT = 2380
-NATS_PORT = 4222
+# Network configurations (base ports - offset applied at runtime based on job_id)
+BASE_ETCD_CLIENT_PORT = 2379
+BASE_ETCD_PEER_PORT = 2380
+BASE_NATS_PORT = 4222
 ETCD_LISTEN_ADDR = "http://0.0.0.0"
 
 logger = logging.getLogger(__name__)
+
+
+def get_port_offset_from_job_id(job_id: str | None = None) -> int:
+    """Calculate port offset based on SLURM job ID.
+
+    Args:
+        job_id: SLURM job ID (if None, reads from environment)
+
+    Returns:
+        Port offset: (job_id % 100) * 10
+    """
+    if job_id is None:
+        job_id = os.environ.get("SLURM_JOB_ID") or os.environ.get("SLURM_JOBID")
+
+    if not job_id:
+        return 0
+
+    try:
+        offset = (int(job_id) % 100) * 10
+        return offset
+    except (ValueError, TypeError):
+        return 0
 
 
 def get_local_ip() -> str:
@@ -119,11 +141,12 @@ def setup_logging():
     )
 
 
-def start_nats(binary_path: str = "/configs/nats-server") -> subprocess.Popen:
+def start_nats(binary_path: str = "/configs/nats-server", port: int = 4222) -> subprocess.Popen:
     """Start NATS server.
 
     Args:
         binary_path: Path to nats-server binary
+        port: Port for NATS to listen on
 
     Returns:
         Popen object for the NATS process
@@ -131,21 +154,21 @@ def start_nats(binary_path: str = "/configs/nats-server") -> subprocess.Popen:
     if not os.path.exists(binary_path):
         raise FileNotFoundError(f"NATS binary not found: {binary_path}")
 
-    # Use /tmp for JetStream storage - avoids "Temporary storage directory" warning
-    # and ensures we're using fast local storage'
+    # Use /tmp for JetStream storage - container-local fast storage.
+    # Each SLURM job runs in its own container, so /tmp is isolated per job.
     if os.path.exists("/tmp/nats"):
         shutil.rmtree("/tmp/nats")
     nats_store_dir = "/tmp/nats"
     os.makedirs(nats_store_dir, exist_ok=True)
 
-    logger.info("Starting NATS server...")
-    cmd = [binary_path, "-js", "-sd", nats_store_dir]
+    logger.info("Starting NATS server on port %d...", port)
+    cmd = [binary_path, "-js", "-sd", nats_store_dir, "-p", str(port)]
 
     proc = subprocess.Popen(
         cmd,
     )
 
-    logger.info("NATS server started (PID: %d)", proc.pid)
+    logger.info("NATS server started (PID: %d, port: %d)", proc.pid, port)
     return proc
 
 
@@ -153,6 +176,9 @@ def start_etcd(
     host_ip: str,
     binary_path: str = "/configs/etcd",
     log_dir: Path | None = None,
+    client_port: int = 2379,
+    peer_port: int = 2380,
+    job_id: str | None = None,
 ) -> subprocess.Popen:
     """Start etcd server.
 
@@ -160,6 +186,9 @@ def start_etcd(
         host_ip: IP address of this node (for peer URLs)
         binary_path: Path to etcd binary
         log_dir: Optional log directory
+        client_port: Client API port
+        peer_port: Peer communication port
+        job_id: SLURM job ID for unique data directory
 
     Returns:
         Popen object for the etcd process
@@ -167,24 +196,37 @@ def start_etcd(
     if not os.path.exists(binary_path):
         raise FileNotFoundError(f"etcd binary not found: {binary_path}")
 
-    logger.info("Starting etcd server...")
+    logger.info("Starting etcd server on client port %d, peer port %d...", client_port, peer_port)
 
-    # Use /tmp for etcd data directory - this is typically on fast local storage
-    # (often tmpfs on HPC systems). Without this, etcd uses "default.etcd" in CWD
-    # which may be on slow network storage, causing Raft consensus timeouts.
-    if os.path.exists("/tmp/etcd"):
-        shutil.rmtree("/tmp/etcd")
-    etcd_data_dir = "/tmp/etcd"
-    os.makedirs(etcd_data_dir, exist_ok=True)
+    # Determine etcd data directory. Prefer log_dir so data lives alongside logs
+    # for easier debugging; fall back to /tmp (container-local fast storage).
+    if log_dir:
+        data_dir = log_dir / "etcd-data"
+    elif job_id:
+        data_dir = Path(f"/tmp/etcd-{job_id}")
+    else:
+        data_dir = Path(f"/tmp/etcd-{client_port}")
+
+    if data_dir.exists():
+        shutil.rmtree(data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    etcd_data_dir = str(data_dir)
+    logger.info("etcd data directory: %s", etcd_data_dir)
 
     cmd = [
         binary_path,
         "--data-dir",
         etcd_data_dir,
         "--listen-client-urls",
-        f"{ETCD_LISTEN_ADDR}:{ETCD_CLIENT_PORT}",
+        f"{ETCD_LISTEN_ADDR}:{client_port}",
         "--advertise-client-urls",
-        f"http://{host_ip}:{ETCD_CLIENT_PORT}",  # Must be reachable IP, not 0.0.0.0
+        f"http://{host_ip}:{client_port}",  # Must be reachable IP, not 0.0.0.0
+        "--listen-peer-urls",
+        f"{ETCD_LISTEN_ADDR}:{peer_port}",
+        "--initial-advertise-peer-urls",
+        f"http://{host_ip}:{peer_port}",
+        "--initial-cluster",
+        f"default=http://{host_ip}:{peer_port}",
     ]
 
     # Set up output handling
@@ -255,6 +297,16 @@ def main():
     log_dir = Path(args.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
+    # Calculate port offset based on SLURM_JOB_ID to avoid conflicts
+    job_id = os.environ.get("SLURM_JOB_ID")
+    port_offset = get_port_offset_from_job_id(job_id)
+    logger.info("Port offset for this job: %d (SLURM_JOB_ID: %s)", port_offset, job_id or "N/A")
+
+    # Calculate actual ports
+    nats_port = BASE_NATS_PORT + port_offset
+    etcd_client_port = BASE_ETCD_CLIENT_PORT + port_offset
+    etcd_peer_port = BASE_ETCD_PEER_PORT + port_offset
+
     # Get our IP address using multiple fallback methods
     host_ip = get_local_ip()
     logger.info("Host IP: %s", host_ip)
@@ -264,21 +316,23 @@ def main():
     etcd_proc = None
 
     try:
-        nats_proc = start_nats(args.nats_binary)
-        etcd_proc = start_etcd(host_ip, args.etcd_binary, log_dir)
+        nats_proc = start_nats(args.nats_binary, port=nats_port)
+        etcd_proc = start_etcd(
+            host_ip, args.etcd_binary, log_dir, client_port=etcd_client_port, peer_port=etcd_peer_port, job_id=job_id
+        )
 
         # Wait for services
-        if not wait_for_service("localhost", NATS_PORT, "NATS"):
+        if not wait_for_service("localhost", nats_port, "NATS"):
             logger.error("NATS failed to start")
             sys.exit(1)
 
-        if not wait_for_service("localhost", ETCD_CLIENT_PORT, "etcd"):
+        if not wait_for_service("localhost", etcd_client_port, "etcd"):
             logger.error("etcd failed to start")
             sys.exit(1)
 
         logger.info("Head node infrastructure is ready")
-        logger.info("  NATS: nats://localhost:%d", NATS_PORT)
-        logger.info("  etcd: http://localhost:%d", ETCD_CLIENT_PORT)
+        logger.info("  NATS: nats://localhost:%d", nats_port)
+        logger.info("  etcd: http://localhost:%d", etcd_client_port)
 
         # Keep running - wait for either process to exit
         while True:

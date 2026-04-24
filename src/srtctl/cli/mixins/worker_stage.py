@@ -110,13 +110,29 @@ class WorkerStageMixin:
         )
 
         # Environment variables
-        env_to_set = {
-            "HEAD_NODE_IP": self.runtime.head_node_ip,
-            "ETCD_ENDPOINTS": f"http://{self.runtime.nodes.infra}:2379",
-            "NATS_SERVER": f"nats://{self.runtime.nodes.infra}:4222",
-            "DYN_SYSTEM_PORT": str(process.sys_port),
-            "DYN_REQUEST_PLANE": "nats",
-        }
+        env_to_set: dict[str, str] = {"HEAD_NODE_IP": self.runtime.head_node_ip}
+
+        # Only Dynamo workers require etcd/NATS + system status server port.
+        if self.config.frontend.type == "dynamo":
+            from srtctl.core.slurm import get_port_offset
+
+            port_offset = get_port_offset(self.runtime.job_id)
+            nats_port = 4222 + port_offset
+            etcd_port = 2379 + port_offset
+
+            env_to_set.update(
+                {
+                    "ETCD_ENDPOINTS": f"http://{self.runtime.infra_node_ip}:{etcd_port}",
+                    "NATS_SERVER": f"nats://{self.runtime.infra_node_ip}:{nats_port}",
+                    "DYN_SYSTEM_PORT": str(process.sys_port),
+                }
+            )
+
+            # Keep request-plane consistent across frontend/workers
+            frontend_plane = None
+            if self.config.frontend.env:
+                frontend_plane = self.config.frontend.env.get("DYN_REQUEST_PLANE")
+            env_to_set["DYN_REQUEST_PLANE"] = frontend_plane if frontend_plane else "nats"
 
         # Add mode-specific environment variables from backend
         # Support simple {node} and {node_id} templating
@@ -139,8 +155,9 @@ class WorkerStageMixin:
 
         # Add profiling environment variables
         if profiling.enabled:
-            profile_dir = str(self.runtime.log_dir / "profiles")
-            env_to_set.update(profiling.get_env_vars(mode, profile_dir))
+            # /logs is the mounted host log directory inside the container.
+            profile_dir_in_container = "/logs/profiles"
+            env_to_set.update(profiling.get_env_vars(mode, profile_dir_in_container))
 
         # Set CUDA_VISIBLE_DEVICES if not using all GPUs
         if len(process.gpu_indices) < self.runtime.gpus_per_node:
@@ -228,6 +245,9 @@ class WorkerStageMixin:
         )
 
         # Environment variables
+        # TODO: port-offset is only applied in start_worker() (SGLang path).
+        # This MPI-style path (TRTLLM) still uses hardcoded NATS/etcd ports.
+        # If TRTLLM needs port-offset support, mirror the dynamo env logic from start_worker().
         env_to_set = {
             "HEAD_NODE_IP": self.runtime.head_node_ip,
             "ETCD_ENDPOINTS": f"http://{self.runtime.nodes.infra}:2379",

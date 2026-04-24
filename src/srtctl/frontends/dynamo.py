@@ -77,9 +77,15 @@ class DynamoFrontend:
             cmd = ["python3", "-m", "dynamo.frontend", f"--http-port={topology.frontend_port}"]
             cmd.extend(self.get_frontend_args_list(config.frontend.args))
 
+            from srtctl.core.slurm import get_port_offset
+
+            port_offset = get_port_offset(runtime.job_id)
+            nats_port = 4222 + port_offset
+            etcd_port = 2379 + port_offset
+
             env_to_set = {
-                "ETCD_ENDPOINTS": f"http://{runtime.nodes.infra}:2379",
-                "NATS_SERVER": f"nats://{runtime.nodes.infra}:4222",
+                "ETCD_ENDPOINTS": f"http://{runtime.infra_node_ip}:{etcd_port}",
+                "NATS_SERVER": f"nats://{runtime.infra_node_ip}:{nats_port}",
                 "DYN_REQUEST_PLANE": "nats",
             }
 

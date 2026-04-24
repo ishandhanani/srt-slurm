@@ -33,9 +33,9 @@ from srtctl.core.processes import (
 )
 from srtctl.core.runtime import RuntimeContext
 from srtctl.core.schema import SrtConfig
-from srtctl.core.slurm import get_slurm_job_id, start_srun_process
+from srtctl.core.slurm import get_port_offset, get_slurm_job_id, start_srun_process
 from srtctl.core.status import JobStage, JobStatus, StatusReporter
-from srtctl.core.topology import Endpoint, Process
+from srtctl.core.topology import Endpoint, NodePortAllocator, Process
 from srtctl.logging_utils import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -81,14 +81,67 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
     @functools.cached_property
     def backend_processes(self) -> list[Process]:
         """Compute physical process topology from endpoints (cached)."""
-        return self.backend.endpoints_to_processes(self.endpoints)
+        # DYN_SYSTEM_PORT is parsed as i16 by dynamo runtime, so keep ports < 32768.
+        # Also avoid collisions across concurrent jobs by offsetting from the job id.
+        #
+        # Note: srtctl allocates one sys_port per Process and increments sequentially from base_sys_port.
+        # Therefore, base_sys_port must reserve a sufficiently large consecutive port window per job
+        # to avoid collisions with other jobs running concurrently.
+        #
+        # Use get_port_offset() for consistency with other services (NATS, etcd, frontend).
+        # get_port_offset returns 0-990 in steps of 10, giving 100 slots.
+        # Each slot needs ~200 ports for sys_port allocation, so we multiply offset by 20.
+        port_offset = get_port_offset(self.runtime.job_id)
+        sys_port_stride = 200  # Reserved consecutive sys ports per job.
+        base_sys_port = 9000 + (port_offset * 20)  # Range: 9000-28800, step 200
 
-    def start_head_infrastructure(self, registry: ProcessRegistry) -> ManagedProcess:
-        """Start NATS and etcd on the infra node.
+        port_allocator: NodePortAllocator | None = None
+        if self.config.frontend.type == "sglang" and getattr(self.backend, "type", None) == "sglang":
+            prefill_cfg: dict[str, object] = {}
+            try:
+                prefill_cfg = self.backend.get_config_for_mode("prefill")  # type: ignore[assignment]
+            except Exception:
+                prefill_cfg = {}
 
-        When etcd_nats_dedicated_node is enabled, services run on a dedicated node.
-        Otherwise, they run on the head node (default behavior).
+            user_bootstrap_port = prefill_cfg.get("disaggregation-bootstrap-port")
+            if user_bootstrap_port is not None:
+                try:
+                    base_bootstrap_port = int(user_bootstrap_port)
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Invalid disaggregation-bootstrap-port=%r; falling back to default bootstrap port allocation",
+                        user_bootstrap_port,
+                    )
+                else:
+                    port_allocator = NodePortAllocator(base_bootstrap_port=base_bootstrap_port)
+
+        processes = self.backend.endpoints_to_processes(
+            self.endpoints,
+            base_sys_port=base_sys_port,
+            port_allocator=port_allocator,
+        )
+        if len(processes) > sys_port_stride:
+            logger.warning(
+                "This job allocates %d processes, which may exceed the reserved sys_port window (%d). "
+                "Consider increasing sys_port_stride to reduce cross-job collision risk.",
+                len(processes),
+                sys_port_stride,
+            )
+        return processes
+
+    def start_head_infrastructure(self, registry: ProcessRegistry) -> ManagedProcess | None:
+        """Start head node infrastructure when required by the chosen frontend.
+
+        Dynamo frontend requires NATS+etcd for discovery/control planes.
+        SGLang frontend uses direct worker connections and does not require these services.
         """
+        if self.config.frontend.type != "dynamo":
+            logger.info(
+                "Skipping head node infrastructure (frontend.type=%s does not require NATS/etcd)",
+                self.config.frontend.type,
+            )
+            return None
+
         infra_node = self.runtime.nodes.infra
         logger.info("Starting infrastructure services (NATS, etcd)")
         logger.info("Infra node: %s", infra_node)
@@ -131,14 +184,19 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
             critical=True,
         )
 
+        port_offset = get_port_offset(self.runtime.job_id)
+        nats_port = 4222 + port_offset
+        etcd_port = 2379 + port_offset
+        logger.info("Port offset for this job: %d (job_id: %s)", port_offset, self.runtime.job_id)
+
         # 300s timeout to handle slow container imports on first run
-        logger.info("Waiting for NATS (port 4222) on %s...", infra_node)
-        if not wait_for_port(infra_node, 4222, timeout=300):
+        logger.info("Waiting for NATS (port %d) on %s...", nats_port, infra_node)
+        if not wait_for_port(infra_node, nats_port, timeout=300):
             raise RuntimeError("NATS failed to start")
         logger.info("NATS is ready")
 
-        logger.info("Waiting for etcd (port 2379) on %s...", infra_node)
-        if not wait_for_port(infra_node, 2379, timeout=300):
+        logger.info("Waiting for etcd (port %d) on %s...", etcd_port, infra_node)
+        if not wait_for_port(infra_node, etcd_port, timeout=300):
             raise RuntimeError("etcd failed to start")
         logger.info("etcd is ready")
 
@@ -151,11 +209,13 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
         if mounts_str:
             container_args += f" --container-mounts={mounts_str}"
 
+        public_port = self.runtime.frontend_port
+
         logger.info("")
         logger.info("=" * 60)
         logger.info("Connection Commands")
         logger.info("=" * 60)
-        logger.info("Frontend URL: http://%s:8000", self.runtime.nodes.head)
+        logger.info("Frontend URL: http://%s:%d", self.runtime.nodes.head, public_port)
         logger.info("")
         logger.info("To connect to head node (%s):", self.runtime.nodes.head)
         logger.info(
@@ -374,7 +434,8 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
             # Stage 1: Head infrastructure (NATS, etcd)
             reporter.report(JobStatus.STARTING, JobStage.HEAD_INFRASTRUCTURE, "Starting head infrastructure")
             head_proc = self.start_head_infrastructure(registry)
-            registry.add_process(head_proc)
+            if head_proc is not None:
+                registry.add_process(head_proc)
 
             # Pre-worker: Ensure HF model is cached before starting workers.
             # 1. Clean stale lock files from previous crashed downloads

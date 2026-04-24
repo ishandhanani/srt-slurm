@@ -16,7 +16,7 @@ import os
 import shlex
 import socket
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from .ip_utils import get_node_ip
@@ -32,6 +32,36 @@ logger = logging.getLogger(__name__)
 def get_slurm_job_id() -> str | None:
     """Get the current SLURM job ID from environment."""
     return os.environ.get("SLURM_JOB_ID") or os.environ.get("SLURM_JOBID")
+
+
+def get_port_offset(job_id: str | None = None) -> int:
+    """Calculate port offset based on SLURM job ID to avoid conflicts.
+
+    When multiple jobs run on the same nodes, they need different port ranges.
+    This function computes an offset based on job_id: (job_id % 100) * 10
+
+    Args:
+        job_id: SLURM job ID (if None, reads from environment)
+
+    Returns:
+        Port offset to add to base ports (0-990)
+
+    Example:
+        Job 2437: (2437 % 100) * 10 = 370
+        Job 2518: (2518 % 100) * 10 = 180
+    """
+    if job_id is None:
+        job_id = get_slurm_job_id()
+
+    if not job_id:
+        return 0
+
+    try:
+        offset = (int(job_id) % 100) * 10
+        logger.debug("Port offset for job %s: %d", job_id, offset)
+        return offset
+    except (ValueError, TypeError):
+        return 0
 
 
 def get_slurm_nodelist() -> list[str]:
@@ -144,7 +174,7 @@ def start_srun_process(
     nodelist: Sequence[str] | None = None,
     output: str | None = None,
     container_image: str | None = None,
-    container_mounts: dict[Path, Path] | None = None,
+    container_mounts: Mapping[Path | str, Path | str] | None = None,
     env_to_pass_through: list[str] | None = None,
     env_to_set: dict[str, str] | None = None,
     bash_preamble: str | None = None,

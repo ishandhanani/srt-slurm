@@ -11,6 +11,11 @@ from srtctl.cli.mixins.frontend_stage import FrontendTopology
 from srtctl.core.runtime import Nodes, RuntimeContext
 from srtctl.core.schema import FrontendConfig, ResourceConfig, SrtConfig
 
+TEST_JOB_ID = "12345"
+_PORT_OFFSET = (int(TEST_JOB_ID) % 100) * 10  # 450
+EXPECTED_PUBLIC_PORT = 8000 + _PORT_OFFSET
+EXPECTED_INTERNAL_PORT = 9090 + _PORT_OFFSET
+
 
 def make_config(
     *,
@@ -39,7 +44,7 @@ def make_config(
 def make_runtime(nodes: list[str]) -> RuntimeContext:
     """Create a minimal RuntimeContext for testing."""
     return RuntimeContext(
-        job_id="12345",
+        job_id=TEST_JOB_ID,
         run_name="test-run",
         nodes=Nodes(head=nodes[0], bench=nodes[0], infra=nodes[0], worker=tuple(nodes)),
         head_node_ip="10.0.0.1",
@@ -80,7 +85,7 @@ class TestComputeFrontendTopology:
     """Tests for _compute_frontend_topology method."""
 
     def test_single_node_no_nginx(self):
-        """Single node: no nginx, 1 frontend on head at port 8000."""
+        """Single node: no nginx, 1 frontend on head with offset port."""
         config = make_config(enable_multiple_frontends=True)
         runtime = make_runtime(["node0"])
 
@@ -89,8 +94,8 @@ class TestComputeFrontendTopology:
 
         assert topology.nginx_node is None
         assert topology.frontend_nodes == ["node0"]
-        assert topology.frontend_port == 8000
-        assert topology.public_port == 8000
+        assert topology.frontend_port == EXPECTED_PUBLIC_PORT
+        assert topology.public_port == EXPECTED_PUBLIC_PORT
         assert topology.uses_nginx is False
 
     def test_multi_node_frontends_disabled(self):
@@ -103,8 +108,8 @@ class TestComputeFrontendTopology:
 
         assert topology.nginx_node is None
         assert topology.frontend_nodes == ["node0"]
-        assert topology.frontend_port == 8000
-        assert topology.public_port == 8000
+        assert topology.frontend_port == EXPECTED_PUBLIC_PORT
+        assert topology.public_port == EXPECTED_PUBLIC_PORT
         assert topology.uses_nginx is False
 
     def test_two_nodes_with_nginx(self):
@@ -117,8 +122,8 @@ class TestComputeFrontendTopology:
 
         assert topology.nginx_node == "node0"
         assert topology.frontend_nodes == ["node1"]
-        assert topology.frontend_port == 8180  # Behind nginx
-        assert topology.public_port == 8000
+        assert topology.frontend_port == EXPECTED_INTERNAL_PORT
+        assert topology.public_port == EXPECTED_PUBLIC_PORT
         assert topology.uses_nginx is True
 
     def test_three_nodes_with_nginx(self):
@@ -131,8 +136,8 @@ class TestComputeFrontendTopology:
 
         assert topology.nginx_node == "node0"
         assert topology.frontend_nodes == ["node1", "node2"]
-        assert topology.frontend_port == 8180
-        assert topology.public_port == 8000
+        assert topology.frontend_port == EXPECTED_INTERNAL_PORT
+        assert topology.public_port == EXPECTED_PUBLIC_PORT
         assert topology.uses_nginx is True
 
     def test_many_nodes_with_nginx(self):

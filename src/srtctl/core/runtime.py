@@ -257,6 +257,12 @@ class RuntimeContext:
             container_path = container_template.get_path(temp_context, make_absolute=False, ensure_exists=False)
             container_mounts[host_path] = container_path
 
+        # Calculate frontend port with job offset to avoid conflicts
+        from .slurm import get_port_offset
+
+        port_offset = get_port_offset(job_id)
+        frontend_port = 8000 + port_offset
+
         return cls(
             job_id=job_id,
             run_name=run_name,
@@ -271,6 +277,7 @@ class RuntimeContext:
             container_mounts=container_mounts,
             srun_options=dict(config.srun_options),
             environment=dict(config.environment),
+            frontend_port=frontend_port,
             is_hf_model=is_hf_model,
         )
 

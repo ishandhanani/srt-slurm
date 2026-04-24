@@ -67,7 +67,7 @@ class FrontendStageMixin:
     @property
     def backend_processes(self) -> list["Process"]:
         """Compute physical process topology from endpoints (cached)."""
-        ...
+        raise NotImplementedError
 
     def _compute_frontend_topology(self) -> FrontendTopology:
         """Determine where nginx and frontends should run.
@@ -76,20 +76,33 @@ class FrontendStageMixin:
         - Single node OR multiple_frontends disabled: 1 frontend on head, no nginx
         - 2+ nodes AND multiple_frontends enabled: nginx on head, frontends on other nodes
 
+        Port offset based on job_id avoids conflicts between different SLURM jobs.
+
         Returns:
             FrontendTopology describing where to run nginx and frontends.
         """
+        from srtctl.core.slurm import get_port_offset
+
         nodes = self.runtime.nodes.worker
         head = self.runtime.nodes.head
         fe_config = self.config.frontend
+
+        # Calculate port offset to avoid conflicts between jobs
+        port_offset = get_port_offset(self.runtime.job_id)
+
+        # Base ports with offset
+        # Note: base_internal_port must not conflict with DYN_SYSTEM_PORT (8081+offset+worker_idx)
+        # With many workers, DYN_SYSTEM_PORT can reach 8081+offset+N, so use 9090 to stay clear
+        base_public_port = 8000 + port_offset
+        base_internal_port = 9090 + port_offset
 
         # Single node or multiple frontends disabled: single frontend, no nginx
         if len(nodes) == 1 or not fe_config.enable_multiple_frontends:
             return FrontendTopology(
                 nginx_node=None,
                 frontend_nodes=[head],
-                frontend_port=8000,
-                public_port=8000,
+                frontend_port=base_public_port,
+                public_port=base_public_port,
             )
 
         # Multiple nodes with multiple frontends enabled:
@@ -104,17 +117,19 @@ class FrontendStageMixin:
         frontend_nodes = other_nodes[:max_frontends]
 
         logger.info(
-            "Frontend topology: nginx on %s, %d frontends on %s",
+            "Frontend topology: nginx on %s (port %d), %d frontends on %s (port %d)",
             head,
+            base_public_port,
             len(frontend_nodes),
             frontend_nodes,
+            base_internal_port,
         )
 
         return FrontendTopology(
             nginx_node=head,
             frontend_nodes=frontend_nodes,
-            frontend_port=8180,  # Internal port behind nginx
-            public_port=8000,  # Public port exposed by nginx
+            frontend_port=base_internal_port,  # Internal port behind nginx
+            public_port=base_public_port,  # Public port exposed by nginx
         )
 
     def _start_nginx(self, topology: FrontendTopology) -> ManagedProcess:
@@ -132,6 +147,7 @@ class FrontendStageMixin:
 
         # Install nginx and run it (daemon off keeps nginx in foreground so srun can manage it)
         # Use container path (/logs) since log_dir is mounted there
+        # Add retry logic for apt-get in case of mirror sync issues
         container_config_path = "/logs/nginx.conf"
         cmd = [
             "bash",

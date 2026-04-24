@@ -40,39 +40,58 @@ class NodePortAllocator:
         - http_port:      30000+ (per node) - HTTP serving port
         - bootstrap_port: 31000+ (per node) - P/D coordination port (prefill only)
 
+    Port offset based on SLURM_JOB_ID avoids conflicts when multiple jobs
+    run on the same nodes: offset = (job_id % 100) * 10
+
     Example:
         allocator = NodePortAllocator()
 
         # Two workers on same node get different ports
-        port1 = allocator.next_http_port("node0")  # 30000
-        port2 = allocator.next_http_port("node0")  # 30001
+        port1 = allocator.next_http_port("node0")  # 30000 + offset
+        port2 = allocator.next_http_port("node0")  # 30001 + offset
 
         # Different node starts fresh
-        port3 = allocator.next_http_port("node1")  # 30000
+        port3 = allocator.next_http_port("node1")  # 30000 + offset
     """
 
     base_http_port: int = 30000
     base_bootstrap_port: int = 31000
     base_kv_events_port: int = 5550
     base_nixl_port: int = 6550  # NIXL side channel ports (must not overlap with kv_events)
+    port_offset: int = 0  # Offset based on job_id to avoid cross-job conflicts
 
     _http_ports: dict[str, int] = field(default_factory=dict, repr=False)
     _bootstrap_ports: dict[str, int] = field(default_factory=dict, repr=False)
     _next_kv_events_port: int = field(default=0, repr=False)  # Global counter
     _next_nixl_port: int = field(default=0, repr=False)  # Global counter for NIXL
 
+    @classmethod
+    def with_job_offset(cls, job_id: str | None = None) -> "NodePortAllocator":
+        """Create allocator with port offset based on SLURM job ID.
+
+        Args:
+            job_id: SLURM job ID (if None, reads from environment)
+
+        Returns:
+            NodePortAllocator with appropriate port offset
+        """
+        from srtctl.core.slurm import get_port_offset
+
+        offset = get_port_offset(job_id)
+        return cls(port_offset=offset)
+
     def next_http_port(self, node: str) -> int:
         """Get next available HTTP port for a node."""
         if node not in self._http_ports:
-            self._http_ports[node] = self.base_http_port
+            self._http_ports[node] = self.base_http_port + self.port_offset
         port = self._http_ports[node]
-        self._http_ports[node] += 1000
+        self._http_ports[node] += 1
         return port
 
     def next_bootstrap_port(self, node: str) -> int:
         """Get next available bootstrap port for a node (prefill only)."""
         if node not in self._bootstrap_ports:
-            self._bootstrap_ports[node] = self.base_bootstrap_port
+            self._bootstrap_ports[node] = self.base_bootstrap_port + self.port_offset
         port = self._bootstrap_ports[node]
         self._bootstrap_ports[node] += 1
         return port
@@ -80,7 +99,7 @@ class NodePortAllocator:
     def next_kv_events_port(self) -> int:
         """Get next available kv-events ZMQ port (globally unique across all nodes)."""
         if self._next_kv_events_port == 0:
-            self._next_kv_events_port = self.base_kv_events_port
+            self._next_kv_events_port = self.base_kv_events_port + self.port_offset
         port = self._next_kv_events_port
         self._next_kv_events_port += 1
         return port
@@ -88,7 +107,7 @@ class NodePortAllocator:
     def next_nixl_port(self) -> int:
         """Get next available NIXL side channel port (globally unique across all nodes)."""
         if self._next_nixl_port == 0:
-            self._next_nixl_port = self.base_nixl_port
+            self._next_nixl_port = self.base_nixl_port + self.port_offset
         port = self._next_nixl_port
         self._next_nixl_port += 1
         return port
@@ -367,6 +386,7 @@ def endpoints_to_processes(
     endpoints: list[Endpoint],
     base_sys_port: int = 8081,
     port_allocator: NodePortAllocator | None = None,
+    job_id: str | None = None,
 ) -> list[Process]:
     """Convert endpoints to physical processes.
 
@@ -376,19 +396,24 @@ def endpoints_to_processes(
     Ports are assigned per-node to avoid conflicts when multiple workers
     share a node (e.g., 2 decode workers with 4 GPUs each on an 8-GPU node).
 
+    Port offset based on job_id avoids conflicts between different SLURM jobs.
+
     Args:
         endpoints: List of Endpoint objects
         base_sys_port: Starting port for DYN_SYSTEM_PORT assignment
         port_allocator: NodePortAllocator for HTTP/bootstrap ports (created if None)
+        job_id: SLURM job ID for port offset calculation (if None, reads from env)
 
     Returns:
         List of Process objects
     """
     processes: list[Process] = []
+    # Note: base_sys_port already includes job-based offset from do_sweep.py,
+    # so we don't add port_offset here to avoid double-counting
     current_sys_port = base_sys_port
 
     if port_allocator is None:
-        port_allocator = NodePortAllocator()
+        port_allocator = NodePortAllocator.with_job_offset(job_id)
 
     for endpoint in endpoints:
         # Allocate bootstrap port once per prefill endpoint (shared by all processes)
