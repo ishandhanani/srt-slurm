@@ -160,6 +160,9 @@ class VLLMProtocol:
         gpus_per_agg: int,
         gpus_per_node: int,
         available_nodes: Sequence[str],
+        *,
+        prefill_nodes: int = 0,
+        decode_nodes: int = 0,
     ) -> list[Endpoint]:
         """Allocate endpoints to nodes."""
         from srtctl.core.topology import allocate_endpoints
@@ -173,6 +176,8 @@ class VLLMProtocol:
             gpus_per_agg=gpus_per_agg,
             gpus_per_node=gpus_per_node,
             available_nodes=available_nodes,
+            prefill_nodes=prefill_nodes,
+            decode_nodes=decode_nodes,
         )
 
     def _is_dp_mode(self, mode: WorkerMode) -> bool:

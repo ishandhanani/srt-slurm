@@ -125,6 +125,9 @@ class TRTLLMProtocol:
         gpus_per_agg: int,
         gpus_per_node: int,
         available_nodes: Sequence[str],
+        *,
+        prefill_nodes: int = 0,
+        decode_nodes: int = 0,
     ) -> list["Endpoint"]:
         """Allocate endpoints to nodes."""
         from srtctl.core.topology import allocate_endpoints
@@ -138,6 +141,8 @@ class TRTLLMProtocol:
             gpus_per_agg=gpus_per_agg,
             gpus_per_node=gpus_per_node,
             available_nodes=available_nodes,
+            prefill_nodes=prefill_nodes,
+            decode_nodes=decode_nodes,
         )
 
     def endpoints_to_processes(
@@ -192,12 +197,16 @@ class TRTLLMProtocol:
         if mode != "agg":
             cmd.extend(["--disaggregation-mode", mode])
 
+        # Pass key params as CLI args (YAML-only may not be respected)
+        for key in ("max_num_tokens", "max_batch_size", "max_seq_len"):
+            if key in config:
+                cli_key = key.replace("_", "-")
+                cmd.extend([f"--{cli_key}", str(config[key])])
+
         cmd.extend(
             [
                 "--extra-engine-args",
                 str(container_config_path),
-                "--request-plane",
-                "nats",
             ]
         )
 

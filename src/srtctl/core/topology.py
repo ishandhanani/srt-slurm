@@ -188,10 +188,17 @@ def allocate_endpoints(
     gpus_per_agg: int,
     gpus_per_node: int,
     available_nodes: Sequence[str],
+    *,
+    prefill_nodes: int = 0,
+    decode_nodes: int = 0,
 ) -> list[Endpoint]:
     """Allocate endpoints to nodes based on GPU requirements.
 
     This is the core allocation logic that replaces bash array math.
+
+    When prefill_nodes or decode_nodes are provided and exceed the minimum
+    needed for packing, each worker is given a dedicated node to avoid
+    co-location conflicts (e.g., TRT-LLM ZMQ port collisions).
 
     Args:
         num_prefill: Number of prefill workers
@@ -202,6 +209,8 @@ def allocate_endpoints(
         gpus_per_agg: GPUs per agg worker
         gpus_per_node: GPUs available per node
         available_nodes: List of available node hostnames
+        prefill_nodes: Total nodes reserved for prefill (0 = auto-pack)
+        decode_nodes: Total nodes reserved for decode (0 = auto-pack)
 
     Returns:
         List of Endpoint objects with node assignments
@@ -226,76 +235,23 @@ def allocate_endpoints(
     node_idx = 0
     gpu_offset = 0  # Track GPU offset within current node
 
-    def allocate_worker(mode: WorkerMode, index: int, gpus_needed: int) -> Endpoint:
-        """Allocate a single worker endpoint."""
-        nonlocal node_idx, gpu_offset
+    # Determine if workers should get dedicated nodes (no packing).
+    # When the user specifies more nodes than packing would require,
+    # each worker should get its own node to avoid port conflicts.
+    prefill_dedicated = (
+        num_prefill > 0
+        and gpus_per_prefill < gpus_per_node
+        and prefill_nodes >= num_prefill
+    )
+    decode_dedicated = (
+        num_decode > 0
+        and gpus_per_decode < gpus_per_node
+        and decode_nodes >= num_decode
+    )
 
-        if gpus_needed <= 0:
-            raise ValueError(f"gpus_needed must be positive, got {gpus_needed}")
-
-        # Calculate how many nodes this worker spans
-        nodes_per_worker = (gpus_needed + gpus_per_node - 1) // gpus_per_node
-
-        # For multi-node workers, start fresh on node boundary
-        if (nodes_per_worker > 1 or gpus_needed == gpus_per_node) and gpu_offset > 0:
-            node_idx += 1
-            gpu_offset = 0
-
-        # Collect nodes for this worker
-        worker_nodes = []
-        for _ in range(nodes_per_worker):
-            if node_idx >= len(available_nodes):
-                raise ValueError(f"Not enough nodes: need node {node_idx}, but only {len(available_nodes)} available")
-            worker_nodes.append(available_nodes[node_idx])
-            node_idx += 1
-
-        # Determine GPU indices (full node for multi-node, or specific range for single)
-        if nodes_per_worker > 1:
-            gpu_indices = frozenset(range(gpus_per_node))
-            gpu_offset = 0
-        else:
-            # Single node: might be partial or full
-            if gpu_offset + gpus_needed > gpus_per_node:
-                # Doesn't fit, move to next node
-                node_idx += 1
-                if node_idx > len(available_nodes):
-                    raise ValueError("Not enough nodes for GPU allocation")
-                worker_nodes = [available_nodes[node_idx - 1]]
-                gpu_offset = 0
-
-            gpu_indices = frozenset(range(gpu_offset, gpu_offset + gpus_needed))
-            gpu_offset += gpus_needed
-
-            # If we filled the node, move to next
-            if gpu_offset >= gpus_per_node:
-                node_idx += 1
-                gpu_offset = 0
-            else:
-                # Still on same node, rewind node_idx for next partial worker
-                node_idx -= len(worker_nodes) - 1 if len(worker_nodes) > 1 else 0
-
-        # Fix: for single-node workers staying on same node
-        if nodes_per_worker == 1 and gpu_offset > 0 and gpu_offset < gpus_per_node:
-            # We're still on the same node, don't increment
-            pass
-        elif nodes_per_worker == 1 and gpu_offset == 0:
-            # We moved to a new node after filling previous
-            pass
-
-        return Endpoint(
-            mode=mode,
-            index=index,
-            nodes=tuple(worker_nodes),
-            gpu_indices=gpu_indices,
-            gpus_per_node=gpus_per_node,
-        )
-
-    # Reset for cleaner allocation
-    node_idx = 0
-    gpu_offset = 0
-
-    # Simpler allocation: each worker gets nodes sequentially
-    def allocate_workers_simple(mode: WorkerMode, count: int, gpus_per_worker: int) -> list[Endpoint]:
+    def allocate_workers_simple(
+        mode: WorkerMode, count: int, gpus_per_worker: int, dedicated_node: bool = False,
+    ) -> list[Endpoint]:
         nonlocal node_idx, gpu_offset
         result = []
 
@@ -317,7 +273,13 @@ def allocate_endpoints(
                     )
                 )
             else:
-                # Partial node worker - pack multiple on same node
+                # Partial node worker
+                if dedicated_node:
+                    # Force each worker onto a fresh node
+                    if gpu_offset > 0:
+                        node_idx += 1
+                        gpu_offset = 0
+
                 if gpu_offset + gpus_per_worker > gpus_per_node:
                     node_idx += 1
                     gpu_offset = 0
@@ -326,7 +288,11 @@ def allocate_endpoints(
                 gpu_indices = frozenset(range(gpu_offset, gpu_offset + gpus_per_worker))
                 gpu_offset += gpus_per_worker
 
-                if gpu_offset >= gpus_per_node:
+                if dedicated_node:
+                    # Advance past remaining GPUs on this node
+                    node_idx += 1
+                    gpu_offset = 0
+                elif gpu_offset >= gpus_per_node:
                     node_idx += 1
                     gpu_offset = 0
 
@@ -344,7 +310,7 @@ def allocate_endpoints(
 
     # Allocate in order: prefill, decode, agg
     if num_prefill > 0:
-        endpoints.extend(allocate_workers_simple("prefill", num_prefill, gpus_per_prefill))
+        endpoints.extend(allocate_workers_simple("prefill", num_prefill, gpus_per_prefill, prefill_dedicated))
 
     # When there's a partial allocation on the current node (gpu_offset > 0) and
     # there are more nodes available, advance to ensure prefill and decode don't
@@ -355,7 +321,7 @@ def allocate_endpoints(
         if gpu_offset > 0 and (node_idx + 1) < len(available_nodes):
             node_idx += 1
             gpu_offset = 0
-        endpoints.extend(allocate_workers_simple("decode", num_decode, gpus_per_decode))
+        endpoints.extend(allocate_workers_simple("decode", num_decode, gpus_per_decode, decode_dedicated))
 
     if num_agg > 0:
         endpoints.extend(allocate_workers_simple("agg", num_agg, gpus_per_agg))

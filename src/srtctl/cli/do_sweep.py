@@ -76,6 +76,8 @@ class SweepOrchestrator(WorkerStageMixin, FrontendStageMixin, BenchmarkStageMixi
             gpus_per_agg=r.gpus_per_agg,
             gpus_per_node=r.gpus_per_node,
             available_nodes=self.runtime.nodes.worker,
+            prefill_nodes=r.prefill_nodes or 0,
+            decode_nodes=r.decode_nodes or 0,
         )
 
     @functools.cached_property

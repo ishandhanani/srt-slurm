@@ -82,6 +82,9 @@ class BackendProtocol(Protocol):
         gpus_per_agg: int,
         gpus_per_node: int,
         available_nodes: Sequence[str],
+        *,
+        prefill_nodes: int = 0,
+        decode_nodes: int = 0,
     ) -> list["Endpoint"]:
         """Allocate logical endpoints based on resource requirements."""
         ...
