@@ -680,6 +680,19 @@ class TestCopyConfigToLogs:
 
         assert (log_dir / "sbatch_script.sh").exists()
 
+    def test_copies_job_id_json(self, tmp_path):
+        """Test {job_id}.json is copied from output dir to log dir."""
+        mixin, log_dir = self._create_mixin_with_runtime(tmp_path)
+        mixin.runtime.job_id = "12345"
+
+        json_src = tmp_path / "12345.json"
+        json_src.write_text('{"job_id": "12345", "version": "2.0"}\n')
+
+        mixin._copy_config_to_logs()
+
+        assert (log_dir / "12345.json").exists()
+        assert (log_dir / "12345.json").read_text() == '{"job_id": "12345", "version": "2.0"}\n'
+
     def test_no_config_does_not_raise(self, tmp_path):
         """Test graceful handling when config.yaml doesn't exist."""
         mixin, log_dir = self._create_mixin_with_runtime(tmp_path)
